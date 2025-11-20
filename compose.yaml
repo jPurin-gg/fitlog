@@ -1,0 +1,55 @@
+services:
+  # 🧩 フロントエンド（Next.js）
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    container_name: myfitlog-frontend
+    env_file:
+      - docker/env/frontend.env
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - node_modules:/app/node_modules
+    command: sh -c "npm install && npm run dev"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    # ローカル開発中のホットリロードを安定させるため
+    environment:
+      - WATCHPACK_POLLING=true
+
+  # ⚙️ バックエンド（Go）
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    container_name: myfitlog-backend
+    ports:
+      - "8080:8080"
+    env_file:
+      - ./docker/env/backend.env
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    command: go run main.go
+    depends_on:
+      - db
+
+  # 🗄️ データベース（PostgreSQL）
+  db:
+    image: postgres:16
+    container_name: myfitlog-db
+    env_file:
+      - ./docker/env/db.env
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./docker/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+# 永続ボリューム
+volumes:
+  node_modules:
+  db_data:
