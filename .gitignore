@@ -1,0 +1,5 @@
+docker/env/
+frontend/node_modules/
+backend/fitlog
+backend/myfitlog-backend
+.env
