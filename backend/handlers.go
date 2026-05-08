@@ -25,7 +25,7 @@ type RecommendResponse struct {
 	MaxWeight      float64 `json:"max_weight"` // 参考用の過去最大重量
 }
 
-func handleRecommend(w http.ResponseWriter, r *http.Request) {
+func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -33,7 +33,7 @@ func handleRecommend(w http.ResponseWriter, r *http.Request) {
 
 	var req RecommendRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Invalid request format", http.StatusBadRequest)
 		return
 	}
 
@@ -55,9 +55,9 @@ func handleRecommend(w http.ResponseWriter, r *http.Request) {
 	
 	// 2. 過去最大重量の取得
 	var maxWeight float64
-	if db != nil {
+	if app.db != nil {
 		// 実際のDBから過去の最大重量を取得します
-		db.QueryRow("SELECT COALESCE(MAX(weight), 0) FROM workout_sets WHERE user_id = $1 AND exercise_id = $2", req.UserID, req.ExerciseID).Scan(&maxWeight)
+		app.db.QueryRow("SELECT COALESCE(MAX(weight), 0) FROM workout_sets WHERE user_id = $1 AND exercise_id = $2", req.UserID, req.ExerciseID).Scan(&maxWeight)
 	}
 	
 	// 初回利用時、もしくは開発環境でDBに繋がっていない場合のダミー値
@@ -159,11 +159,12 @@ type MonthlyPlanResponse struct {
 	PlanName      string       `json:"plan_name"`
 	Frequency     string       `json:"frequency"`
 	Description   string       `json:"description"`
-	Rationale     string       `json:"rationale"`
-	WeeklyRoutine []DayRoutine `json:"weekly_routine"`
+	Rationale       string       `json:"rationale"`
+	RecommendedDays []int        `json:"recommended_days"`
+	WeeklyRoutine   []DayRoutine `json:"weekly_routine"`
 }
 
-func handleMonthlyPlan(w http.ResponseWriter, r *http.Request) {
+func (app *App) handleMonthlyPlan(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -172,7 +173,7 @@ func handleMonthlyPlan(w http.ResponseWriter, r *http.Request) {
 	// OPTIONS method for CORS if needed is usually handled centrally, but we might just respond OK
 	var req MonthlyPlanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Invalid request format", http.StatusBadRequest)
 		return
 	}
 
@@ -185,6 +186,7 @@ func handleMonthlyPlan(w http.ResponseWriter, r *http.Request) {
 		resp.Frequency = "週5〜6回"
 		resp.Description = "各筋肉群を日ごとに徹底的に追い込む、高頻度・高強度のルーティンです。"
 		resp.Rationale = "非常に高いモチベーションと頻度を考慮し、1回あたりの部位を絞って限界まで追い込める分割法を選択しました。"
+		resp.RecommendedDays = []int{1, 2, 3, 5, 6}
 		resp.WeeklyRoutine = []DayRoutine{
 			{DayName: "Day 1", Target: "胸・腹", ExampleExercises: []string{"ベンチプレス", "ダンベルフライ", "クランチ"}},
 			{DayName: "Day 2", Target: "背中", ExampleExercises: []string{"デッドリフト", "懸垂", "ラットプルダウン"}},
@@ -197,6 +199,7 @@ func handleMonthlyPlan(w http.ResponseWriter, r *http.Request) {
 		resp.Frequency = "週1〜2回"
 		resp.Description = "少ない日数でも全身の主要な筋肉を同時に鍛えられる、タイムパフォーマンスに優れたルーティンです。"
 		resp.Rationale = "多忙なスケジュールや無理のないペースを考慮し、少ない回数で全身を刺激して筋力低下を防ぎ、少しずつ成長できる全身法を選択しました。"
+		resp.RecommendedDays = []int{2, 5}
 		resp.WeeklyRoutine = []DayRoutine{
 			{DayName: "Day 1", Target: "全身 A", ExampleExercises: []string{"スクワット", "ベンチプレス", "ベントオーバーロウ"}},
 			{DayName: "Day 2", Target: "全身 B", ExampleExercises: []string{"デッドリフト", "ショルダープレス", "懸垂"}},
@@ -206,6 +209,7 @@ func handleMonthlyPlan(w http.ResponseWriter, r *http.Request) {
 		resp.Frequency = "週3〜4回"
 		resp.Description = "押す筋肉、引く筋肉、脚の3グループに分けて鍛える、最もバランスが良く結果が出やすい王道のルーティンです。"
 		resp.Rationale = "バランス良く全身を鍛えつつ、各部位に十分な回復期間を与えられるPPL法が最も適していると判断しました。"
+		resp.RecommendedDays = []int{1, 3, 5}
 		resp.WeeklyRoutine = []DayRoutine{
 			{DayName: "Day 1", Target: "Push (胸・肩・三頭)", ExampleExercises: []string{"ベンチプレス", "ショルダープレス", "ディップス"}},
 			{DayName: "Day 2", Target: "Pull (背中・二頭)", ExampleExercises: []string{"懸垂", "デッドリフト", "バーベルカール"}},

@@ -41,8 +41,13 @@ func callAI(systemPrompt, userPrompt string, jsonMode bool) (string, error) {
 		return "", errors.New("OPENAI_API_KEY is not set in environment or .env")
 	}
 
+	model := os.Getenv("OPENAI_MODEL")
+	if model == "" {
+		model = "gpt-4o-mini"
+	}
+
 	reqBody := AIRequest{
-		Model: "gpt-4o-mini", // デフォルトモデル
+		Model: model, // デフォルトモデル
 		Messages: []Message{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
@@ -59,7 +64,12 @@ func callAI(systemPrompt, userPrompt string, jsonMode bool) (string, error) {
 		return "", err
 	}
 
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonBody))
+	apiURL := os.Getenv("OPENAI_API_URL")
+	if apiURL == "" {
+		apiURL = "https://api.openai.com/v1/chat/completions"
+	}
+
+	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return "", err
 	}

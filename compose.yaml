@@ -33,7 +33,7 @@ services:
     working_dir: /app
     volumes:
       - ./backend:/app
-    command: go run main.go
+    command: air
     depends_on:
       - db
 

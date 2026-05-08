@@ -9,9 +9,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-var db *sql.DB
-
-func initDB() {
+func initDB() *sql.DB {
 	host := os.Getenv("DB_HOST")
 	port := os.Getenv("DB_PORT")
 	user := os.Getenv("DB_USER")
@@ -21,8 +19,7 @@ func initDB() {
 	psqlInfo := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		host, port, user, password, dbname)
 
-	var err error
-	db, err = sql.Open("postgres", psqlInfo)
+	db, err := sql.Open("postgres", psqlInfo)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -33,4 +30,5 @@ func initDB() {
 	}
 
 	fmt.Println("Successfully connected to database")
+	return db
 }

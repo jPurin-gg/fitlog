@@ -31,7 +31,8 @@ export default function WorkoutPage() {
     if (!formData.weight || !formData.reps) return;
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:8080/api/recommend', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+      const res = await fetch(`${apiUrl}/api/recommend`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 

@@ -31,7 +31,7 @@ type DashboardResponse struct {
 	RecentWorkouts []WorkoutItemData `json:"recent_workouts"`
 }
 
-func handleDashboard(w http.ResponseWriter, r *http.Request) {
+func (app *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -53,7 +53,7 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 resp.ChartData = []int{40, 70, 45, 90, 65, 80, 55}
 
 // Fetch up to 3 recent workouts
-rows, err := db.Query(`
+rows, err := app.db.Query(`
 SELECT id, started_at, COALESCE(ended_at, started_at), notes
 FROM workouts
 WHERE user_id = $1
@@ -107,7 +107,7 @@ type CalendarResponse struct {
 	WorkedOutDays  []WorkedOutDay `json:"worked_out_days"`
 }
 
-func handleCalendar(w http.ResponseWriter, r *http.Request) {
+func (app *App) handleCalendar(w http.ResponseWriter, r *http.Request) {
 if r.Method != http.MethodGet {
 http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 return
@@ -128,7 +128,7 @@ if month == 0 { month = int(time.Now().Month()) }
 	resp.WorkedOutDays = []WorkedOutDay{}
 
 	// get unique days in that month the user worked out
-	rows, err := db.Query(`
+	rows, err := app.db.Query(`
 		SELECT EXTRACT(DAY FROM started_at), MAX(COALESCE(notes, 'Workout'))
 		FROM workouts
 		WHERE user_id = $1
@@ -171,7 +171,7 @@ type AlternativeResponse struct {
 	Message      string                `json:"message"`
 }
 
-func handleAlternative(w http.ResponseWriter, r *http.Request) {
+func (app *App) handleAlternative(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -179,7 +179,7 @@ func handleAlternative(w http.ResponseWriter, r *http.Request) {
 
 	var req AlternativeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Invalid request format", http.StatusBadRequest)
 		return
 	}
 

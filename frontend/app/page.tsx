@@ -32,7 +32,8 @@ export default function Home() {
   const [altModalData, setAltModalData] = React.useState<{dayIdx: number, exIdx: number, exName: string} | null>(null);
 
   React.useEffect(() => {
-    fetch('http://localhost:8080/api/dashboard')
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+    fetch(`${apiUrl}/api/dashboard`)
       .then(res => res.json())
       .then(data => setDashboardData(data))
       .catch(console.error);
@@ -298,7 +299,8 @@ function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
   const generatePlan = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:8080/api/monthly-plan', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+      const res = await fetch(`${apiUrl}/api/monthly-plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ motivation, frequency })

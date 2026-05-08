@@ -1,12 +1,18 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/joho/godotenv"
 )
+
+type App struct {
+	db *sql.DB
+}
 
 func main() {
 	// docker/env/backend.env から環境変数を読み込む
@@ -15,13 +21,18 @@ func main() {
 	}
 
 	// データベース初期化
-	initDB()
+	db := initDB()
+	app := &App{db: db}
 
 	// エンドポイント
-	// CROS Wrapper
+	// CORS Wrapper
 	cors := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
+			allowedOrigin := os.Getenv("FRONTEND_URL")
+			if allowedOrigin == "" {
+				allowedOrigin = "http://localhost:3000"
+			}
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 			if r.Method == "OPTIONS" {
@@ -32,11 +43,11 @@ func main() {
 		}
 	}
 
-	http.HandleFunc("/api/recommend", cors(handleRecommend))
-	http.HandleFunc("/api/monthly-plan", cors(handleMonthlyPlan))
-	http.HandleFunc("/api/dashboard", cors(handleDashboard))
-	http.HandleFunc("/api/calendar", cors(handleCalendar))
-	http.HandleFunc("/api/alternative", cors(handleAlternative))
+	http.HandleFunc("/api/recommend", cors(app.handleRecommend))
+	http.HandleFunc("/api/monthly-plan", cors(app.handleMonthlyPlan))
+	http.HandleFunc("/api/dashboard", cors(app.handleDashboard))
+	http.HandleFunc("/api/calendar", cors(app.handleCalendar))
+	http.HandleFunc("/api/alternative", cors(app.handleAlternative))
 
 	fmt.Println("Server started on :8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {

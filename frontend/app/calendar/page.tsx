@@ -5,12 +5,33 @@ import { ArrowLeft, Calendar as CalendarIcon, Dumbbell, Sparkles, Check } from "
 import Link from "next/link";
 import { motion } from "framer-motion";
 
+interface DayRoutine {
+  day_name: string;
+  target: string;
+  example_exercises: string[];
+}
+
+interface MonthlyPlan {
+  plan_name: string;
+  frequency: string;
+  description: string;
+  rationale: string;
+  recommended_days: number[];
+  weekly_routine: DayRoutine[];
+}
+
+interface WorkedOutDay {
+  date: number;
+  type: string;
+}
+
+
 export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [plan, setPlan] = useState<any>(null);
+  const [plan, setPlan] = useState<MonthlyPlan | null>(null);
   const [plannedWeekDays, setPlannedWeekDays] = useState<number[]>([]);
   const [workedOutDates, setWorkedOutDates] = useState<number[]>([]);
-  const [workedOutDays, setWorkedOutDays] = useState<any[]>([]);
+  const [workedOutDays, setWorkedOutDays] = useState<WorkedOutDay[]>([]);
 
   useEffect(() => {
     // Load plan
@@ -20,20 +41,14 @@ export default function CalendarPage() {
       const p = JSON.parse(savedPlan);
       setPlan(p);
       
-      const numDays = p.weekly_routine?.length || 3;
-      let days = [];
-      if (numDays === 1) days = [3]; // Wed
-      else if (numDays === 2) days = [2, 5]; // Tue, Fri
-      else if (numDays === 3) days = [1, 3, 5]; // Mon, Wed, Fri
-      else if (numDays === 4) days = [1, 2, 4, 5]; // Mon, Tue, Thu, Fri
-      else if (numDays === 5) days = [1, 2, 3, 5, 6]; // Mon, Tue, Wed, Fri, Sat
-      else days = [1, 2, 3, 4, 5, 6]; // Mon-Sat
+      const days = p.recommended_days || [1, 3, 5];
       setPlannedWeekDays(days);
       generatedPlanDays = days;
     }
     // Fetch worked out dates from the DB
     const today = new Date();
-    fetch(`http://localhost:8080/api/calendar?year=${today.getFullYear()}&month=${today.getMonth() + 1}`)
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+    fetch(`${apiUrl}/api/calendar?year=${today.getFullYear()}&month=${today.getMonth() + 1}`)
       .then(res => res.json())
       .then(data => {
         if (data && data.worked_out_dates) {
@@ -43,7 +58,7 @@ export default function CalendarPage() {
           setWorkedOutDays(data.worked_out_days);
         }
       })
-      .catch(console.error);
+      .catch(err => console.error("Failed to fetch calendar data:", err));
   }, []);
 
   const year = currentDate.getFullYear();
@@ -230,7 +245,7 @@ export default function CalendarPage() {
                   </div>
                   
                   <div className="space-y-3">
-                    {plan.weekly_routine.map((r: any, i: number) => (
+                    {plan.weekly_routine.map((r: DayRoutine, i: number) => (
                       <div key={i} className="bg-black/30 p-4 rounded-xl border border-white/5 relative overflow-hidden group hover:border-primary/30 transition-colors">
                         <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary/20 group-hover:bg-primary transition-colors" />
                         <div className="flex justify-between items-start mb-2">
