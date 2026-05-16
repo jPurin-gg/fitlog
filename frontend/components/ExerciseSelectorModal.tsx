@@ -25,6 +25,21 @@ const EQUIPMENTS = [
   "自重", "ダンベル", "バーベル", "マシン", "ケーブル", "バンド", "ケトルベル", "メディシンボール", "バランスボール", "その他"
 ];
 
+const EXERCISE_LABELS: Record<string, string> = {
+  strength: "筋力トレーニング",
+  stretching: "ストレッチ",
+  cardio: "有酸素",
+  plyometrics: "瞬発系",
+  powerlifting: "パワーリフティング",
+  olympic_weightlifting: "重量挙げ",
+  strongman: "ストロングマン",
+};
+
+function displayExerciseLabel(value?: string) {
+  if (!value) return "";
+  return EXERCISE_LABELS[value] || value;
+}
+
 interface Props {
   onClose: () => void;
   onSelect: (ex: { id: string, name: string }) => void;
@@ -136,7 +151,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
             </p>
 
             <div className="space-y-2">
-              <label className="text-xs uppercase font-black text-white/40">種目名 <span className="text-red-500">*</span></label>
+              <label className="text-xs font-black text-white/40">種目名 <span className="text-red-500">*</span></label>
               <input 
                 type="text" 
                 value={customName}
@@ -147,7 +162,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs uppercase font-black text-white/40">カテゴリ (任意)</label>
+              <label className="text-xs font-black text-white/40">カテゴリ（任意）</label>
               <select 
                 value={customCategory}
                 onChange={e => setCustomCategory(e.target.value)}
@@ -213,7 +228,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
                   onChange={e => setEquipFilter(e.target.value)}
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/80 focus:outline-none focus:border-primary/50 appearance-none"
                 >
-                  <option value="">全ての器具</option>
+                  <option value="">すべての器具</option>
                   {EQUIPMENTS.map(eq => <option key={eq} value={eq}>{eq}</option>)}
                 </select>
               </div>
@@ -228,7 +243,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
                 >
                   <div className="flex justify-between items-center w-full">
                     <span className="text-white font-medium group-hover:text-primary transition-colors">{ex.name}</span>
-                    {ex.category && <span className="text-[10px] px-2 py-0.5 bg-white/5 rounded-full text-white/40">{ex.category}</span>}
+                    {ex.category && <span className="text-[10px] px-2 py-0.5 bg-white/5 rounded-full text-white/40">{displayExerciseLabel(ex.category)}</span>}
                   </div>
                   <div className="flex gap-2 mt-1">
                     {ex.primaryMuscles && ex.primaryMuscles.length > 0 && (

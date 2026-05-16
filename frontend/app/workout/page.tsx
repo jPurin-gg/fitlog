@@ -14,8 +14,7 @@ import {
   CheckCircle2,
   ListChecks
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
-import Link from "next/link";
+import { AnimatePresence } from "framer-motion";
 import { AlternativeCoachModal } from "@/components/AlternativeCoachModal";
 import { ExerciseSelectorModal } from "@/components/ExerciseSelectorModal";
 
@@ -41,6 +40,18 @@ interface WorkoutPlanSession {
     coach_note: string;
     exercises: WorkoutPlanExercise[];
   };
+}
+
+function displayPlanText(text?: string) {
+  if (!text) return "";
+  return text
+    .replace("PPL法 (Push/Pull/Legs)", "PPL法（押す・引く・脚）")
+    .replace("Full Body", "全身")
+    .replace("Push (胸・肩・三頭)", "押す日（胸・肩・三頭）")
+    .replace("Pull (背中・二頭)", "引く日（背中・二頭）")
+    .replace("Legs (脚・腹)", "脚の日（脚・腹）")
+    .replace("全身 A", "全身その1")
+    .replace("全身 B", "全身その2");
 }
 
 export default function WorkoutPage() {
@@ -230,16 +241,16 @@ export default function WorkoutPage() {
             <div className="absolute inset-0 bg-primary/20 rounded-full animate-ping" />
             <Play className="w-10 h-10 text-primary ml-2" />
           </div>
-          <h1 className="text-3xl font-bold mb-4">Ready to lift?</h1>
-          <p className="text-white/50 mb-10">Start your AI-guided workout session and let the smart coach do the thinking.</p>
+          <h1 className="text-3xl font-bold mb-4">今日の筋トレを始めますか？</h1>
+          <p className="text-white/50 mb-10">AIが今日のメニューを組み立て、セットごとに調整します。</p>
           <button 
             onClick={startWorkout}
             disabled={loading}
-            className="w-full py-5 bg-primary text-black font-black rounded-2xl shadow-[0_0_30px_rgba(255,170,0,0.5)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 text-xl tracking-wider uppercase group relative overflow-hidden disabled:opacity-50 disabled:pointer-events-none"
+            className="w-full py-5 bg-primary text-black font-black rounded-2xl shadow-[0_0_30px_rgba(255,170,0,0.5)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 text-xl tracking-wider group relative overflow-hidden disabled:opacity-50 disabled:pointer-events-none"
           >
             <div className="absolute inset-0 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/30 to-transparent skew-x-12" />
             <span className="relative z-10 flex items-center justify-center gap-2">
-              {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <>Start Workout <Sparkles className="w-5 h-5" /></>}
+              {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <>ワークアウトを開始 <Sparkles className="w-5 h-5" /></>}
             </span>
           </button>
           {aiError && <p className="mt-5 text-sm text-red-300">{aiError}</p>}
@@ -287,9 +298,9 @@ export default function WorkoutPage() {
       <main className="max-w-3xl mx-auto relative z-10">
         <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight">Active Workout</h1>
+              <h1 className="text-2xl font-bold tracking-tight">ワークアウト中</h1>
               <p className="text-primary font-medium text-sm flex items-center gap-2">
-                 <BrainCircuit className="w-4 h-4" /> AI Coach Active
+                 <BrainCircuit className="w-4 h-4" /> AIコーチ稼働中
               </p>
             </div>
             <div className="flex items-center gap-3">
@@ -309,7 +320,7 @@ export default function WorkoutPage() {
         <section className="glass rounded-[32px] p-6 lg:p-8 border-primary/20 bg-primary/5 overflow-hidden relative shadow-2xl shadow-primary/5">
           <div className="flex justify-between items-center mb-8 border-b border-white/5 pb-6">
             <div>
-              <h2 className="text-2xl font-bold italic tracking-wider mb-2">{currentExercise.name}</h2>
+              <h2 className="text-2xl font-bold tracking-wider mb-2">{currentExercise.name}</h2>
               <div className="flex gap-2">
                 <button 
                   onClick={() => setShowExerciseSelector(true)}
@@ -329,7 +340,7 @@ export default function WorkoutPage() {
           {/* SET カウンター＆目標セット数 */}
           <div className="flex flex-col items-end gap-1">
             <div className="px-5 py-2 bg-primary/20 rounded-2xl text-sm font-black text-primary border border-primary/30">
-              SET {currentSet} / {targetSets}
+              セット {currentSet} / {targetSets}
             </div>
             {/* 進捗バー */}
             <div className="flex gap-1">
@@ -364,8 +375,8 @@ export default function WorkoutPage() {
             <div className="mb-8 bg-black/30 rounded-2xl border border-white/5 p-4">
               <div className="flex items-start justify-between gap-4 mb-4">
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-primary font-black mb-1">Today&apos;s Plan</p>
-                  <h3 className="text-lg font-bold">{workoutPlan.plan.workout_title}</h3>
+                  <p className="text-[10px] tracking-widest text-primary font-black mb-1">今日の計画</p>
+                  <h3 className="text-lg font-bold">{displayPlanText(workoutPlan.plan.workout_title)}</h3>
                   <p className="text-xs text-white/45 mt-1">{workoutPlan.plan.coach_note}</p>
                 </div>
                 <div className="text-right text-xs text-white/50 font-bold">
@@ -388,7 +399,7 @@ export default function WorkoutPage() {
                       <span className="text-sm font-bold truncate">{ex.name}</span>
                     </div>
                     <div className="mt-1 text-[10px] text-white/40">
-                      {ex.planned_sets} sets / {ex.target_weight}kg x {ex.target_reps}
+                      {ex.planned_sets}セット / {ex.target_weight}kg × {ex.target_reps}回
                     </div>
                   </button>
                 ))}
@@ -401,7 +412,7 @@ export default function WorkoutPage() {
             <div className="space-y-6">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label className="text-[10px] uppercase font-black text-white/40 ml-1">Weight (kg)</label>
+                  <label className="text-[10px] font-black text-white/40 ml-1">重量（kg）</label>
                   <input 
                     type="number" 
                     value={formData.weight}
@@ -411,7 +422,7 @@ export default function WorkoutPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] uppercase font-black text-white/40 ml-1">Reps</label>
+                  <label className="text-[10px] font-black text-white/40 ml-1">回数</label>
                   <input 
                     type="number" 
                     value={formData.reps}
@@ -422,7 +433,7 @@ export default function WorkoutPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <label className="text-[10px] uppercase font-black text-white/40 ml-1">Set Feeling / Impression</label>
+                <label className="text-[10px] font-black text-white/40 ml-1">セット後の感想</label>
                 <textarea 
                   value={formData.feeling}
                   onChange={(e) => setFormData({...formData, feeling: e.target.value})}
@@ -435,9 +446,9 @@ export default function WorkoutPage() {
                 <button 
                   onClick={getRecommendation}
                   disabled={loading || !formData.weight || !formData.reps}
-                  className="w-full py-5 mt-4 bg-primary text-black font-black rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-30 disabled:pointer-events-none uppercase tracking-widest flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(255,170,0,0.3)]"
+                  className="w-full py-5 mt-4 bg-primary text-black font-black rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-30 disabled:pointer-events-none tracking-widest flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(255,170,0,0.3)]"
                 >
-                  {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : "Set Completed - Analyze"}
+                  {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : "セット完了・AIに相談"}
                 </button>
               )}
 
@@ -446,7 +457,7 @@ export default function WorkoutPage() {
                 <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-start gap-3">
                   <Flame className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="text-red-400 font-bold text-sm">AI の呼び出しに失敗しました</p>
+                    <p className="text-red-400 font-bold text-sm">AIの呼び出しに失敗しました</p>
                     <p className="text-red-300/70 text-xs mt-1">{aiError}</p>
                     <button
                       onClick={getRecommendation}
@@ -470,15 +481,15 @@ export default function WorkoutPage() {
                   }`}>
                     <div className="flex items-center gap-3">
                       {recommendation.next_action === 'STOP' ? <Flame className="w-8 h-8" /> : <TrendingUp className="w-8 h-8" />}
-                      <span className="text-3xl font-black italic tracking-tighter uppercase">
-                        {recommendation.next_action === 'STOP' ? 'STOP NOW' : 'NEXT SET: CONTINUE'}
+                      <span className="text-3xl font-black tracking-tighter">
+                        {recommendation.next_action === 'STOP' ? 'ここで中止推奨' : '次のセットへ'}
                       </span>
                     </div>
                   </div>
 
                   <div className="glass bg-black/50 p-6 rounded-[24px] border-white/5 space-y-4">
                     <div className="flex items-center gap-2 text-primary font-bold text-sm">
-                      <Sparkles className="w-4 h-4" /> AI COACH SAYS
+                      <Sparkles className="w-4 h-4" /> AIコーチの提案
                     </div>
                     <p className="text-white/90 leading-relaxed font-medium text-lg">
                       {recommendation.recommendation}
@@ -486,22 +497,22 @@ export default function WorkoutPage() {
                     {recommendation.next_action !== 'STOP' && (
                       <div className="flex gap-4 pt-4">
                         <div className="flex-1 bg-white/5 p-4 rounded-xl border border-white/5 text-center">
-                          <span className="text-[10px] uppercase font-black text-white/40 block mb-1">Target Kg</span>
+                          <span className="text-[10px] font-black text-white/40 block mb-1">目標重量</span>
                           <span className="text-2xl font-bold">{recommendation.target_weight}</span>
                         </div>
                         <div className="flex-1 bg-white/5 p-4 rounded-xl border border-white/5 text-center">
-                          <span className="text-[10px] uppercase font-black text-white/40 block mb-1">Target Reps</span>
+                          <span className="text-[10px] font-black text-white/40 block mb-1">目標回数</span>
                           <span className="text-2xl font-bold">{recommendation.target_reps}</span>
                         </div>
                       </div>
                     )}
                     <div className="pt-4 border-t border-white/5 flex justify-between items-end">
                       <div>
-                        <p className="text-[10px] text-white/30 uppercase font-black mb-1">Coach&apos;s Rationale</p>
-                        <p className="text-xs text-white/50 italic">{recommendation.reason}</p>
+                        <p className="text-[10px] text-white/30 font-black mb-1">提案理由</p>
+                        <p className="text-xs text-white/50">{recommendation.reason}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-[10px] text-white/30 uppercase font-black mb-1">Personal Best</p>
+                        <p className="text-[10px] text-white/30 font-black mb-1">過去最高</p>
                         <p className="text-sm font-bold text-white/70">{recommendation.max_weight}<span className="text-[10px] ml-0.5">kg</span></p>
                       </div>
                     </div>
@@ -514,13 +525,13 @@ export default function WorkoutPage() {
                           onClick={handleNextSet}
                           className="w-full py-4 bg-white/10 hover:bg-white/20 text-white font-bold rounded-2xl transition-all"
                         >
-                          Start Next Set
+                          次のセットへ
                         </button>
                         <button 
                           onClick={handleNextExercise}
                           className="w-full py-4 bg-primary/20 hover:bg-primary/30 text-primary font-bold rounded-2xl transition-all"
                         >
-                          {currentExerciseIndex + 1 >= (workoutPlan?.plan.exercises.length || 1) ? 'Finish Workout' : 'Next Exercise'}
+                          {currentExerciseIndex + 1 >= (workoutPlan?.plan.exercises.length || 1) ? 'ワークアウト終了' : '次の種目へ'}
                         </button>
                       </div>
                     ) : (

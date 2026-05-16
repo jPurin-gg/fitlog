@@ -54,7 +54,7 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
           <div className="p-2 bg-primary/20 rounded-xl">
             <MessageSquare className="w-6 h-6 text-primary" />
           </div>
-          <h2 className="text-xl font-bold italic tracking-tight uppercase">Change Exercise</h2>
+          <h2 className="text-xl font-bold tracking-tight">種目を変更</h2>
         </div>
 
         <div className="bg-white/5 rounded-2xl p-4 mb-6 border border-white/5 flex items-center justify-between">
@@ -65,7 +65,7 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
         {!result ? (
           <div className="space-y-6">
             <div className="space-y-3">
-              <label className="text-[12px] uppercase font-black text-white/40 ml-1">マシンが空いていないですか？</label>
+              <label className="text-[12px] font-black text-white/40 ml-1">マシンが空いていないですか？</label>
               <textarea 
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
@@ -77,7 +77,7 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
             <button 
               onClick={fetchAlternatives}
               disabled={loading}
-              className="w-full py-4 bg-primary text-black font-black rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-30 uppercase flex items-center justify-center gap-2"
+              className="w-full py-4 bg-primary text-black font-black rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-30 flex items-center justify-center gap-2"
             >
               {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><BrainCircuit className="w-5 h-5" /> AIに代替種目を相談する</>}
             </button>
@@ -87,7 +87,7 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
                 <div className="w-full border-t border-white/10"></div>
               </div>
               <div className="relative flex justify-center text-xs">
-                <span className="bg-[#111] px-2 text-white/40 font-bold uppercase tracking-widest">Or manually change</span>
+                <span className="bg-[#111] px-2 text-white/40 font-bold tracking-widest">手動で変更する</span>
               </div>
             </div>
 
@@ -115,7 +115,7 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
             </div>
 
             <div className="space-y-3">
-              <h4 className="text-[10px] font-black text-white/40 uppercase tracking-widest pl-1">Suggested Alternatives</h4>
+              <h4 className="text-[10px] font-black text-white/40 tracking-widest pl-1">候補種目</h4>
               {result.alternatives.map((alt: any, idx: number) => (
                 <button 
                   key={idx}

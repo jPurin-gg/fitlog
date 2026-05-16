@@ -42,6 +42,28 @@ function dateFromPlanMonth(planMonth: string) {
   return new Date(year, (month || 1) - 1, 1);
 }
 
+function displayPlanText(text?: string) {
+  if (!text) return "";
+  return text
+    .replace("PPL法 (Push/Pull/Legs)", "PPL法（押す・引く・脚）")
+    .replace("Full Body", "全身")
+    .replace("Push (胸・肩・三頭)", "押す日（胸・肩・三頭）")
+    .replace("Pull (背中・二頭)", "引く日（背中・二頭）")
+    .replace("Legs (脚・腹)", "脚の日（脚・腹）")
+    .replace("全身 A", "全身その1")
+    .replace("全身 B", "全身その2")
+    .replace(/^Day 1$/, "1日目")
+    .replace(/^Day 2$/, "2日目")
+    .replace(/^Day 3$/, "3日目")
+    .replace(/^Day 4$/, "4日目")
+    .replace(/^Day 5$/, "5日目")
+    .replace(/^Push$/, "押す日")
+    .replace(/^Pull$/, "引く日")
+    .replace(/^Legs$/, "脚の日")
+    .replace(/^Strength$/, "筋トレ")
+    .replace(/^Workout$/, "ワークアウト");
+}
+
 export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [plan, setPlan] = useState<MonthlyPlan | null>(null);
@@ -80,7 +102,7 @@ export default function CalendarPage() {
       })
       .catch(err => console.error("Failed to fetch monthly plan:", err));
 
-    // Fetch worked out dates from the DB
+    // DBから実施済みの日付を取得する
     fetch(`${apiUrl}/api/calendar?year=${currentDate.getFullYear()}&month=${currentDate.getMonth() + 1}`)
       .then(res => res.json())
       .then(data => {
@@ -103,7 +125,7 @@ export default function CalendarPage() {
   const isSelectedCurrentMonth = selectedPlanMonth === getCurrentPlanMonth();
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const firstDayOfMonth = new Date(year, month, 1).getDay(); // 0 is Sun, 1 is Mon...
+  const firstDayOfMonth = new Date(year, month, 1).getDay();
 
   const days: (number | null)[] = [];
   for (let i = 0; i < firstDayOfMonth; i++) {
@@ -122,7 +144,6 @@ export default function CalendarPage() {
     const isToday = isCurrentMonth && dateNum === today.getDate();
     const isWorkedOut = workedOutDates.includes(dateNum);
     
-    // Day of week 0-6
     const dow = dateObj.getDay();
     const plannedIdx = plannedWeekDays.indexOf(dow);
     const isPlanned = plannedIdx !== -1;
@@ -130,14 +151,14 @@ export default function CalendarPage() {
     let plannedTarget = "";
     if (isPlanned && plan?.weekly_routine?.[plannedIdx]) {
       plannedTarget = plan.weekly_routine[plannedIdx].target;
-      // Truncate some common long strings for better calendar fit
-      if (plannedTarget.includes("Push")) plannedTarget = "Push";
-      if (plannedTarget.includes("Pull")) plannedTarget = "Pull";
-      if (plannedTarget.includes("Legs")) plannedTarget = "Legs";
+      // カレンダー内に収まるよう、代表的な分割名は短く表示する。
+      if (plannedTarget.includes("Push")) plannedTarget = "押す日";
+      if (plannedTarget.includes("Pull")) plannedTarget = "引く日";
+      if (plannedTarget.includes("Legs")) plannedTarget = "脚の日";
     }
 
     const workedOutDay = workedOutDays.find(d => d.date === dateNum);
-    const type = workedOutDay ? workedOutDay.type : "";
+    const type = workedOutDay ? displayPlanText(workedOutDay.type) : "";
 
     return { 
       isToday, 
@@ -148,7 +169,7 @@ export default function CalendarPage() {
     };
   };
 
-  const weekDayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const weekDayNames = ["日", "月", "火", "水", "木", "金", "土"];
   const moveMonth = (offset: number) => {
     setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
   };
@@ -165,8 +186,8 @@ export default function CalendarPage() {
               <ArrowLeft className="w-5 h-5" />
             </Link>
             <div>
-              <h1 className="text-3xl font-bold tracking-tight">Schedule</h1>
-              <p className="text-white/50">Your monthly workout plan</p>
+              <h1 className="text-3xl font-bold tracking-tight">カレンダー</h1>
+              <p className="text-white/50">月間プランと実施記録</p>
             </div>
           </div>
           <button
@@ -189,9 +210,9 @@ export default function CalendarPage() {
                   >
                     <ChevronLeft className="w-5 h-5" />
                   </button>
-                  <h2 className="text-xl md:text-2xl font-black uppercase tracking-widest text-primary flex items-center gap-3">
+                  <h2 className="text-xl md:text-2xl font-black tracking-widest text-primary flex items-center gap-3">
                     <CalendarIcon className="w-5 h-5 md:w-6 md:h-6" />
-                    {currentDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
+                    {currentDate.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long' })}
                   </h2>
                   <button
                     onClick={() => moveMonth(1)}
@@ -205,22 +226,22 @@ export default function CalendarPage() {
                 <div className="flex flex-wrap gap-4 text-[10px] md:text-xs font-bold text-white/60">
                   <div className="flex items-center gap-1 md:gap-2">
                     <div className="w-2 h-2 md:w-3 md:h-3 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]"></div>
-                    Done
+                    実施済み
                   </div>
                   <div className="flex items-center gap-1 md:gap-2">
                     <div className="w-2 h-2 md:w-3 md:h-3 rounded-full bg-primary shadow-[0_0_10px_rgba(255,170,0,0.5)]"></div>
-                    Planned
+                    予定
                   </div>
                   <div className="flex items-center gap-1 md:gap-2">
                     <div className="w-2 h-2 md:w-3 md:h-3 rounded-full border-2 border-white"></div>
-                    Today
+                    今日
                   </div>
                 </div>
               </div>
 
               <div className="grid grid-cols-7 gap-2 lg:gap-4 mb-4">
                 {weekDayNames.map(day => (
-                  <div key={day} className="text-center text-[10px] font-black uppercase text-white/30 tracking-widest">
+                  <div key={day} className="text-center text-[10px] font-black text-white/30 tracking-widest">
                     {day}
                   </div>
                 ))}
@@ -265,7 +286,7 @@ export default function CalendarPage() {
                       <div className="h-4 flex items-center justify-center">
                         {status.isWorkedOut ? (
                           <div className="flex flex-col items-center">
-                            <span className="text-[8px] md:text-[10px] font-black text-green-300 uppercase leading-none text-center whitespace-normal px-1 w-full line-clamp-2">
+                            <span className="text-[8px] md:text-[10px] font-black text-green-300 leading-none text-center whitespace-normal px-1 w-full line-clamp-2">
                               {status.type}
                             </span>
                           </div>
@@ -273,14 +294,14 @@ export default function CalendarPage() {
                           <>
                             {status.isPlanned && !status.isToday && (
                               <div className="flex flex-col items-center">
-                                <span className="text-[7px] md:text-[9px] font-bold text-primary opacity-80 uppercase leading-tight text-center whitespace-normal px-0.5 w-full line-clamp-2">
+                                <span className="text-[7px] md:text-[9px] font-bold text-primary opacity-80 leading-tight text-center whitespace-normal px-0.5 w-full line-clamp-2">
                                   {status.plannedTarget || <Dumbbell className="w-3 h-3 mx-auto" />}
                                 </span>
                               </div>
                             )}
                             {status.isToday && status.isPlanned && (
                               <div className="flex flex-col items-center animate-pulse">
-                                <span className="text-[8px] md:text-[10px] font-black text-white uppercase leading-tight text-center whitespace-normal px-0.5 w-full line-clamp-2">
+                                <span className="text-[8px] md:text-[10px] font-black text-white leading-tight text-center whitespace-normal px-0.5 w-full line-clamp-2">
                                   {status.plannedTarget || <Dumbbell className="w-4 h-4 mx-auto" />}
                                 </span>
                               </div>
@@ -299,7 +320,7 @@ export default function CalendarPage() {
             <div className="glass rounded-[32px] p-6 lg:p-8">
               <div className="flex items-center justify-between gap-3 mb-5">
                 <div>
-                  <h2 className="text-lg font-bold tracking-tight">Plan History</h2>
+                  <h2 className="text-lg font-bold tracking-tight">プラン履歴</h2>
                   <p className="text-xs text-white/40">過去月のプランを閲覧</p>
                 </div>
                 <span className="text-[10px] font-black text-white/30 bg-white/5 px-2 py-1 rounded-md">
@@ -324,10 +345,10 @@ export default function CalendarPage() {
                         <div className="flex justify-between items-start gap-3">
                           <div>
                             <div className="text-xs font-black text-primary mb-1">{historyPlan.plan_month}</div>
-                            <div className="text-sm font-bold leading-tight">{historyPlan.plan_name}</div>
+                            <div className="text-sm font-bold leading-tight">{displayPlanText(historyPlan.plan_name)}</div>
                           </div>
                           {historyPlan.plan_month === getCurrentPlanMonth() && (
-                            <span className="text-[9px] font-black text-black bg-primary px-2 py-0.5 rounded-full">NOW</span>
+                            <span className="text-[9px] font-black text-black bg-primary px-2 py-0.5 rounded-full">今月</span>
                           )}
                         </div>
                       </button>
@@ -342,12 +363,12 @@ export default function CalendarPage() {
             </div>
 
             <div className="glass rounded-[32px] p-6 lg:p-8 border-l-4 border-primary">
-              <div className="flex items-center gap-2 text-primary font-bold mb-4 uppercase text-sm tracking-widest">
-                <Sparkles className="w-5 h-5" /> {isSelectedCurrentMonth ? "Active Routine" : "Archived Routine"}
+              <div className="flex items-center gap-2 text-primary font-bold mb-4 text-sm tracking-widest">
+                <Sparkles className="w-5 h-5" /> {isSelectedCurrentMonth ? "今月のプラン" : "過去のプラン"}
               </div>
               {plan ? (
                 <div>
-                  <h3 className="text-xl font-bold mb-2 tracking-tight">{plan.plan_name}</h3>
+                  <h3 className="text-xl font-bold mb-2 tracking-tight">{displayPlanText(plan.plan_name)}</h3>
                   <div className="px-3 py-1 glass bg-white/5 rounded-lg inline-block text-xs font-bold text-white/70 mb-6">
                     {plan.plan_month || selectedPlanMonth} / {plan.frequency}
                   </div>
@@ -357,9 +378,9 @@ export default function CalendarPage() {
                       <div key={i} className="bg-black/30 p-4 rounded-xl border border-white/5 relative overflow-hidden group hover:border-primary/30 transition-colors">
                         <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary/20 group-hover:bg-primary transition-colors" />
                         <div className="flex justify-between items-start mb-2">
-                          <span className="text-[10px] uppercase font-black text-primary bg-primary/10 px-2 py-0.5 rounded-md">{r.day_name}</span>
+                          <span className="text-[10px] font-black text-primary bg-primary/10 px-2 py-0.5 rounded-md">{displayPlanText(r.day_name)}</span>
                         </div>
-                        <div className="font-bold text-sm mb-2">{r.target}</div>
+                        <div className="font-bold text-sm mb-2">{displayPlanText(r.target)}</div>
                         <div className="flex flex-wrap gap-1">
                           {r.example_exercises.map((ex: string, eIdx: number) => (
                             <span key={eIdx} className="text-[10px] text-white/60 bg-white/5 px-2 py-1 rounded-md">
@@ -385,8 +406,8 @@ export default function CalendarPage() {
               className="glass rounded-2xl p-6 bg-gradient-to-r from-green-500/10 to-transparent border-green-500/30 cursor-pointer flex justify-between items-center group"
             >
               <div>
-                <h4 className="font-bold text-green-400 mb-1 group-hover:text-green-300 transition-colors">Log Workout</h4>
-                <p className="text-xs text-white/50">Mark today as done</p>
+                <h4 className="font-bold text-green-400 mb-1 group-hover:text-green-300 transition-colors">今日の記録</h4>
+                <p className="text-xs text-white/50">今日を実施済みにする</p>
               </div>
               <div className="w-10 h-10 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center group-hover:bg-green-500 group-hover:text-black transition-all">
                 <Check className="w-5 h-5 font-bold" />

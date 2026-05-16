@@ -43,10 +43,10 @@ func (app *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	// Fake Stats but derived a bit
 	resp.Stats = []StatCardData{
-		{Label: "Calories", Value: "2,450", Unit: "kcal", Trend: "+12%"},
-		{Label: "Heart Rate", Value: "72", Unit: "bpm", Trend: "-2%"},
-		{Label: "Active Time", Value: "45", Unit: "min", Trend: "+5min"},
-		{Label: "Weight", Value: "68.5", Unit: "kg", Trend: "-0.5kg"},
+		{Label: "消費カロリー", Value: "2,450", Unit: "kcal", Trend: "+12%"},
+		{Label: "心拍数", Value: "72", Unit: "bpm", Trend: "-2%"},
+		{Label: "活動時間", Value: "45", Unit: "分", Trend: "+5分"},
+		{Label: "体重", Value: "68.5", Unit: "kg", Trend: "-0.5kg"},
 	}
 
 	// ChartData (Last 7 days mock data, just static for now as simple DB fetch isn't fully comprehensive)
@@ -63,7 +63,7 @@ func (app *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 				rows.Scan(&d)
 				dates = append(dates, d)
 			}
-			
+
 			for i, d := range dates {
 				var count int
 				app.db.QueryRow(`
@@ -81,7 +81,7 @@ func (app *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	// Fetch up to 3 recent workouts
 	if app.db != nil {
 		rows, err := app.db.Query(`
-			SELECT w.id, w.started_at, COALESCE(w.ended_at, w.started_at), COALESCE(w.notes, 'Strength')
+			SELECT w.id, w.started_at, COALESCE(w.ended_at, w.started_at), COALESCE(w.notes, '筋トレ')
 			FROM workouts w
 			WHERE w.user_id = $1
 			ORDER BY w.started_at DESC
@@ -96,7 +96,7 @@ func (app *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 				var end time.Time
 				var notes string
 				if err := rows.Scan(&id, &start, &end, &notes); err == nil {
-					
+
 					// もし終了時間が同じ（記録中）なら、最後のセットの時間を取得
 					var lastSetTime time.Time
 					err = app.db.QueryRow("SELECT MAX(created_at) FROM workout_sets WHERE workout_id = $1", id).Scan(&lastSetTime)
@@ -109,32 +109,30 @@ func (app *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 						dur = 1 // 少なくとも1分
 					}
 
-					title := notes + " Workout"
-					if notes == "Strength" {
-						title = "Workout Session"
-					}
+					workoutType := displayWorkoutType(notes)
+					title := workoutType + "の記録"
 
 					resp.RecentWorkouts = append(resp.RecentWorkouts, WorkoutItemData{
 						ID:       id,
 						Title:    title,
-						Type:     notes,
-						Duration: fmt.Sprintf("%.0f min", dur),
+						Type:     workoutType,
+						Duration: fmt.Sprintf("%.0f分", dur),
 						Calories: fmt.Sprintf("%.0f kcal", dur*5), // mock
-						Time:     start.Format("03:04 PM"),
+						Time:     start.Format("15:04"),
 					})
 				}
 			}
 		}
 	}
 
-if len(resp.RecentWorkouts) == 0 {
-resp.RecentWorkouts = []WorkoutItemData{
-{ID: 1, Title: "Morning Yoga", Type: "Flexibility", Duration: "30 min", Calories: "120 kcal", Time: "08:00 AM"},
-}
-}
+	if len(resp.RecentWorkouts) == 0 {
+		resp.RecentWorkouts = []WorkoutItemData{
+			{ID: 1, Title: "朝のストレッチ", Type: "柔軟性", Duration: "30分", Calories: "120 kcal", Time: "08:00"},
+		}
+	}
 
-w.Header().Set("Content-Type", "application/json")
-json.NewEncoder(w).Encode(resp)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 type WorkedOutDay struct {
@@ -148,20 +146,24 @@ type CalendarResponse struct {
 }
 
 func (app *App) handleCalendar(w http.ResponseWriter, r *http.Request) {
-if r.Method != http.MethodGet {
-http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-return
-}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-userID := 1
-yearStr := r.URL.Query().Get("year")
-monthStr := r.URL.Query().Get("month")
+	userID := 1
+	yearStr := r.URL.Query().Get("year")
+	monthStr := r.URL.Query().Get("month")
 
-year, _ := strconv.Atoi(yearStr)
-month, _ := strconv.Atoi(monthStr)
+	year, _ := strconv.Atoi(yearStr)
+	month, _ := strconv.Atoi(monthStr)
 
-if year == 0 { year = time.Now().Year() }
-if month == 0 { month = int(time.Now().Month()) }
+	if year == 0 {
+		year = time.Now().Year()
+	}
+	if month == 0 {
+		month = int(time.Now().Month())
+	}
 
 	var resp CalendarResponse
 	resp.WorkedOutDates = []int{}
@@ -169,7 +171,7 @@ if month == 0 { month = int(time.Now().Month()) }
 
 	// get unique days in that month the user worked out
 	rows, err := app.db.Query(`
-		SELECT EXTRACT(DAY FROM started_at), MAX(COALESCE(notes, 'Workout'))
+		SELECT EXTRACT(DAY FROM started_at), MAX(COALESCE(notes, 'ワークアウト'))
 		FROM workouts
 		WHERE user_id = $1
 		  AND EXTRACT(YEAR FROM started_at) = $2
@@ -186,14 +188,35 @@ if month == 0 { month = int(time.Now().Month()) }
 				resp.WorkedOutDates = append(resp.WorkedOutDates, int(d))
 				resp.WorkedOutDays = append(resp.WorkedOutDays, WorkedOutDay{
 					Date: int(d),
-					Type: t,
+					Type: displayWorkoutType(t),
 				})
 			}
 		}
 	}
 
-w.Header().Set("Content-Type", "application/json")
-json.NewEncoder(w).Encode(resp)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func displayWorkoutType(value string) string {
+	switch value {
+	case "Strength":
+		return "筋トレ"
+	case "Workout":
+		return "ワークアウト"
+	case "Flexibility":
+		return "柔軟性"
+	case "Morning Yoga":
+		return "朝のストレッチ"
+	case "Push (胸・肩・三頭)":
+		return "押す日（胸・肩・三頭）"
+	case "Pull (背中・二頭)":
+		return "引く日（背中・二頭）"
+	case "Legs (脚・腹)":
+		return "脚の日（脚・腹）"
+	default:
+		return value
+	}
 }
 
 type AlternativeRequest struct {
@@ -234,18 +257,18 @@ func (app *App) handleAlternative(w http.ResponseWriter, r *http.Request) {
 		// 1. 元の種目の対象筋肉を取得
 		var pMusclesJSON []byte
 		err := app.db.QueryRow("SELECT primary_muscles FROM exercises WHERE id = $1 LIMIT 1", req.ExerciseID).Scan(&pMusclesJSON)
-		
+
 		if err == nil {
 			var pMuscles []string
 			json.Unmarshal(pMusclesJSON, &pMuscles)
-			
+
 			if len(pMuscles) > 0 {
 				var arr []string
 				for _, m := range pMuscles {
 					arr = append(arr, fmt.Sprintf("'%s'", strings.ReplaceAll(m, "'", "''")))
 				}
 				arrStr := "ARRAY[" + strings.Join(arr, ",") + "]"
-				
+
 				// 同じ筋肉を鍛えられる他の種目を最大30件取得
 				rows, err := app.db.Query(fmt.Sprintf(`
 					SELECT id, name, equipment FROM exercises 
@@ -253,7 +276,7 @@ func (app *App) handleAlternative(w http.ResponseWriter, r *http.Request) {
 					  AND id != $1 
 					LIMIT 30
 				`, arrStr), req.ExerciseID)
-				
+
 				if err == nil {
 					defer rows.Close()
 					var exList []string
@@ -262,10 +285,10 @@ func (app *App) handleAlternative(w http.ResponseWriter, r *http.Request) {
 						rows.Scan(&idStr, &nStr, &eqStr)
 						exList = append(exList, fmt.Sprintf("- ID: %s, Name: %s (器具: %s)", idStr, nStr, eqStr))
 					}
-					
+
 					if len(exList) > 0 {
 						dbContext := "以下の種目が同じ筋肉( " + strings.Join(pMuscles, ", ") + " )を鍛えられるデータベース内の候補です:\n" + strings.Join(exList, "\n")
-						
+
 						systemPrompt := `あなたは優秀なパーソナルトレーナーAIです。ユーザーが現在行おうとしている種目を別の種目に変更したいと考えています。
 データベース内の候補リストの中から、ユーザーの理由（例: マシンが空いていない等）に最も適した代替種目を2〜3個選び、JSON形式で出力してください。
 選んだ種目のIDとNameは必ず候補リストにあるものをそのまま使用してください。
@@ -281,7 +304,7 @@ func (app *App) handleAlternative(w http.ResponseWriter, r *http.Request) {
   ]
 }`
 						userPrompt := fmt.Sprintf("変更したい元の種目: %s\n変更したい理由: %s\n\n%s", req.Exercise, req.Reason, dbContext)
-						
+
 						aiJSON, err := callAI(systemPrompt, userPrompt, true)
 						if err == nil {
 							aiStr := strings.TrimSpace(aiJSON)

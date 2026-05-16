@@ -743,32 +743,32 @@ func generateMonthlyPlan(motivation, frequency string) MonthlyPlanResponse {
 		resp.Rationale = "非常に高いモチベーションと頻度を考慮し、1回あたりの部位を絞って限界まで追い込める分割法を選択しました。"
 		resp.RecommendedDays = []int{1, 2, 3, 5, 6}
 		resp.WeeklyRoutine = []DayRoutine{
-			{DayName: "Day 1", Target: "胸・腹", ExampleExercises: []string{"ベンチプレス", "ダンベルフライ", "クランチ"}},
-			{DayName: "Day 2", Target: "背中", ExampleExercises: []string{"デッドリフト", "懸垂", "ラットプルダウン"}},
-			{DayName: "Day 3", Target: "脚", ExampleExercises: []string{"スクワット", "レッグプレス", "カーフレイズ"}},
-			{DayName: "Day 4", Target: "肩", ExampleExercises: []string{"ショルダープレス", "サイドレイズ", "リアレイズ"}},
-			{DayName: "Day 5", Target: "腕", ExampleExercises: []string{"バーベルカール", "トライセプスエクステンション", "ハンマーカール"}},
+			{DayName: "1日目", Target: "胸・腹", ExampleExercises: []string{"ベンチプレス", "ダンベルフライ", "クランチ"}},
+			{DayName: "2日目", Target: "背中", ExampleExercises: []string{"デッドリフト", "懸垂", "ラットプルダウン"}},
+			{DayName: "3日目", Target: "脚", ExampleExercises: []string{"スクワット", "レッグプレス", "カーフレイズ"}},
+			{DayName: "4日目", Target: "肩", ExampleExercises: []string{"ショルダープレス", "サイドレイズ", "リアレイズ"}},
+			{DayName: "5日目", Target: "腕", ExampleExercises: []string{"バーベルカール", "トライセプスエクステンション", "ハンマーカール"}},
 		}
 	} else if strings.Contains(frequency, "週1") || strings.Contains(frequency, "週2") || strings.Contains(motivation, "健康維持") || strings.Contains(motivation, "無理なく") {
-		resp.PlanName = "全身法 (Full Body)"
+		resp.PlanName = "全身法"
 		resp.Frequency = "週1〜2回"
 		resp.Description = "少ない日数でも全身の主要な筋肉を同時に鍛えられる、タイムパフォーマンスに優れたルーティンです。"
 		resp.Rationale = "多忙なスケジュールや無理のないペースを考慮し、少ない回数で全身を刺激して筋力低下を防ぎ、少しずつ成長できる全身法を選択しました。"
 		resp.RecommendedDays = []int{2, 5}
 		resp.WeeklyRoutine = []DayRoutine{
-			{DayName: "Day 1", Target: "全身 A", ExampleExercises: []string{"スクワット", "ベンチプレス", "ベントオーバーロウ"}},
-			{DayName: "Day 2", Target: "全身 B", ExampleExercises: []string{"デッドリフト", "ショルダープレス", "懸垂"}},
+			{DayName: "1日目", Target: "全身その1", ExampleExercises: []string{"スクワット", "ベンチプレス", "ベントオーバーロウ"}},
+			{DayName: "2日目", Target: "全身その2", ExampleExercises: []string{"デッドリフト", "ショルダープレス", "懸垂"}},
 		}
 	} else {
-		resp.PlanName = "PPL法 (Push/Pull/Legs)"
+		resp.PlanName = "PPL法（押す・引く・脚）"
 		resp.Frequency = "週3〜4回"
 		resp.Description = "押す筋肉、引く筋肉、脚の3グループに分けて鍛える、最もバランスが良く結果が出やすい王道のルーティンです。"
 		resp.Rationale = "バランス良く全身を鍛えつつ、各部位に十分な回復期間を与えられるPPL法が最も適していると判断しました。"
 		resp.RecommendedDays = []int{1, 3, 5}
 		resp.WeeklyRoutine = []DayRoutine{
-			{DayName: "Day 1", Target: "Push (胸・肩・三頭)", ExampleExercises: []string{"ベンチプレス", "ショルダープレス", "ディップス"}},
-			{DayName: "Day 2", Target: "Pull (背中・二頭)", ExampleExercises: []string{"懸垂", "デッドリフト", "バーベルカール"}},
-			{DayName: "Day 3", Target: "Legs (脚・腹)", ExampleExercises: []string{"スクワット", "レッグプレス", "カーフレイズ"}},
+			{DayName: "1日目", Target: "押す日（胸・肩・三頭）", ExampleExercises: []string{"ベンチプレス", "ショルダープレス", "ディップス"}},
+			{DayName: "2日目", Target: "引く日（背中・二頭）", ExampleExercises: []string{"懸垂", "デッドリフト", "バーベルカール"}},
+			{DayName: "3日目", Target: "脚の日（脚・腹）", ExampleExercises: []string{"スクワット", "レッグプレス", "カーフレイズ"}},
 		}
 	}
 	return resp

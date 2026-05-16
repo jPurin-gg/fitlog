@@ -7,21 +7,14 @@ import {
   Activity, 
   Flame, 
   Dumbbell, 
-  Timer, 
-  TrendingUp, 
-  ChevronRight, 
   Plus,
   Calendar,
-  Settings,
   Bell,
   Sparkles,
-  BrainCircuit,
   Loader2,
   X,
   Target,
   RefreshCw,
-  MessageSquare,
-  ArrowRight
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlternativeCoachModal } from "@/components/AlternativeCoachModal";
@@ -29,6 +22,23 @@ import { AlternativeCoachModal } from "@/components/AlternativeCoachModal";
 function getCurrentPlanMonth() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function displayPlanText(text?: string) {
+  if (!text) return "";
+  return text
+    .replace("PPL法 (Push/Pull/Legs)", "PPL法（押す・引く・脚）")
+    .replace("Full Body", "全身")
+    .replace("Push (胸・肩・三頭)", "押す日（胸・肩・三頭）")
+    .replace("Pull (背中・二頭)", "引く日（背中・二頭）")
+    .replace("Legs (脚・腹)", "脚の日（脚・腹）")
+    .replace("全身 A", "全身その1")
+    .replace("全身 B", "全身その2")
+    .replace(/^Day 1$/, "1日目")
+    .replace(/^Day 2$/, "2日目")
+    .replace(/^Day 3$/, "3日目")
+    .replace(/^Day 4$/, "4日目")
+    .replace(/^Day 5$/, "5日目");
 }
 
 export default function Home() {
@@ -108,18 +118,18 @@ export default function Home() {
         )}
       </AnimatePresence>
 
-      {/* Background Glows */}
+      {/* 背景の光 */}
       <div className="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="fixed bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-secondary/10 blur-[120px] rounded-full pointer-events-none" />
 
       <main className="max-w-7xl mx-auto relative z-10">
-        {/* Header */}
+        {/* ヘッダー */}
         <header className="flex flex-col gap-5 sm:flex-row sm:justify-between sm:items-center mb-12">
           <div>
             <h1 className="text-4xl font-bold tracking-tight mb-1">
-              Hey, <span className="text-gradient">Mitsuki</span> 👋
+              おかえりなさい、<span className="text-gradient">みつきさん</span>
             </h1>
-            <p className="text-white/50">Ready to crush your goals today?</p>
+            <p className="text-white/50">今日のコンディションに合わせて進めましょう。</p>
           </div>
           <div className="flex flex-wrap gap-3 sm:gap-4 w-full sm:w-auto">
             <Link href="/calendar" className="p-3 glass rounded-2xl hover:bg-white/10 transition-colors block">
@@ -130,12 +140,12 @@ export default function Home() {
             </button>
             <button className="px-6 py-3 bg-primary text-black font-bold rounded-2xl glow-primary hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 flex-1 sm:flex-none justify-center">
               <Plus className="w-5 h-5" />
-              <span>New Workout</span>
+              <span>記録を始める</span>
             </button>
           </div>
         </header>
 
-        {/* Today's Workout Focus */}
+        {/* 今日のワークアウト */}
         <section className="mb-8">
           <div className="glass rounded-[32px] p-6 md:p-10 relative overflow-hidden border border-white/10 shadow-2xl shadow-primary/5">
             <div className="absolute top-0 right-0 p-8 text-primary/5 pointer-events-none">
@@ -148,7 +158,7 @@ export default function Home() {
                   <Flame className="w-6 h-6" />
                 </div>
                 <div>
-                  <h2 className="text-2xl font-bold tracking-tight">Today&apos;s Workout</h2>
+                  <h2 className="text-2xl font-bold tracking-tight">今日のメニュー</h2>
                   <p className="text-white/50 text-sm font-medium">{new Date().toLocaleDateString('ja-JP', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
                 </div>
               </div>
@@ -174,7 +184,7 @@ export default function Home() {
                     <div className="bg-white/5 rounded-3xl p-8 text-center border border-white/10 relative overflow-hidden">
                       <div className="relative z-10">
                         <span className="text-4xl mb-4 block">☕️</span>
-                        <h3 className="text-2xl font-black text-white mb-2">Rest Day</h3>
+                        <h3 className="text-2xl font-black text-white mb-2">休息日</h3>
                         <p className="text-white/60">今日はオフの日です。しっかり休んで回復しましょう。</p>
                       </div>
                     </div>
@@ -186,10 +196,10 @@ export default function Home() {
                   <div className="bg-primary/10 rounded-3xl p-6 lg:p-8 border border-primary/20">
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
                       <div>
-                        <span className="text-[10px] font-black uppercase tracking-widest text-primary bg-primary/20 px-3 py-1 rounded-full mb-3 inline-block">
-                          {routine.day_name}
+                        <span className="text-[10px] font-black tracking-widest text-primary bg-primary/20 px-3 py-1 rounded-full mb-3 inline-block">
+                          {displayPlanText(routine.day_name)}
                         </span>
-                        <h3 className="text-3xl md:text-4xl font-black italic uppercase tracking-tight text-white mb-2">{routine.target}</h3>
+                        <h3 className="text-3xl md:text-4xl font-black tracking-tight text-white mb-2">{displayPlanText(routine.target)}</h3>
                         <p className="text-white/50 text-sm">AIコーチが選んだ本日の最適メニュー</p>
                       </div>
                       <Link href="/workout" className="w-full md:w-auto px-8 py-4 bg-primary text-black font-black rounded-2xl hover:scale-105 transition-transform flex justify-center items-center gap-2 shadow-[0_0_20px_rgba(255,170,0,0.3)]">
@@ -198,7 +208,7 @@ export default function Home() {
                     </div>
                     
                     <div className="space-y-3">
-                      <p className="text-xs font-black text-white/30 uppercase tracking-widest mb-4">Recommended Exercises</p>
+                      <p className="text-xs font-black text-white/30 tracking-widest mb-4">おすすめ種目</p>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {routine.example_exercises.map((ex: string, i: number) => (
                           <div key={i} className="flex flex-col p-4 bg-black/40 rounded-2xl border border-white/5 transition-colors group">
@@ -225,11 +235,11 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Simplified Recent Workouts */}
+        {/* 最近の記録 */}
         <section className="glass rounded-[32px] p-6 md:p-10 border border-white/5">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-bold flex items-center gap-2">
-              <Activity className="w-5 h-5 text-secondary" /> Recent Workouts
+              <Activity className="w-5 h-5 text-secondary" /> 最近のワークアウト
             </h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -239,19 +249,19 @@ export default function Home() {
                 <p className="text-xs text-white/40 mb-4">{w.time}</p>
                 <div className="flex gap-6">
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-white/30 block mb-1">Duration</span>
+                    <span className="text-[10px] font-bold text-white/30 block mb-1">時間</span>
                     <span className="font-medium text-sm">{w.duration}</span>
                   </div>
                   {/* Calorie mock logic was visible earlier but we keep it clean now */}
                   <div className="hidden">
-                    <span className="text-[10px] uppercase font-bold text-white/30 block mb-1">Calories</span>
+                    <span className="text-[10px] font-bold text-white/30 block mb-1">消費カロリー</span>
                     <span className="font-medium text-sm text-primary">{w.calories}</span>
                   </div>
                 </div>
               </div>
             )) : (
               <div className="col-span-full text-center py-6 text-white/30 text-sm flex items-center justify-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" /> Loading records...
+                <Loader2 className="w-4 h-4 animate-spin" /> 記録を読み込み中...
               </div>
             )}
           </div>
@@ -261,53 +271,6 @@ export default function Home() {
   );
 }
 
-
-function StatCard({ icon, label, value, unit, trend, color }: any) {
-  return (
-    <div className="glass rounded-[28px] p-6 hover:bg-white/5 transition-all group cursor-default">
-      <div className="flex justify-between items-start mb-4">
-        <div className="p-3 bg-white/5 rounded-2xl group-hover:scale-110 transition-transform duration-300">
-          {icon}
-        </div>
-        <span className={`text-xs font-bold px-2 py-1 rounded-lg ${
-          trend.startsWith('+') ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
-        }`}>
-          {trend}
-        </span>
-      </div>
-      <div>
-        <p className="text-sm font-medium text-white/40 mb-1">{label}</p>
-        <div className="flex items-baseline gap-1">
-          <span className="text-2xl font-bold">{value}</span>
-          <span className="text-xs font-medium text-white/30">{unit}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function WorkoutItem({ title, type, duration, calories, time }: any) {
-  return (
-    <div className="glass border-white/5 rounded-2xl p-4 flex items-center justify-between group hover:bg-white/5 transition-all cursor-pointer">
-      <div className="flex items-center gap-4">
-        <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
-          <Activity className="w-6 h-6 text-white/40 group-hover:text-primary transition-colors" />
-        </div>
-        <div>
-          <h4 className="font-bold text-sm">{title}</h4>
-          <p className="text-[10px] text-white/40 font-medium uppercase tracking-wider">{type} • {time}</p>
-        </div>
-      </div>
-      <div className="flex items-center gap-8">
-        <div className="text-right">
-          <p className="text-sm font-bold">{duration}</p>
-          <p className="text-[10px] text-white/40">{calories}</p>
-        </div>
-        <ChevronRight className="w-5 h-5 text-white/20 group-hover:text-white transition-colors" />
-      </div>
-    </div>
-  );
-}
 
 function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
   const [motivation, setMotivation] = React.useState("健康維持");
@@ -334,14 +297,14 @@ function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
       console.error(e);
       // Fallback
       onPlanGenerated({
-        plan_name: "PPL法 (Push/Pull/Legs)",
+        plan_name: "PPL法（押す・引く・脚）",
         frequency: "週3〜4回",
         description: "押す筋肉、引く筋肉、脚の3グループに分けて鍛える、最もバランスが良く結果が出やすい王道のルーティンです。",
         rationale: "バランス良く鍛えられるPPL法が最も適していると判断しました。まずはこれをベースに頑張りましょう！",
         weekly_routine: [
-          { day_name: "Day 1", target: "Push", example_exercises: ["ベンチプレス", "ショルダープレス"] },
-          { day_name: "Day 2", target: "Pull", example_exercises: ["懸垂", "ラットプルダウン"] },
-          { day_name: "Day 3", target: "Legs", example_exercises: ["スクワット", "レッグプレス"] }
+          { day_name: "1日目", target: "押す日", example_exercises: ["ベンチプレス", "ショルダープレス"] },
+          { day_name: "2日目", target: "引く日", example_exercises: ["懸垂", "ラットプルダウン"] },
+          { day_name: "3日目", target: "脚の日", example_exercises: ["スクワット", "レッグプレス"] }
         ]
       });
     } finally {
@@ -384,7 +347,7 @@ function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
           
           <div className="space-y-6 mb-8">
             <div className="space-y-3">
-              <label className="text-xs font-black uppercase tracking-widest text-white/40 ml-1">今月のモチベーション</label>
+              <label className="text-xs font-black tracking-widest text-white/40 ml-1">今月のモチベーション</label>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                 {motivationOptions.map(opt => (
                   <button
@@ -404,7 +367,7 @@ function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
             </div>
 
             <div className="space-y-3">
-              <label className="text-xs font-black uppercase tracking-widest text-white/40 ml-1">通える頻度 (目安)</label>
+              <label className="text-xs font-black tracking-widest text-white/40 ml-1">通える頻度（目安）</label>
               <div className="grid grid-cols-3 gap-2">
                 {frequencyOptions.map(opt => (
                   <button

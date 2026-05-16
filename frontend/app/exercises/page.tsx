@@ -27,6 +27,29 @@ const EQUIPMENTS = [
   "自重", "ダンベル", "バーベル", "マシン", "ケーブル", "バンド", "ケトルベル", "メディシンボール", "バランスボール", "その他"
 ]
 
+const EXERCISE_LABELS: Record<string, string> = {
+  beginner: "初級",
+  intermediate: "中級",
+  expert: "上級",
+  compound: "複合",
+  isolation: "単関節",
+  strength: "筋力トレーニング",
+  stretching: "ストレッチ",
+  cardio: "有酸素",
+  plyometrics: "瞬発系",
+  powerlifting: "パワーリフティング",
+  olympic_weightlifting: "重量挙げ",
+  strongman: "ストロングマン",
+  push: "押す",
+  pull: "引く",
+  static: "静止",
+}
+
+function displayExerciseLabel(value?: string) {
+  if (!value) return ""
+  return EXERCISE_LABELS[value] || value
+}
+
 export default function ExercisesPage() {
   const [exercises, setExercises] = useState<Exercise[]>([])
   const [muscle, setMuscle] = useState('すべて')
@@ -94,7 +117,7 @@ export default function ExercisesPage() {
         <div className="max-w-5xl mx-auto relative z-10 flex flex-col items-center text-center">
           <Dumbbell className="w-16 h-16 mb-4 text-blue-300 opacity-90" />
           <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight mb-4 text-transparent bg-clip-text bg-gradient-to-r from-white to-blue-200">
-            Exercise Library
+            種目辞書
           </h1>
           <p className="text-blue-200 text-lg max-w-xl">
             約900種目以上のトレーニングデータベース。部位や器具から、あなたに最適な種目を見つけましょう。
@@ -216,7 +239,7 @@ export default function ExercisesPage() {
                     </h3>
                     {ex.level && (
                       <span className="px-3 py-1 bg-white/5 border border-white/10 text-white/80 text-xs font-bold rounded-full whitespace-nowrap ml-2">
-                        {ex.level}
+                        {displayExerciseLabel(ex.level)}
                       </span>
                     )}
                   </div>
@@ -240,7 +263,7 @@ export default function ExercisesPage() {
                       <div className="flex items-center text-sm text-white/60">
                         <Shield className="w-4 h-4 mr-2 text-accent" />
                         <span className="font-medium mr-2">分類:</span>
-                        {ex.category}
+                        {displayExerciseLabel(ex.category)}
                       </div>
                     )}
                   </div>
@@ -271,10 +294,10 @@ export default function ExercisesPage() {
             
             <div className="p-6">
               <div className="flex flex-wrap gap-2 mb-6">
-                {selectedExercise.level && <span className="px-3 py-1 bg-white/5 border border-white/10 text-white/80 text-xs font-bold rounded-full">{selectedExercise.level}</span>}
-                {selectedExercise.category && <span className="px-3 py-1 bg-white/5 border border-white/10 text-white/80 text-xs font-bold rounded-full">{selectedExercise.category}</span>}
-                {selectedExercise.mechanic && <span className="px-3 py-1 bg-white/5 border border-white/10 text-white/80 text-xs font-bold rounded-full">{selectedExercise.mechanic}</span>}
-                {selectedExercise.force && <span className="px-3 py-1 bg-white/5 border border-white/10 text-white/80 text-xs font-bold rounded-full">{selectedExercise.force}</span>}
+                {selectedExercise.level && <span className="px-3 py-1 bg-white/5 border border-white/10 text-white/80 text-xs font-bold rounded-full">{displayExerciseLabel(selectedExercise.level)}</span>}
+                {selectedExercise.category && <span className="px-3 py-1 bg-white/5 border border-white/10 text-white/80 text-xs font-bold rounded-full">{displayExerciseLabel(selectedExercise.category)}</span>}
+                {selectedExercise.mechanic && <span className="px-3 py-1 bg-white/5 border border-white/10 text-white/80 text-xs font-bold rounded-full">{displayExerciseLabel(selectedExercise.mechanic)}</span>}
+                {selectedExercise.force && <span className="px-3 py-1 bg-white/5 border border-white/10 text-white/80 text-xs font-bold rounded-full">{displayExerciseLabel(selectedExercise.force)}</span>}
               </div>
               
               <h3 className="text-lg font-bold text-white mb-3 flex items-center">
