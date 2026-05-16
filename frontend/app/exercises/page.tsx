@@ -102,18 +102,6 @@ export default function ExercisesPage() {
     }
   }, [selectedExercise])
 
-  // テキスト検索によるフィルタリング（日本語の名前、英語のID、器具の両方で検索可能に）
-  // ＋ 器具（複数選択）のフィルタリング
-  const filteredExercises = exercises.filter(ex => 
-    (
-      (ex.name && ex.name.toLowerCase().includes(searchQuery.toLowerCase())) || 
-      (ex.id && ex.id.toLowerCase().includes(searchQuery.toLowerCase().replace(/ /g, '_'))) ||
-      (ex.equipment && ex.equipment.toLowerCase().includes(searchQuery.toLowerCase()))
-    ) &&
-    (
-      selectedEquipments.length === 0 || (ex.equipment && selectedEquipments.includes(ex.equipment))
-    )
-  )
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white pb-20 selection:bg-primary/30">
@@ -185,7 +173,7 @@ export default function ExercisesPage() {
           <div className="flex justify-center items-center py-20">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
           </div>
-        ) : filteredExercises.length === 0 ? (
+        ) : exercises.length === 0 ? (
           <div className="text-center py-20 bg-[#111] rounded-3xl shadow-sm border border-white/10">
             <Activity className="w-16 h-16 mx-auto text-white/20 mb-4" />
             <h3 className="text-xl font-semibold text-white/80 mb-2">見つかりませんでした</h3>
@@ -195,7 +183,7 @@ export default function ExercisesPage() {
           <>
             <div className="sticky top-0 z-40 py-4 mb-6 flex flex-col md:flex-row items-start md:items-center justify-between text-white/60 gap-4 bg-[#0a0a0a]/90 backdrop-blur-xl border-b border-white/5">
               <span className="font-medium bg-[#111] px-4 py-2 rounded-lg border border-white/10 flex-shrink-0">
-                <span className="text-primary font-bold text-lg mr-1">{filteredExercises.length}</span> 件の種目
+                <span className="text-primary font-bold text-lg mr-1">{exercises.length}</span> 件の種目
               </span>
 
               {/* アクティブな検索条件の表示 */}
@@ -236,7 +224,7 @@ export default function ExercisesPage() {
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredExercises.map(ex => (
+            {exercises.map(ex => (
               <div key={ex.id} className="glass bg-[#111] rounded-2xl shadow-sm hover:shadow-[0_0_20px_rgba(255,170,0,0.1)] transition-all border border-white/10 hover:border-primary/50 overflow-hidden group">
                 <div className="p-6">
                   <div className="flex justify-between items-start mb-4">

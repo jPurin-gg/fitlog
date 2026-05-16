@@ -58,11 +58,24 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
   const [customCategory, setCustomCategory] = useState("筋力トレーニング");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/exercises`)
-      .then(res => res.json())
-      .then(data => setExercises(data || []))
-  }, []);
+    const fetch_ = async () => {
+      const params = new URLSearchParams();
+      if (searchQuery.trim()) params.set('name', searchQuery.trim());
+      // 細かい筋肉が指定されていればそちらを優先、なければざっくりカテゴリで絞る
+      const effectiveMuscle = muscleFilter || (broadMuscle ? (MUSCLE_CATEGORIES[broadMuscle]?.[0] ?? '') : '');
+      if (effectiveMuscle) params.set('muscle', effectiveMuscle);
+      if (equipFilter) params.set('equipment', equipFilter);
+      const qs = params.toString();
+      const res = await fetch(`${apiBase}/api/exercises${qs ? '?' + qs : ''}`);
+      const data = await res.json();
+      setExercises(data || []);
+    };
+    const timer = setTimeout(fetch_, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, muscleFilter, broadMuscle, equipFilter, apiBase]);
 
   const handleBroadMuscleChange = (broad: string) => {
     setBroadMuscle(broad);
@@ -86,21 +99,8 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
     ? MUSCLE_CATEGORIES[broadMuscle] 
     : Object.values(MUSCLE_CATEGORIES).flat();
 
-  const filtered = exercises.filter(ex => {
-    const matchSearch = (ex.name && ex.name.toLowerCase().includes(searchQuery.toLowerCase())) || 
-                        (ex.id && ex.id.toLowerCase().includes(searchQuery.toLowerCase().replace(/ /g, '_')));
-    
-    let matchMuscle = true;
-    if (muscleFilter) {
-      matchMuscle = ex.primaryMuscles?.includes(muscleFilter) || false;
-    } else if (broadMuscle) {
-      const targetMuscles = MUSCLE_CATEGORIES[broadMuscle];
-      matchMuscle = ex.primaryMuscles?.some(m => targetMuscles.includes(m)) || false;
-    }
-
-    const matchEquip = !equipFilter || (ex.equipment && ex.equipment.includes(equipFilter));
-    return matchSearch && matchMuscle && matchEquip;
-  });
+  // サーバー側で検索済みのため、exercises をそのまま表示する
+  const filtered = exercises;
 
   const handleCustomSubmit = async () => {
     if (!customName.trim()) return;
