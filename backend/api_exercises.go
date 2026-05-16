@@ -13,28 +13,45 @@ func (app *App) handleExercises(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// クエリパラメータの取得（例: ?muscle=胸&equipment=ダンベル）
+	// クエリパラメータ
 	muscle := r.URL.Query().Get("muscle")
-	equipment := r.URL.Query().Get("equipment")
+	// equipment はカンマ区切りで複数指定可能 (例: ?equipment=ダンベル,バーベル)
+	equipmentParam := r.URL.Query().Get("equipment")
+	nameQuery := r.URL.Query().Get("name")
 
 	query := `SELECT id, name, force, level, mechanic, equipment, category, instructions, primary_muscles, secondary_muscles, images FROM exercises WHERE 1=1`
 	args := []interface{}{}
 	argId := 1
 
+	// 種目名のキーワード検索（日本語名・英語ID両対応）
+	if nameQuery != "" {
+		query += ` AND (name ILIKE $` + fmt.Sprint(argId) + ` OR id ILIKE $` + fmt.Sprint(argId) + `)`
+		args = append(args, "%"+nameQuery+"%")
+		argId++
+	}
+
+	// 筋肉名フィルタ（主動筋または補助筋）
 	if muscle != "" {
-		// JSON配列の中に特定の筋肉名が含まれているかテキスト検索（英語・日本語両対応のためLIKEを使用）
-		query += ` AND (primary_muscles::text LIKE $` + fmt.Sprint(argId) + ` OR secondary_muscles::text LIKE $` + fmt.Sprint(argId) + `)`
+		query += ` AND (primary_muscles::text ILIKE $` + fmt.Sprint(argId) + ` OR secondary_muscles::text ILIKE $` + fmt.Sprint(argId) + `)`
 		args = append(args, "%"+muscle+"%")
 		argId++
 	}
 
-	if equipment != "" {
-		query += ` AND equipment = $` + fmt.Sprint(argId)
-		args = append(args, equipment)
-		argId++
+	// 器具フィルタ（複数選択: カンマ区切り）
+	if equipmentParam != "" {
+		equipments := splitAndTrim(equipmentParam)
+		if len(equipments) == 1 {
+			query += ` AND equipment = $` + fmt.Sprint(argId)
+			args = append(args, equipments[0])
+			argId++
+		} else if len(equipments) > 1 {
+			query += ` AND equipment = ANY($` + fmt.Sprint(argId) + `)`
+			args = append(args, equipments)
+			argId++
+		}
 	}
 
-	query += ` ORDER BY name ASC LIMIT 100`
+	query += ` ORDER BY name ASC`
 
 	rows, err := app.db.Query(query, args...)
 	if err != nil {
@@ -58,7 +75,6 @@ func (app *App) handleExercises(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// DBに保存されているJSON文字列をGoの配列に変換
 		if instJSON != nil { json.Unmarshal(instJSON, &ex.Instructions) }
 		if primJSON != nil { json.Unmarshal(primJSON, &ex.PrimaryMuscles) }
 		if secJSON != nil { json.Unmarshal(secJSON, &ex.SecondaryMuscles) }
@@ -67,7 +83,6 @@ func (app *App) handleExercises(w http.ResponseWriter, r *http.Request) {
 		exercises = append(exercises, ex)
 	}
 
-	// nilスライスを空配列にして返すための対策
 	if exercises == nil {
 		exercises = []ExerciseData{}
 	}
@@ -75,6 +90,41 @@ func (app *App) handleExercises(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(exercises)
 }
+
+// splitAndTrim はカンマ区切り文字列を分割してトリムする
+func splitAndTrim(s string) []string {
+	var result []string
+	for _, part := range splitComma(s) {
+		if t := trimSpace(part); t != "" {
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
+func splitComma(s string) []string {
+	var parts []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == ',' {
+			parts = append(parts, s[start:i])
+			start = i + 1
+		}
+	}
+	parts = append(parts, s[start:])
+	return parts
+}
+
+func trimSpace(s string) string {
+	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t') {
+		s = s[1:]
+	}
+	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t') {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
 // handleTargetSets - 種目ごとの目標セット数の取得・更新
 func (app *App) handleTargetSets(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")

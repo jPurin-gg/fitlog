@@ -70,8 +70,12 @@ export default function ExercisesPage() {
     const fetchExercises = async () => {
       setIsLoading(true)
       try {
-        const query = muscle === 'すべて' ? '' : `?muscle=${muscle}`
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/exercises${query}`)
+        const params = new URLSearchParams()
+        if (muscle !== 'すべて') params.set('muscle', muscle)
+        if (searchQuery.trim()) params.set('name', searchQuery.trim())
+        if (selectedEquipments.length > 0) params.set('equipment', selectedEquipments.join(','))
+        const qs = params.toString()
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/exercises${qs ? '?' + qs : ''}`)
         if (res.ok) {
           const data = await res.json()
           setExercises(data || [])
@@ -81,8 +85,10 @@ export default function ExercisesPage() {
       }
       setIsLoading(false)
     }
-    fetchExercises()
-  }, [muscle])
+    // 入力中に毎回叩かないよう 300ms debounce
+    const timer = setTimeout(fetchExercises, 300)
+    return () => clearTimeout(timer)
+  }, [muscle, searchQuery, selectedEquipments])
 
   // モーダルが開いている間は背景のスクロールを無効化する（UX改善）
   useEffect(() => {
