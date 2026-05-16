@@ -23,6 +23,10 @@ func main() {
 	// データベース初期化
 	db := initDB()
 
+	if err := ensureSchema(db); err != nil {
+		log.Fatalf("Failed to ensure schema: %v", err)
+	}
+
 	// マスターデータの自動挿入（初回のみ）
 	if err := seedDatabase(db); err != nil {
 		log.Fatalf("Failed to seed database: %v", err)
@@ -57,8 +61,8 @@ func main() {
 	http.HandleFunc("/api/dashboard", cors(app.handleDashboard))
 	http.HandleFunc("/api/calendar", cors(app.handleCalendar))
 	http.HandleFunc("/api/alternative", cors(app.handleAlternative))
+	http.HandleFunc("/api/monthly-plans", cors(app.handleMonthlyPlans))
 	http.HandleFunc("/api/monthly-plan", cors(app.handleMonthlyPlan))
-
 
 	fmt.Println("Server started on :8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {

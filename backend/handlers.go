@@ -1,11 +1,14 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type RecommendRequest struct {
@@ -18,8 +21,8 @@ type RecommendRequest struct {
 }
 
 type RecommendResponse struct {
-	NextAction     string  `json:"next_action"`     // "CONTINUE", "ADJUST", "STOP"
-	Recommendation string  `json:"recommendation"`  // 具体的なアドバイス
+	NextAction     string  `json:"next_action"`    // "CONTINUE", "ADJUST", "STOP"
+	Recommendation string  `json:"recommendation"` // 具体的なアドバイス
 	TargetWeight   float64 `json:"target_weight"`
 	TargetReps     int     `json:"target_reps"`
 	Reason         string  `json:"reason"`
@@ -50,13 +53,13 @@ func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 	// 過去最大から遠い場合は、ボリューム（回数）を稼ぐアプローチを提案してください。
 	// 理由もあわせて返答してください。"
 	// -----------------------------
-	
+
 	// 1. 過去最大重量の取得
 	var maxWeight float64
 	if app.db != nil {
 		app.db.QueryRow("SELECT COALESCE(max_weight, 0) FROM user_exercise_stats WHERE user_id = $1 AND exercise_id = $2", req.UserID, req.ExerciseID).Scan(&maxWeight)
 	}
-	
+
 	// 初回利用時のダミー値
 	if maxWeight == 0 {
 		maxWeight = 10.0 // 何もない場合の基準
@@ -70,7 +73,7 @@ func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 			SELECT id FROM workouts 
 			WHERE user_id = $1 AND ended_at IS NULL AND DATE(started_at) = CURRENT_DATE 
 			LIMIT 1`, req.UserID).Scan(&workoutID)
-		
+
 		if err != nil {
 			// 新しく作成
 			err = app.db.QueryRow(`
@@ -129,55 +132,27 @@ func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 
 上記に基づき、次のセットはどうすべきかJSONで提案してください。`, req.SetOrder, req.Weight, req.Reps, req.Feeling, maxWeight)
 
-	var resp RecommendResponse
-	resp.MaxWeight = maxWeight
-
 	aiJSON, err := callAI(systemPrompt, userPrompt, true)
 	if err != nil {
-		fmt.Printf("AI API Error (Recommend): %v. Using fallback logic.\n", err)
-		// APIコール失敗時のフォールバックロジック
-		if req.Feeling == "痛い" || req.Feeling == "違和感" {
-			resp.NextAction = "STOP"
-			resp.Recommendation = "本日はここで中止しましょう。怪我のリスクがあります。"
-			resp.Reason = "体の違和感は何より優先して対処すべきです。最高重量を目指すのはコンディションが良い日にしましょう。"
-		} else if req.SetOrder >= 2 && (req.Feeling == "限界" || req.Feeling == "かなりきつい") {
-			resp.NextAction = "STOP"
-			resp.Recommendation = "本日のこの種目はここで終了し、十分な回復を図りましょう。"
-			resp.Reason = "すでに強い疲労感があります。過去最大重量(" + fmt.Sprintf("%.0f", maxWeight) + "kg)に挑戦するためのベース作りとしては今日で十分な刺激です。"
-		} else if req.Weight >= maxWeight-5 && (req.Feeling == "軽い" || req.Feeling == "余裕あり") {
-			resp.NextAction = "CONTINUE"
-			resp.Recommendation = "調子が良さそうです。自己ベスト更新を狙って、少し重量を上げてみましょう。"
-			resp.TargetWeight = req.Weight + 2.5
-			resp.TargetReps = req.Reps - 2
-			if resp.TargetReps < 1 { resp.TargetReps = 1 }
-			resp.Reason = "過去最大重量に近い重量にも関わらず余裕があるため、神経系の適応を引き出すチャンスです。"
-		} else {
-			resp.NextAction = "CONTINUE"
-			resp.Recommendation = "フォームを意識して、今の重量でしっかりと回数をこなしましょう。"
-			resp.TargetWeight = req.Weight
-			resp.TargetReps = req.Reps
-			resp.Reason = "最大重量に向けての筋力基盤を作るため、現在の重量で十分なボリューム（回数）を積むことが有効です。"
-		}
-	} else {
-		// AIレスポンスのパース
-		// もしマークダウンブロックが含まれていたら除去
-		aiStr := strings.TrimSpace(aiJSON)
-		if strings.HasPrefix(aiStr, "```json") {
-			aiStr = strings.TrimPrefix(aiStr, "```json")
-			aiStr = strings.TrimSuffix(strings.TrimSpace(aiStr), "```")
-		}
-
-		if err := json.Unmarshal([]byte(aiStr), &resp); err != nil {
-			fmt.Printf("AI JSON Parse Error: %v. Raw String: %s\n", err, aiStr)
-			// エラー時の適当なデフォルト値
-			resp.NextAction = "CONTINUE"
-			resp.Recommendation = "通信エラーが発生しましたが、調子に合わせて継続しましょう。"
-			resp.TargetWeight = req.Weight
-			resp.TargetReps = req.Reps
-			resp.Reason = "AIからの応答パースに失敗しました。"
-		}
-		resp.MaxWeight = maxWeight // 再セット
+		log.Printf("AI API Error (Recommend): %v\n", err)
+		http.Error(w, "AIの呼び出しに失敗しました。しばらくしてからやり直してください。", http.StatusServiceUnavailable)
+		return
 	}
+
+	// AIレスポンスのパース（マークダウンブロックを除去）
+	aiStr := strings.TrimSpace(aiJSON)
+	if strings.HasPrefix(aiStr, "```json") {
+		aiStr = strings.TrimPrefix(aiStr, "```json")
+		aiStr = strings.TrimSuffix(strings.TrimSpace(aiStr), "```")
+	}
+
+	var resp RecommendResponse
+	if err := json.Unmarshal([]byte(aiStr), &resp); err != nil {
+		log.Printf("AI JSON Parse Error: %v. Raw: %s\n", err, aiStr)
+		http.Error(w, "AIの返答の解析に失敗しました。もう一度お試しください。", http.StatusInternalServerError)
+		return
+	}
+	resp.MaxWeight = maxWeight
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -185,6 +160,7 @@ func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 
 type MonthlyPlanRequest struct {
 	UserID     int    `json:"user_id"`
+	PlanMonth  string `json:"plan_month"`
 	Motivation string `json:"motivation"`
 	Frequency  string `json:"frequency"`
 }
@@ -196,31 +172,143 @@ type DayRoutine struct {
 }
 
 type MonthlyPlanResponse struct {
-	PlanName      string       `json:"plan_name"`
-	Frequency     string       `json:"frequency"`
-	Description   string       `json:"description"`
+	ID              int          `json:"id,omitempty"`
+	UserID          int          `json:"user_id,omitempty"`
+	PlanMonth       string       `json:"plan_month,omitempty"`
+	PlanName        string       `json:"plan_name"`
+	Frequency       string       `json:"frequency"`
+	Description     string       `json:"description"`
 	Rationale       string       `json:"rationale"`
 	RecommendedDays []int        `json:"recommended_days"`
 	WeeklyRoutine   []DayRoutine `json:"weekly_routine"`
 }
 
 func (app *App) handleMonthlyPlan(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+	switch r.Method {
+	case http.MethodGet:
+		app.getMonthlyPlan(w, r)
+	case http.MethodPost:
+		app.createMonthlyPlan(w, r)
+	case http.MethodPut:
+		app.saveMonthlyPlan(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (app *App) handleMonthlyPlans(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// OPTIONS method for CORS if needed is usually handled centrally, but we might just respond OK
+	userID := parseUserID(r.URL.Query().Get("user_id"))
+	plans, err := app.loadMonthlyPlans(userID)
+	if err != nil {
+		log.Printf("Failed to load monthly plans: %v", err)
+		http.Error(w, "Failed to load monthly plans", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(plans)
+}
+
+func (app *App) getMonthlyPlan(w http.ResponseWriter, r *http.Request) {
+	userID := parseUserID(r.URL.Query().Get("user_id"))
+	planMonth := normalizePlanMonth(r.URL.Query().Get("month"))
+
+	plan, ok, err := app.loadMonthlyPlan(userID, planMonth)
+	if err != nil {
+		log.Printf("Failed to load monthly plan: %v", err)
+		http.Error(w, "Failed to load monthly plan", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"message": "monthly plan not found"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(plan)
+}
+
+func (app *App) createMonthlyPlan(w http.ResponseWriter, r *http.Request) {
 	var req MonthlyPlanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
 		http.Error(w, "Invalid request format", http.StatusBadRequest)
 		return
 	}
 
+	userID := req.UserID
+	if userID == 0 {
+		userID = 1
+	}
+	planMonth := normalizePlanMonth(req.PlanMonth)
 	motivation := req.Motivation
 	frequency := req.Frequency
-	var resp MonthlyPlanResponse
+	resp := generateMonthlyPlan(motivation, frequency)
+	resp.UserID = userID
+	resp.PlanMonth = planMonth
 
+	if err := app.upsertMonthlyPlan(userID, planMonth, &resp); err != nil {
+		log.Printf("Failed to save monthly plan: %v", err)
+		http.Error(w, "Failed to save monthly plan", http.StatusInternalServerError)
+		return
+	}
+
+	plan, ok, err := app.loadMonthlyPlan(userID, planMonth)
+	if err != nil || !ok {
+		log.Printf("Failed to reload monthly plan: ok=%v err=%v", ok, err)
+		http.Error(w, "Failed to load saved monthly plan", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(plan)
+}
+
+func (app *App) saveMonthlyPlan(w http.ResponseWriter, r *http.Request) {
+	var req MonthlyPlanResponse
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request format", http.StatusBadRequest)
+		return
+	}
+
+	userID := req.UserID
+	if userID == 0 {
+		userID = 1
+	}
+	planMonth := normalizePlanMonth(req.PlanMonth)
+	req.UserID = userID
+	req.PlanMonth = planMonth
+
+	if req.PlanName == "" || len(req.WeeklyRoutine) == 0 {
+		http.Error(w, "Invalid monthly plan", http.StatusBadRequest)
+		return
+	}
+
+	if err := app.upsertMonthlyPlan(userID, planMonth, &req); err != nil {
+		log.Printf("Failed to update monthly plan: %v", err)
+		http.Error(w, "Failed to update monthly plan", http.StatusInternalServerError)
+		return
+	}
+
+	plan, ok, err := app.loadMonthlyPlan(userID, planMonth)
+	if err != nil || !ok {
+		log.Printf("Failed to reload monthly plan: ok=%v err=%v", ok, err)
+		http.Error(w, "Failed to load saved monthly plan", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(plan)
+}
+
+func generateMonthlyPlan(motivation, frequency string) MonthlyPlanResponse {
+	var resp MonthlyPlanResponse
 	if strings.Contains(frequency, "週5") || strings.Contains(motivation, "本気") {
 		resp.PlanName = "ブロ割 (部位別特化)"
 		resp.Frequency = "週5〜6回"
@@ -256,7 +344,127 @@ func (app *App) handleMonthlyPlan(w http.ResponseWriter, r *http.Request) {
 			{DayName: "Day 3", Target: "Legs (脚・腹)", ExampleExercises: []string{"スクワット", "レッグプレス", "カーフレイズ"}},
 		}
 	}
+	return resp
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+func (app *App) loadMonthlyPlan(userID int, planMonth string) (MonthlyPlanResponse, bool, error) {
+	var plan MonthlyPlanResponse
+	var recommendedDaysJSON []byte
+	var weeklyRoutineJSON []byte
+
+	err := app.db.QueryRow(`
+		SELECT id, user_id, plan_month, plan_name, frequency, COALESCE(description, ''), COALESCE(rationale, ''), recommended_days, weekly_routine
+		FROM monthly_plans
+		WHERE user_id = $1 AND plan_month = $2
+	`, userID, planMonth).Scan(
+		&plan.ID,
+		&plan.UserID,
+		&plan.PlanMonth,
+		&plan.PlanName,
+		&plan.Frequency,
+		&plan.Description,
+		&plan.Rationale,
+		&recommendedDaysJSON,
+		&weeklyRoutineJSON,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return MonthlyPlanResponse{}, false, nil
+		}
+		return MonthlyPlanResponse{}, false, err
+	}
+
+	if err := json.Unmarshal(recommendedDaysJSON, &plan.RecommendedDays); err != nil {
+		return MonthlyPlanResponse{}, false, err
+	}
+	if err := json.Unmarshal(weeklyRoutineJSON, &plan.WeeklyRoutine); err != nil {
+		return MonthlyPlanResponse{}, false, err
+	}
+	return plan, true, nil
+}
+
+func (app *App) loadMonthlyPlans(userID int) ([]MonthlyPlanResponse, error) {
+	rows, err := app.db.Query(`
+		SELECT id, user_id, plan_month, plan_name, frequency, COALESCE(description, ''), COALESCE(rationale, ''), recommended_days, weekly_routine
+		FROM monthly_plans
+		WHERE user_id = $1
+		ORDER BY plan_month DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	plans := []MonthlyPlanResponse{}
+	for rows.Next() {
+		var plan MonthlyPlanResponse
+		var recommendedDaysJSON []byte
+		var weeklyRoutineJSON []byte
+		if err := rows.Scan(
+			&plan.ID,
+			&plan.UserID,
+			&plan.PlanMonth,
+			&plan.PlanName,
+			&plan.Frequency,
+			&plan.Description,
+			&plan.Rationale,
+			&recommendedDaysJSON,
+			&weeklyRoutineJSON,
+		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(recommendedDaysJSON, &plan.RecommendedDays); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(weeklyRoutineJSON, &plan.WeeklyRoutine); err != nil {
+			return nil, err
+		}
+		plans = append(plans, plan)
+	}
+	return plans, rows.Err()
+}
+
+func (app *App) upsertMonthlyPlan(userID int, planMonth string, plan *MonthlyPlanResponse) error {
+	recommendedDaysJSON, err := json.Marshal(plan.RecommendedDays)
+	if err != nil {
+		return err
+	}
+	weeklyRoutineJSON, err := json.Marshal(plan.WeeklyRoutine)
+	if err != nil {
+		return err
+	}
+
+	return app.db.QueryRow(`
+		INSERT INTO monthly_plans (
+			user_id, plan_month, plan_name, frequency, description, rationale, recommended_days, weekly_routine
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
+		ON CONFLICT (user_id, plan_month) DO UPDATE SET
+			plan_name = EXCLUDED.plan_name,
+			frequency = EXCLUDED.frequency,
+			description = EXCLUDED.description,
+			rationale = EXCLUDED.rationale,
+			recommended_days = EXCLUDED.recommended_days,
+			weekly_routine = EXCLUDED.weekly_routine,
+			updated_at = CURRENT_TIMESTAMP
+		RETURNING id
+	`, userID, planMonth, plan.PlanName, plan.Frequency, plan.Description, plan.Rationale, string(recommendedDaysJSON), string(weeklyRoutineJSON)).Scan(&plan.ID)
+}
+
+func parseUserID(raw string) int {
+	userID, err := strconv.Atoi(raw)
+	if err != nil || userID == 0 {
+		return 1
+	}
+	return userID
+}
+
+func normalizePlanMonth(raw string) string {
+	if raw == "" {
+		return time.Now().Format("2006-01")
+	}
+	if _, err := time.Parse("2006-01", raw); err != nil {
+		return time.Now().Format("2006-01")
+	}
+	return raw
 }

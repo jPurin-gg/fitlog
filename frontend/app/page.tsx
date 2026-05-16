@@ -1,5 +1,6 @@
 "use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
 import Link from "next/link";
 import { 
@@ -25,31 +26,60 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { AlternativeCoachModal } from "@/components/AlternativeCoachModal";
 
+function getCurrentPlanMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
 export default function Home() {
   const [showMonthlyModal, setShowMonthlyModal] = React.useState(false);
   const [monthlyPlan, setMonthlyPlan] = React.useState<any>(null);
   const [dashboardData, setDashboardData] = React.useState<any>(null);
   const [altModalData, setAltModalData] = React.useState<{dayIdx: number, exIdx: number, exName: string} | null>(null);
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+  const currentMonth = getCurrentPlanMonth();
+
+  const saveMonthlyPlan = async (plan: any) => {
+    const planToSave = { ...plan, user_id: 1, plan_month: plan.plan_month || currentMonth };
+    setMonthlyPlan(planToSave);
+    try {
+      const res = await fetch(`${apiUrl}/api/monthly-plan`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(planToSave)
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setMonthlyPlan(saved);
+      }
+    } catch (e) {
+      console.error("Failed to save monthly plan:", e);
+    }
+  };
 
   React.useEffect(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
     fetch(`${apiUrl}/api/dashboard`)
       .then(res => res.json())
       .then(data => setDashboardData(data))
       .catch(console.error);
 
-    // Check if we need to show the monthly plan modal
-    const currentMonth = new Date().toISOString().slice(0, 7); // e.g. "2026-02"
-    const savedMonth = localStorage.getItem('lastPlanMonth');
-    const savedPlan = localStorage.getItem('currentMonthlyPlan');
-    
-    // Only show modal if no month is saved or if we are in a new month
-    if (!savedMonth || savedMonth !== currentMonth) {
-      setTimeout(() => setShowMonthlyModal(true), 1000); // slight delay for smooth UX
-    } else if (savedPlan) {
-      setMonthlyPlan(JSON.parse(savedPlan));
-    }
-  }, []);
+    fetch(`${apiUrl}/api/monthly-plan?user_id=1&month=${currentMonth}`)
+      .then(async res => {
+        if (res.status === 404) {
+          setTimeout(() => setShowMonthlyModal(true), 1000);
+          return null;
+        }
+        if (!res.ok) throw new Error(await res.text());
+        return res.json();
+      })
+      .then(data => {
+        if (data) setMonthlyPlan(data);
+      })
+      .catch(err => {
+        console.error("Failed to fetch monthly plan:", err);
+        setTimeout(() => setShowMonthlyModal(true), 1000);
+      });
+  }, [apiUrl, currentMonth]);
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white p-4 md:p-8 font-sans selection:bg-primary/30">
@@ -59,9 +89,6 @@ export default function Home() {
             onClose={() => setShowMonthlyModal(false)} 
             onPlanGenerated={(plan: any) => {
               setMonthlyPlan(plan);
-              const currentMonth = new Date().toISOString().slice(0, 7);
-              localStorage.setItem('lastPlanMonth', currentMonth);
-              localStorage.setItem('currentMonthlyPlan', JSON.stringify(plan));
               setShowMonthlyModal(false);
             }} 
           />
@@ -70,11 +97,11 @@ export default function Home() {
           <AlternativeCoachModal 
             exerciseName={altModalData.exName}
             onClose={() => setAltModalData(null)}
-            onReplace={(newExName: string) => {
+            onReplace={(newExercise: string | { id?: string; name?: string }) => {
+              const newExName = typeof newExercise === "string" ? newExercise : newExercise.name || altModalData.exName;
               const updatedPlan = { ...monthlyPlan };
               updatedPlan.weekly_routine[altModalData.dayIdx].example_exercises[altModalData.exIdx] = newExName;
-              setMonthlyPlan(updatedPlan);
-              localStorage.setItem('currentMonthlyPlan', JSON.stringify(updatedPlan));
+              saveMonthlyPlan(updatedPlan);
               setAltModalData(null);
             }}
           />
@@ -87,21 +114,21 @@ export default function Home() {
 
       <main className="max-w-7xl mx-auto relative z-10">
         {/* Header */}
-        <header className="flex justify-between items-center mb-12">
+        <header className="flex flex-col gap-5 sm:flex-row sm:justify-between sm:items-center mb-12">
           <div>
             <h1 className="text-4xl font-bold tracking-tight mb-1">
               Hey, <span className="text-gradient">Mitsuki</span> 👋
             </h1>
             <p className="text-white/50">Ready to crush your goals today?</p>
           </div>
-          <div className="flex gap-4">
+          <div className="flex flex-wrap gap-3 sm:gap-4 w-full sm:w-auto">
             <Link href="/calendar" className="p-3 glass rounded-2xl hover:bg-white/10 transition-colors block">
               <Calendar className="w-5 h-5 text-white/70" />
             </Link>
             <button className="p-3 glass rounded-2xl hover:bg-white/10 transition-colors">
               <Bell className="w-5 h-5 text-white/70" />
             </button>
-            <button className="px-6 py-3 bg-primary text-black font-bold rounded-2xl glow-primary hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2">
+            <button className="px-6 py-3 bg-primary text-black font-bold rounded-2xl glow-primary hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 flex-1 sm:flex-none justify-center">
               <Plus className="w-5 h-5" />
               <span>New Workout</span>
             </button>
@@ -121,7 +148,7 @@ export default function Home() {
                   <Flame className="w-6 h-6" />
                 </div>
                 <div>
-                  <h2 className="text-2xl font-bold tracking-tight">Today's Workout</h2>
+                  <h2 className="text-2xl font-bold tracking-tight">Today&apos;s Workout</h2>
                   <p className="text-white/50 text-sm font-medium">{new Date().toLocaleDateString('ja-JP', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
                 </div>
               </div>
@@ -140,17 +167,8 @@ export default function Home() {
                 }
 
                 const dayOfWeek = new Date().getDay();
-                const numDays = monthlyPlan.weekly_routine?.length || 3;
-                let days = [];
-                if (numDays === 1) days = [3];
-                else if (numDays === 2) days = [2, 5];
-                else if (numDays === 3) days = [1, 3, 5];
-                else if (numDays === 4) days = [1, 2, 4, 5];
-                else if (numDays === 5) days = [1, 2, 3, 5, 6];
-                else days = [1, 2, 3, 4, 5, 6];
-
-                // デバッグ用: 今日が必ず筋トレ日になるように強制設定しています（idxを0に固定）
-                let idx = 0; // days.indexOf(dayOfWeek);
+                const days = monthlyPlan.recommended_days || [1, 3, 5];
+                const idx = days.indexOf(dayOfWeek);
                 if (idx === -1) {
                   return (
                     <div className="bg-white/5 rounded-3xl p-8 text-center border border-white/10 relative overflow-hidden">
@@ -303,7 +321,12 @@ function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
       const res = await fetch(`${apiUrl}/api/monthly-plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ motivation, frequency })
+        body: JSON.stringify({
+          user_id: 1,
+          plan_month: getCurrentPlanMonth(),
+          motivation,
+          frequency
+        })
       });
       const data = await res.json();
       onPlanGenerated(data);

@@ -53,6 +53,22 @@ CREATE TABLE workout_sets (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 月間トレーニングプラン
+CREATE TABLE monthly_plans (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    plan_month TEXT NOT NULL, -- 例: 2026-05
+    plan_name TEXT NOT NULL,
+    frequency TEXT NOT NULL,
+    description TEXT,
+    rationale TEXT,
+    recommended_days JSONB NOT NULL DEFAULT '[]'::jsonb,
+    weekly_routine JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, plan_month)
+);
+
 -- 初期ユーザー作成
 INSERT INTO users (username) VALUES ('Mitsuki');
 
@@ -60,5 +76,4 @@ INSERT INTO users (username) VALUES ('Mitsuki');
 -- ※exercises(種目)のデータは、アプリ起動時にGoサーバーが tmpkin_jp.json を読み込んで自動的に挿入します。
 -- そのため、ここにはダミーデータは記述しません。
 -- ==========================================
-
 

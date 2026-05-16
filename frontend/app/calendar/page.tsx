@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { ArrowLeft, Calendar as CalendarIcon, Dumbbell, Sparkles, Check } from "lucide-react";
+import { ArrowLeft, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Dumbbell, Sparkles, Check } from "lucide-react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 
@@ -12,6 +12,9 @@ interface DayRoutine {
 }
 
 interface MonthlyPlan {
+  id?: number;
+  user_id?: number;
+  plan_month?: string;
   plan_name: string;
   frequency: string;
   description: string;
@@ -25,44 +28,79 @@ interface WorkedOutDay {
   type: string;
 }
 
+function getCurrentPlanMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function formatPlanMonth(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function dateFromPlanMonth(planMonth: string) {
+  const [year, month] = planMonth.split("-").map(Number);
+  return new Date(year, (month || 1) - 1, 1);
+}
 
 export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [plan, setPlan] = useState<MonthlyPlan | null>(null);
+  const [planHistory, setPlanHistory] = useState<MonthlyPlan[]>([]);
   const [plannedWeekDays, setPlannedWeekDays] = useState<number[]>([]);
   const [workedOutDates, setWorkedOutDates] = useState<number[]>([]);
   const [workedOutDays, setWorkedOutDays] = useState<WorkedOutDay[]>([]);
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+  const selectedPlanMonth = formatPlanMonth(currentDate);
 
   useEffect(() => {
-    // Load plan
-    const savedPlan = localStorage.getItem('currentMonthlyPlan');
-    let generatedPlanDays: number[] = [];
-    if (savedPlan) {
-      const p = JSON.parse(savedPlan);
-      setPlan(p);
-      
-      const days = p.recommended_days || [1, 3, 5];
-      setPlannedWeekDays(days);
-      generatedPlanDays = days;
-    }
+    fetch(`${apiUrl}/api/monthly-plans?user_id=1`)
+      .then(res => {
+        if (!res.ok) throw new Error("Failed to fetch monthly plan history");
+        return res.json();
+      })
+      .then(data => setPlanHistory(Array.isArray(data) ? data : []))
+      .catch(err => console.error("Failed to fetch monthly plan history:", err));
+  }, [apiUrl]);
+
+  useEffect(() => {
+    fetch(`${apiUrl}/api/monthly-plan?user_id=1&month=${selectedPlanMonth}`)
+      .then(res => {
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error("Failed to fetch monthly plan");
+        return res.json();
+      })
+      .then(data => {
+        if (!data) {
+          setPlan(null);
+          setPlannedWeekDays([]);
+          return;
+        }
+        setPlan(data);
+        setPlannedWeekDays(data.recommended_days || [1, 3, 5]);
+      })
+      .catch(err => console.error("Failed to fetch monthly plan:", err));
+
     // Fetch worked out dates from the DB
-    const today = new Date();
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
-    fetch(`${apiUrl}/api/calendar?year=${today.getFullYear()}&month=${today.getMonth() + 1}`)
+    fetch(`${apiUrl}/api/calendar?year=${currentDate.getFullYear()}&month=${currentDate.getMonth() + 1}`)
       .then(res => res.json())
       .then(data => {
         if (data && data.worked_out_dates) {
           setWorkedOutDates(data.worked_out_dates);
+        } else {
+          setWorkedOutDates([]);
         }
         if (data && data.worked_out_days) {
           setWorkedOutDays(data.worked_out_days);
+        } else {
+          setWorkedOutDays([]);
         }
       })
       .catch(err => console.error("Failed to fetch calendar data:", err));
-  }, []);
+  }, [apiUrl, currentDate, selectedPlanMonth]);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
+  const isSelectedCurrentMonth = selectedPlanMonth === getCurrentPlanMonth();
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDayOfMonth = new Date(year, month, 1).getDay(); // 0 is Sun, 1 is Mon...
@@ -106,11 +144,14 @@ export default function CalendarPage() {
       isWorkedOut, 
       type,
       plannedTarget,
-      isPlanned: isPlanned && !isWorkedOut && dateObj >= new Date(today.getFullYear(), today.getMonth(), today.getDate()) 
+      isPlanned: isPlanned && !isWorkedOut && (!isCurrentMonth || dateObj >= new Date(today.getFullYear(), today.getMonth(), today.getDate())) 
     };
   };
 
   const weekDayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const moveMonth = (offset: number) => {
+    setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
+  };
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white p-4 md:p-8 font-sans selection:bg-primary/30">
@@ -118,7 +159,7 @@ export default function CalendarPage() {
       <div className="fixed bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-secondary/10 blur-[120px] rounded-full pointer-events-none" />
 
       <main className="max-w-5xl mx-auto relative z-10">
-        <header className="flex items-center justify-between mb-10">
+        <header className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between mb-10">
           <div className="flex items-center gap-4">
             <Link href="/" className="p-3 glass rounded-2xl hover:bg-white/10 transition-colors">
               <ArrowLeft className="w-5 h-5" />
@@ -128,18 +169,40 @@ export default function CalendarPage() {
               <p className="text-white/50">Your monthly workout plan</p>
             </div>
           </div>
+          <button
+            onClick={() => setCurrentDate(new Date())}
+            className="self-start sm:self-auto px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-xs font-bold text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            今月へ戻る
+          </button>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
             <div className="glass rounded-[32px] p-6 lg:p-8">
-              <div className="flex justify-between items-center mb-8">
-                <h2 className="text-2xl font-black uppercase tracking-widest text-primary flex items-center gap-3">
-                  <CalendarIcon className="w-6 h-6" />
-                  {currentDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
-                </h2>
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between mb-8">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => moveMonth(-1)}
+                    className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+                    aria-label="前の月"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <h2 className="text-xl md:text-2xl font-black uppercase tracking-widest text-primary flex items-center gap-3">
+                    <CalendarIcon className="w-5 h-5 md:w-6 md:h-6" />
+                    {currentDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
+                  </h2>
+                  <button
+                    onClick={() => moveMonth(1)}
+                    className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+                    aria-label="次の月"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                </div>
                 
-                <div className="flex gap-4 text-[10px] md:text-xs font-bold text-white/60">
+                <div className="flex flex-wrap gap-4 text-[10px] md:text-xs font-bold text-white/60">
                   <div className="flex items-center gap-1 md:gap-2">
                     <div className="w-2 h-2 md:w-3 md:h-3 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]"></div>
                     Done
@@ -233,15 +296,60 @@ export default function CalendarPage() {
           </div>
 
           <div className="space-y-6">
+            <div className="glass rounded-[32px] p-6 lg:p-8">
+              <div className="flex items-center justify-between gap-3 mb-5">
+                <div>
+                  <h2 className="text-lg font-bold tracking-tight">Plan History</h2>
+                  <p className="text-xs text-white/40">過去月のプランを閲覧</p>
+                </div>
+                <span className="text-[10px] font-black text-white/30 bg-white/5 px-2 py-1 rounded-md">
+                  {planHistory.length}
+                </span>
+              </div>
+
+              {planHistory.length > 0 ? (
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {planHistory.map(historyPlan => {
+                    const active = historyPlan.plan_month === selectedPlanMonth;
+                    return (
+                      <button
+                        key={historyPlan.id || historyPlan.plan_month}
+                        onClick={() => historyPlan.plan_month && setCurrentDate(dateFromPlanMonth(historyPlan.plan_month))}
+                        className={`w-full text-left p-3 rounded-2xl border transition-all ${
+                          active
+                            ? "bg-primary/20 border-primary/40 text-white"
+                            : "bg-white/5 border-white/5 text-white/60 hover:bg-white/10 hover:text-white"
+                        }`}
+                      >
+                        <div className="flex justify-between items-start gap-3">
+                          <div>
+                            <div className="text-xs font-black text-primary mb-1">{historyPlan.plan_month}</div>
+                            <div className="text-sm font-bold leading-tight">{historyPlan.plan_name}</div>
+                          </div>
+                          {historyPlan.plan_month === getCurrentPlanMonth() && (
+                            <span className="text-[9px] font-black text-black bg-primary px-2 py-0.5 rounded-full">NOW</span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-white/40 text-sm leading-relaxed">
+                  まだ保存済みの月間プランがありません。ホームで今月のプランを作成すると、ここに履歴として残ります。
+                </p>
+              )}
+            </div>
+
             <div className="glass rounded-[32px] p-6 lg:p-8 border-l-4 border-primary">
               <div className="flex items-center gap-2 text-primary font-bold mb-4 uppercase text-sm tracking-widest">
-                <Sparkles className="w-5 h-5" /> Active Routine
+                <Sparkles className="w-5 h-5" /> {isSelectedCurrentMonth ? "Active Routine" : "Archived Routine"}
               </div>
               {plan ? (
                 <div>
                   <h3 className="text-xl font-bold mb-2 tracking-tight">{plan.plan_name}</h3>
                   <div className="px-3 py-1 glass bg-white/5 rounded-lg inline-block text-xs font-bold text-white/70 mb-6">
-                    {plan.frequency}
+                    {plan.plan_month || selectedPlanMonth} / {plan.frequency}
                   </div>
                   
                   <div className="space-y-3">
@@ -264,7 +372,10 @@ export default function CalendarPage() {
                   </div>
                 </div>
               ) : (
-                <p className="text-white/40 text-sm">プランがまだ生成されていません。<br/>ホームに戻って生成してください。</p>
+                <p className="text-white/40 text-sm">
+                  {selectedPlanMonth} のプランはまだありません。<br/>
+                  今月分はホームから生成できます。
+                </p>
               )}
             </div>
             

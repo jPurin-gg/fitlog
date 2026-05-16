@@ -38,9 +38,9 @@ fitlog/
 │       └── AlternativeCoachModal.tsx # AI代替種目提案モーダル
 ├── backend/                  # Go サーバー
 │   ├── main.go               # エントリポイント・ルーティング
-│   ├── db.go                 # DB接続
+│   ├── db.go                 # DB接続・追加スキーマ作成
 │   ├── seed.go               # 初回 DB シーディング
-│   ├── handlers.go           # /api/recommend
+│   ├── handlers.go           # /api/recommend, /api/monthly-plan
 │   ├── api_exercises.go      # /api/exercises, /api/exercises/target_sets
 │   ├── api_custom_exercise.go# /api/exercises/custom
 │   ├── api_extra.go          # /api/dashboard, /api/calendar, /api/alternative
@@ -117,6 +117,23 @@ fitlog/
 | feeling   | TEXT       | 感想（例: 余裕あり、限界）  |
 | is_pr     | BOOLEAN DEFAULT FALSE | 自己ベスト更新フラグ |
 | created_at| TIMESTAMPTZ|                          |
+
+### `monthly_plans`（月間トレーニングプラン）
+| カラム           | 型                        | 説明                          |
+|----------------|--------------------------|------------------------------|
+| id             | SERIAL PK                 |                              |
+| user_id        | INTEGER FK                | 現在は固定ユーザー `1`        |
+| plan_month     | TEXT NOT NULL             | 対象月。例: `2026-05`         |
+| plan_name      | TEXT NOT NULL             | プラン名                      |
+| frequency      | TEXT NOT NULL             | 推奨頻度                      |
+| description    | TEXT                      | プラン説明                    |
+| rationale      | TEXT                      | 選定理由                      |
+| recommended_days | JSONB NOT NULL          | 推奨曜日。日曜=0、月曜=1      |
+| weekly_routine | JSONB NOT NULL            | 曜日ごとの部位・種目リスト    |
+| created_at     | TIMESTAMPTZ DEFAULT NOW() |                              |
+| updated_at     | TIMESTAMPTZ DEFAULT NOW() |                              |
+
+> `UNIQUE (user_id, plan_month)`。月間プランは削除せず、月ごとに履歴として保持する。既存DBではバックエンド起動時に `CREATE TABLE IF NOT EXISTS` で作成される。
 
 ---
 
@@ -208,6 +225,100 @@ fitlog/
 
 ---
 
+### `GET /api/monthly-plan`
+指定月の月間トレーニングプランを取得する。ホーム画面とカレンダー画面で使用する。
+
+| クエリパラメータ | 説明                         |
+|-------------|-----------------------------|
+| user_id     | ユーザーID（省略時: `1`）      |
+| month       | 対象月 `YYYY-MM`（省略時: 今月）|
+
+**レスポンス**
+```json
+{
+  "id": 1,
+  "user_id": 1,
+  "plan_month": "2026-05",
+  "plan_name": "PPL法 (Push/Pull/Legs)",
+  "frequency": "週3〜4回",
+  "description": "押す筋肉、引く筋肉、脚の3グループに分けて鍛える...",
+  "rationale": "バランス良く全身を鍛えつつ...",
+  "recommended_days": [1, 3, 5],
+  "weekly_routine": [
+    {
+      "day_name": "Day 1",
+      "target": "Push (胸・肩・三頭)",
+      "example_exercises": ["ベンチプレス", "ショルダープレス", "ディップス"]
+    }
+  ]
+}
+```
+
+> プランが未作成の場合は `404` と `{ "message": "monthly plan not found" }` を返す。フロントエンドはこの場合に月間プラン生成モーダルを表示する。
+
+### `GET /api/monthly-plans`
+保存済みの月間プラン履歴を取得する。カレンダー画面の過去月プラン閲覧UIで使用する。
+
+| クエリパラメータ | 説明                    |
+|-------------|------------------------|
+| user_id     | ユーザーID（省略時: `1`） |
+
+**レスポンス**
+```json
+[
+  {
+    "id": 1,
+    "user_id": 1,
+    "plan_month": "2026-05",
+    "plan_name": "PPL法 (Push/Pull/Legs)",
+    "frequency": "週3〜4回",
+    "description": "...",
+    "rationale": "...",
+    "recommended_days": [1, 3, 5],
+    "weekly_routine": [...]
+  }
+]
+```
+
+> `plan_month` の降順で返す。履歴がない場合は空配列 `[]`。
+
+### `POST /api/monthly-plan`
+モチベーションと頻度から月間プランを生成し、DBに保存する。既に同じ `user_id + plan_month` のプランがある場合は更新する。
+
+**リクエスト**
+```json
+{
+  "user_id": 1,
+  "plan_month": "2026-05",
+  "motivation": "健康維持",
+  "frequency": "週3-4回"
+}
+```
+
+**処理フロー**
+1. `motivation` と `frequency` からルールベースでプランを生成
+2. `monthly_plans` に UPSERT
+3. 保存後のプランを返す
+
+### `PUT /api/monthly-plan`
+既存の月間プランを保存する。ホーム画面でAI代替種目を選び、当月プラン内の種目が置き換わった場合などに使用する。
+
+**リクエスト**
+```json
+{
+  "user_id": 1,
+  "plan_month": "2026-05",
+  "plan_name": "PPL法 (Push/Pull/Legs)",
+  "frequency": "週3〜4回",
+  "description": "...",
+  "rationale": "...",
+  "recommended_days": [1, 3, 5],
+  "weekly_routine": [...]
+}
+```
+
+---
+
 ### `POST /api/alternative`
 現在の種目の代替種目を AI が提案する。
 
@@ -286,6 +397,11 @@ AI 呼び出しが失敗した場合（APIキー未設定、レート制限等�
 
 ### ホーム（`/`）
 - 今日のワークアウト概要
+- 当月の月間プランを `/api/monthly-plan` から取得
+- 当月プランが未作成の場合、月間プラン生成モーダルを表示
+- 今日が `recommended_days` に含まれる場合、その曜日に対応するメニューを表示
+- 今日が推奨日でない場合は Rest Day 表示
+- ホーム上で代替種目を選んだ場合、`PUT /api/monthly-plan` で当月プランに保存
 - 過去7日間のセット数グラフ
 - 最近のワークアウト履歴3件
 
@@ -310,6 +426,11 @@ AI 呼び出しが失敗した場合（APIキー未設定、レート制限等�
 ### カレンダー（`/calendar`）
 - 月次カレンダー
 - ワークアウト実施日にドット表示
+- 当月の `monthly_plans.recommended_days` を予定日として表示
+- `weekly_routine` の `target` を予定日のラベルとして表示
+- 前月 / 翌月ボタンで表示月を移動
+- `GET /api/monthly-plans` で保存済みプラン履歴を表示
+- 履歴の月を選ぶと、その月のプランとワークアウト実施日を閲覧できる
 
 ### 共通コンポーネント
 
@@ -370,6 +491,9 @@ docker logs --tail 50 myfitlog-backend
 - CORS: `FRONTEND_URL` で指定したオリジンのみ許可
 - API キー: コンテナの環境変数で注入（ソースコードに直書きなし）
 - 入力バリデーション: 必須フィールドのみサーバー側で検証、任意フィールドは NULL 保存
+- `.env` / `.env.*` / `docker/env/` は `.gitignore` で除外し、`.env.example` / `*.env.example` のみサンプルとしてコミット可能
+- `AGENTS.md` にAIエージェント利用時の安全ルールを記載。DBボリューム削除、`docker compose down -v`、`git reset --hard`、`git push --force`、本番環境操作などは明示確認必須
+- 月間プランはDBに保持するが、APIキーや機密情報は含めない
 
 ---
 
@@ -381,6 +505,7 @@ docker logs --tail 50 myfitlog-backend
 | `stats` (カロリー等)  | ホーム画面はモックデータ                    | 実記録から計算                           |
 | 種目検索              | クライアント側フィルタ（全件取得後）         | サーバー側全文検索（pgベクトル等）        |
 | workout 終了         | `ended_at` が常に NULL（終了ボタンなし）   | 「ワークアウト終了」ボタンの実装          |
+| 月間プラン再利用       | 過去月の閲覧は可能。再利用・複製は未実装           | 先月プランを今月にコピーして編集           |
 | AI プロンプト         | バックエンドにハードコード                  | 管理画面または設定ファイルで変更可能にする |
 | PWA / モバイル対応    | ブラウザのみ                               | manifest.json / Service Worker 追加    |
 

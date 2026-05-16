@@ -2,6 +2,9 @@ docker/env/
 frontend/node_modules/
 backend/fitlog
 .env
+.env.*
+!.env.example
+!*.env.example
 
 # 開発・移行用の不要ファイル群（other/ フォルダ）
 other/

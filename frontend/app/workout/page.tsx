@@ -1,5 +1,6 @@
 "use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
 import { 
   Flame, 
@@ -19,6 +20,7 @@ import { ExerciseSelectorModal } from "@/components/ExerciseSelectorModal";
 export default function WorkoutPage() {
   const [loading, setLoading] = React.useState(false);
   const [recommendation, setRecommendation] = React.useState<any>(null);
+  const [aiError, setAiError] = React.useState<string | null>(null);
   const [currentSet, setCurrentSet] = React.useState(1);
   const [formData, setFormData] = React.useState({ weight: '', reps: '', feeling: '' });
   const [workoutStarted, setWorkoutStarted] = React.useState(false);
@@ -68,8 +70,8 @@ export default function WorkoutPage() {
   const getRecommendation = async () => {
     if (!formData.weight || !formData.reps) return;
     setLoading(true);
+    setAiError(null);
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
       const res = await fetch(`${apiUrl}/api/recommend`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -82,18 +84,16 @@ export default function WorkoutPage() {
           feeling: formData.feeling
         })
       });
+      if (!res.ok) {
+        const msg = await res.text();
+        setAiError(msg || 'AIの呼び出しに失敗しました。');
+        return;
+      }
       const data = await res.json();
       setRecommendation(data);
     } catch (e) {
       console.error(e);
-      // Fallback
-      setRecommendation({
-        next_action: "CONTINUE",
-        recommendation: "素晴らしい！次のセットも維持しましょう。",
-        target_weight: formData.weight,
-        target_reps: formData.reps,
-        reason: "安定した出力が維持されています。"
-      });
+      setAiError('ネットワークエラーが発生しました。バックエンドに接続できません。');
     } finally {
       setLoading(false);
     }
@@ -102,7 +102,8 @@ export default function WorkoutPage() {
   const handleNextSet = () => {
     setCurrentSet(prev => prev + 1);
     setRecommendation(null);
-    setFormData({ ...formData, feeling: '' }); // Reset only feeling
+    setAiError(null);
+    setFormData({ ...formData, feeling: '' });
   };
 
   if (!workoutStarted) {
@@ -278,6 +279,23 @@ export default function WorkoutPage() {
                   {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : "Set Completed - Analyze"}
                 </button>
               )}
+
+              {/* AI エラー表示 */}
+              {aiError && !recommendation && (
+                <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-start gap-3">
+                  <Flame className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-red-400 font-bold text-sm">AI の呼び出しに失敗しました</p>
+                    <p className="text-red-300/70 text-xs mt-1">{aiError}</p>
+                    <button
+                      onClick={getRecommendation}
+                      className="mt-3 text-xs text-red-400 hover:text-red-300 underline transition-colors"
+                    >
+                      もう一度試す
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* AI Result Area - Only shows when recommendation exists */}
@@ -318,7 +336,7 @@ export default function WorkoutPage() {
                     )}
                     <div className="pt-4 border-t border-white/5 flex justify-between items-end">
                       <div>
-                        <p className="text-[10px] text-white/30 uppercase font-black mb-1">Coach's Rationale</p>
+                        <p className="text-[10px] text-white/30 uppercase font-black mb-1">Coach&apos;s Rationale</p>
                         <p className="text-xs text-white/50 italic">{recommendation.reason}</p>
                       </div>
                       <div className="text-right">

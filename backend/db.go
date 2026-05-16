@@ -40,3 +40,23 @@ func initDB() *sql.DB {
 	log.Fatalf("Failed to connect to database after %d attempts: %v", maxRetries, err)
 	return nil
 }
+
+func ensureSchema(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS monthly_plans (
+			id SERIAL PRIMARY KEY,
+			user_id INTEGER REFERENCES users(id),
+			plan_month TEXT NOT NULL,
+			plan_name TEXT NOT NULL,
+			frequency TEXT NOT NULL,
+			description TEXT,
+			rationale TEXT,
+			recommended_days JSONB NOT NULL DEFAULT '[]'::jsonb,
+			weekly_routine JSONB NOT NULL DEFAULT '[]'::jsonb,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (user_id, plan_month)
+		);
+	`)
+	return err
+}
