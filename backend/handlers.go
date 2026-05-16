@@ -29,6 +29,48 @@ type RecommendResponse struct {
 	MaxWeight      float64 `json:"max_weight"` // 参考用の過去最大重量
 }
 
+type StartWorkoutPlanRequest struct {
+	UserID int `json:"user_id"`
+}
+
+type FinishWorkoutRequest struct {
+	UserID    int `json:"user_id"`
+	WorkoutID int `json:"workout_id"`
+}
+
+type WorkoutPlanExercise struct {
+	ExerciseID    string  `json:"exercise_id"`
+	Name          string  `json:"name"`
+	PlannedSets   int     `json:"planned_sets"`
+	TargetWeight  float64 `json:"target_weight"`
+	TargetReps    int     `json:"target_reps"`
+	LastMaxWeight float64 `json:"last_max_weight"`
+}
+
+type WorkoutPlanPayload struct {
+	WorkoutTitle         string                `json:"workout_title"`
+	Target               string                `json:"target"`
+	EstimatedDurationMin int                   `json:"estimated_duration_min"`
+	CoachNote            string                `json:"coach_note"`
+	Exercises            []WorkoutPlanExercise `json:"exercises"`
+}
+
+type WorkoutPlanSessionResponse struct {
+	ID        int                `json:"id"`
+	WorkoutID int                `json:"workout_id"`
+	UserID    int                `json:"user_id"`
+	PlanDate  string             `json:"plan_date"`
+	Status    string             `json:"status"`
+	Plan      WorkoutPlanPayload `json:"plan"`
+}
+
+type FinishWorkoutResponse struct {
+	WorkoutID int    `json:"workout_id"`
+	StartedAt string `json:"started_at"`
+	EndedAt   string `json:"ended_at"`
+	Status    string `json:"status"`
+}
+
 func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -156,6 +198,391 @@ func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (app *App) handleStartWorkoutPlan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req StartWorkoutPlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
+		http.Error(w, "Invalid request format", http.StatusBadRequest)
+		return
+	}
+	userID := req.UserID
+	if userID == 0 {
+		userID = 1
+	}
+
+	if err := app.closeStaleWorkouts(userID); err != nil {
+		log.Printf("Failed to close stale workouts: %v", err)
+	}
+
+	if plan, ok, err := app.loadActiveWorkoutPlan(userID); err != nil {
+		log.Printf("Failed to load active workout plan: %v", err)
+		http.Error(w, "Failed to load active workout plan", http.StatusInternalServerError)
+		return
+	} else if ok {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(plan)
+		return
+	}
+
+	payload, err := app.buildTodayWorkoutPlan(userID)
+	if err != nil {
+		log.Printf("Failed to build workout plan: %v", err)
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+
+	workoutID, err := app.getOrCreateTodayWorkout(userID)
+	if err != nil {
+		log.Printf("Failed to start workout: %v", err)
+		http.Error(w, "Failed to start workout", http.StatusInternalServerError)
+		return
+	}
+
+	planJSON, err := json.Marshal(payload)
+	if err != nil {
+		http.Error(w, "Failed to serialize workout plan", http.StatusInternalServerError)
+		return
+	}
+
+	var resp WorkoutPlanSessionResponse
+	err = app.db.QueryRow(`
+		INSERT INTO workout_plans (workout_id, user_id, plan_date, title, estimated_duration_min, status, plan)
+		VALUES ($1, $2, CURRENT_DATE, $3, $4, 'active', $5::jsonb)
+		ON CONFLICT (user_id, plan_date, status) DO UPDATE SET
+			workout_id = EXCLUDED.workout_id,
+			title = EXCLUDED.title,
+			estimated_duration_min = EXCLUDED.estimated_duration_min,
+			plan = EXCLUDED.plan,
+			updated_at = CURRENT_TIMESTAMP
+		RETURNING id, workout_id, user_id, plan_date::text, status, plan
+	`, workoutID, userID, payload.WorkoutTitle, payload.EstimatedDurationMin, string(planJSON)).Scan(
+		&resp.ID,
+		&resp.WorkoutID,
+		&resp.UserID,
+		&resp.PlanDate,
+		&resp.Status,
+		&planJSON,
+	)
+	if err != nil {
+		log.Printf("Failed to save workout plan: %v", err)
+		http.Error(w, "Failed to save workout plan", http.StatusInternalServerError)
+		return
+	}
+	if err := json.Unmarshal(planJSON, &resp.Plan); err != nil {
+		http.Error(w, "Failed to parse saved workout plan", http.StatusInternalServerError)
+		return
+	}
+
+	_, _ = app.db.Exec("UPDATE workouts SET notes = $1 WHERE id = $2", payload.WorkoutTitle, workoutID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (app *App) handleFinishWorkout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req FinishWorkoutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
+		http.Error(w, "Invalid request format", http.StatusBadRequest)
+		return
+	}
+	userID := req.UserID
+	if userID == 0 {
+		userID = 1
+	}
+
+	var resp FinishWorkoutResponse
+	var err error
+	if req.WorkoutID > 0 {
+		err = app.db.QueryRow(`
+			UPDATE workouts
+			SET ended_at = COALESCE(
+				(SELECT MAX(created_at) FROM workout_sets WHERE workout_id = workouts.id),
+				CURRENT_TIMESTAMP
+			)
+			WHERE id = $1 AND user_id = $2 AND ended_at IS NULL
+			RETURNING id, started_at::text, ended_at::text
+		`, req.WorkoutID, userID).Scan(&resp.WorkoutID, &resp.StartedAt, &resp.EndedAt)
+	} else {
+		err = app.db.QueryRow(`
+			UPDATE workouts
+			SET ended_at = COALESCE(
+				(SELECT MAX(created_at) FROM workout_sets WHERE workout_id = workouts.id),
+				CURRENT_TIMESTAMP
+			)
+			WHERE id = (
+				SELECT id FROM workouts
+				WHERE user_id = $1 AND ended_at IS NULL
+				ORDER BY started_at DESC
+				LIMIT 1
+			)
+			RETURNING id, started_at::text, ended_at::text
+		`, userID).Scan(&resp.WorkoutID, &resp.StartedAt, &resp.EndedAt)
+	}
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Active workout not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Failed to finish workout: %v", err)
+		http.Error(w, "Failed to finish workout", http.StatusInternalServerError)
+		return
+	}
+
+	_, _ = app.db.Exec(`
+		UPDATE workout_plans
+		SET status = 'completed', updated_at = CURRENT_TIMESTAMP
+		WHERE workout_id = $1 AND user_id = $2 AND status = 'active'
+	`, resp.WorkoutID, userID)
+	resp.Status = "completed"
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (app *App) closeStaleWorkouts(userID int) error {
+	_, err := app.db.Exec(`
+		UPDATE workouts
+		SET ended_at = COALESCE(
+			(SELECT MAX(created_at) FROM workout_sets WHERE workout_id = workouts.id),
+			started_at
+		)
+		WHERE user_id = $1 AND ended_at IS NULL AND DATE(started_at) < CURRENT_DATE
+	`, userID)
+	if err != nil {
+		return err
+	}
+	_, err = app.db.Exec(`
+		UPDATE workout_plans
+		SET status = 'abandoned', updated_at = CURRENT_TIMESTAMP
+		WHERE user_id = $1 AND status = 'active' AND plan_date < CURRENT_DATE
+	`, userID)
+	return err
+}
+
+func (app *App) getOrCreateTodayWorkout(userID int) (int, error) {
+	var workoutID int
+	err := app.db.QueryRow(`
+		SELECT id FROM workouts
+		WHERE user_id = $1 AND ended_at IS NULL AND DATE(started_at) = CURRENT_DATE
+		ORDER BY started_at DESC
+		LIMIT 1
+	`, userID).Scan(&workoutID)
+	if err == nil {
+		return workoutID, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, err
+	}
+	err = app.db.QueryRow("INSERT INTO workouts (user_id) VALUES ($1) RETURNING id", userID).Scan(&workoutID)
+	return workoutID, err
+}
+
+func (app *App) loadActiveWorkoutPlan(userID int) (WorkoutPlanSessionResponse, bool, error) {
+	var resp WorkoutPlanSessionResponse
+	var planJSON []byte
+	err := app.db.QueryRow(`
+		SELECT id, workout_id, user_id, plan_date::text, status, plan
+		FROM workout_plans
+		WHERE user_id = $1 AND plan_date = CURRENT_DATE AND status = 'active'
+		ORDER BY updated_at DESC
+		LIMIT 1
+	`, userID).Scan(&resp.ID, &resp.WorkoutID, &resp.UserID, &resp.PlanDate, &resp.Status, &planJSON)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return WorkoutPlanSessionResponse{}, false, nil
+		}
+		return WorkoutPlanSessionResponse{}, false, err
+	}
+	if err := json.Unmarshal(planJSON, &resp.Plan); err != nil {
+		return WorkoutPlanSessionResponse{}, false, err
+	}
+	return resp, true, nil
+}
+
+func (app *App) buildTodayWorkoutPlan(userID int) (WorkoutPlanPayload, error) {
+	today := time.Now()
+	monthly, ok, err := app.loadMonthlyPlan(userID, today.Format("2006-01"))
+	if err != nil {
+		return WorkoutPlanPayload{}, err
+	}
+	if !ok || len(monthly.WeeklyRoutine) == 0 {
+		return WorkoutPlanPayload{}, fmt.Errorf("今月の月間プランがまだありません。先にホームで月間プランを作成してください。")
+	}
+
+	weekday := int(today.Weekday())
+	idx := -1
+	for i, d := range monthly.RecommendedDays {
+		if d == weekday {
+			idx = i
+			break
+		}
+	}
+	routine := monthly.WeeklyRoutine[0]
+	coachNote := "今日は月間プラン上は休息日ですが、実施する場合に備えてAIが軽めに調整します。"
+	if idx >= 0 && idx < len(monthly.WeeklyRoutine) {
+		routine = monthly.WeeklyRoutine[idx]
+		coachNote = "月間プランの今日のメニューをもとに、直近の重量と目標セット数を反映します。"
+	}
+
+	exercises := []WorkoutPlanExercise{}
+	for _, name := range routine.ExampleExercises {
+		exerciseID, displayName, err := app.findExerciseByName(name)
+		if err != nil {
+			log.Printf("Exercise lookup failed for %q: %v", name, err)
+			continue
+		}
+		stats := app.loadExercisePlanStats(userID, exerciseID)
+		exercises = append(exercises, WorkoutPlanExercise{
+			ExerciseID:    exerciseID,
+			Name:          displayName,
+			PlannedSets:   stats.TargetSets,
+			TargetWeight:  stats.TargetWeight,
+			TargetReps:    stats.TargetReps,
+			LastMaxWeight: stats.MaxWeight,
+		})
+	}
+	if len(exercises) == 0 {
+		return WorkoutPlanPayload{}, fmt.Errorf("月間プラン内の種目を辞書から見つけられませんでした。")
+	}
+
+	estimated := len(exercises) * 12
+	if estimated < 30 {
+		estimated = 30
+	}
+	payload := WorkoutPlanPayload{
+		WorkoutTitle:         routine.Target,
+		Target:               routine.Target,
+		EstimatedDurationMin: estimated,
+		CoachNote:            coachNote,
+		Exercises:            exercises,
+	}
+	return refineWorkoutPlanWithAI(payload)
+}
+
+func refineWorkoutPlanWithAI(base WorkoutPlanPayload) (WorkoutPlanPayload, error) {
+	baseJSON, err := json.Marshal(base)
+	if err != nil {
+		return WorkoutPlanPayload{}, err
+	}
+
+	systemPrompt := `あなたは安全重視の筋トレAIコーチです。
+ユーザーの今日のワークアウト計画をJSONで微調整してください。
+以下の制約を守ってください:
+- 返答はJSONのみ
+- exercise_id と name は入力された候補から変更しない
+- planned_sets は1〜6の整数
+- target_weight と target_reps は無理のない範囲にする
+- 疲労や痛みが出たら短縮できる前提の coach_note にする`
+
+	userPrompt := fmt.Sprintf(`以下のベース計画を、今日実施しやすいワークアウト計画に調整してください。
+同じJSON構造で返してください。
+
+%s`, string(baseJSON))
+
+	aiJSON, err := callAI(systemPrompt, userPrompt, true)
+	if err != nil {
+		return WorkoutPlanPayload{}, fmt.Errorf("AIによる今日の計画作成に失敗しました。APIキーや接続状況を確認してください。")
+	}
+
+	aiStr := strings.TrimSpace(aiJSON)
+	if strings.HasPrefix(aiStr, "```json") {
+		aiStr = strings.TrimPrefix(aiStr, "```json")
+		aiStr = strings.TrimSuffix(strings.TrimSpace(aiStr), "```")
+	}
+
+	var refined WorkoutPlanPayload
+	if err := json.Unmarshal([]byte(aiStr), &refined); err != nil {
+		return WorkoutPlanPayload{}, fmt.Errorf("AIの計画レスポンスを解析できませんでした。もう一度お試しください。")
+	}
+	if len(refined.Exercises) != len(base.Exercises) || refined.WorkoutTitle == "" {
+		return WorkoutPlanPayload{}, fmt.Errorf("AIの計画レスポンスが不正でした。もう一度お試しください。")
+	}
+	for i := range refined.Exercises {
+		refined.Exercises[i].ExerciseID = base.Exercises[i].ExerciseID
+		refined.Exercises[i].Name = base.Exercises[i].Name
+		refined.Exercises[i].LastMaxWeight = base.Exercises[i].LastMaxWeight
+		if refined.Exercises[i].PlannedSets < 1 {
+			refined.Exercises[i].PlannedSets = base.Exercises[i].PlannedSets
+		}
+		if refined.Exercises[i].PlannedSets > 6 {
+			refined.Exercises[i].PlannedSets = 6
+		}
+		if refined.Exercises[i].TargetWeight <= 0 {
+			refined.Exercises[i].TargetWeight = base.Exercises[i].TargetWeight
+		}
+		if refined.Exercises[i].TargetReps <= 0 {
+			refined.Exercises[i].TargetReps = base.Exercises[i].TargetReps
+		}
+	}
+	if refined.EstimatedDurationMin <= 0 {
+		refined.EstimatedDurationMin = base.EstimatedDurationMin
+	}
+	if refined.CoachNote == "" {
+		refined.CoachNote = base.CoachNote
+	}
+	return refined, nil
+}
+
+type exercisePlanStats struct {
+	TargetSets   int
+	TargetWeight float64
+	TargetReps   int
+	MaxWeight    float64
+}
+
+func (app *App) loadExercisePlanStats(userID int, exerciseID string) exercisePlanStats {
+	stats := exercisePlanStats{TargetSets: 3, TargetWeight: 20, TargetReps: 10}
+	_ = app.db.QueryRow(`
+		SELECT COALESCE(weight, 0), COALESCE(max_weight, 0), COALESCE(target_sets, 3)
+		FROM user_exercise_stats
+		WHERE user_id = $1 AND exercise_id = $2
+	`, userID, exerciseID).Scan(&stats.TargetWeight, &stats.MaxWeight, &stats.TargetSets)
+	if stats.TargetWeight == 0 && stats.MaxWeight > 0 {
+		stats.TargetWeight = stats.MaxWeight * 0.8
+	}
+	if stats.TargetWeight == 0 {
+		stats.TargetWeight = 20
+	}
+	return stats
+}
+
+func (app *App) findExerciseByName(name string) (string, string, error) {
+	var id string
+	var displayName string
+	err := app.db.QueryRow(`
+		SELECT id, name FROM exercises
+		WHERE name = $1 OR id = $1
+		LIMIT 1
+	`, name).Scan(&id, &displayName)
+	if err == nil {
+		return id, displayName, nil
+	}
+	err = app.db.QueryRow(`
+		SELECT id, name FROM exercises
+		WHERE name ILIKE $1 OR id ILIKE $1
+		ORDER BY name
+		LIMIT 1
+	`, "%"+name+"%").Scan(&id, &displayName)
+	if err == nil {
+		return id, displayName, nil
+	}
+	err = app.db.QueryRow(`
+		SELECT id, name FROM exercises
+		WHERE id = 'Barbell_Bench_Press_-_Medium_Grip'
+		LIMIT 1
+	`).Scan(&id, &displayName)
+	return id, displayName, err
 }
 
 type MonthlyPlanRequest struct {

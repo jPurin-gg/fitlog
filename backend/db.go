@@ -57,6 +57,20 @@ func ensureSchema(db *sql.DB) error {
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE (user_id, plan_month)
 		);
+
+		CREATE TABLE IF NOT EXISTS workout_plans (
+			id SERIAL PRIMARY KEY,
+			workout_id INTEGER REFERENCES workouts(id),
+			user_id INTEGER REFERENCES users(id),
+			plan_date DATE NOT NULL,
+			title TEXT NOT NULL,
+			estimated_duration_min INTEGER,
+			status TEXT NOT NULL DEFAULT 'active',
+			plan JSONB NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (user_id, plan_date, status)
+		);
 	`)
 	return err
 }

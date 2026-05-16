@@ -10,15 +10,42 @@ import {
   Loader2,
   Play,
   RefreshCw,
-  Search
+  Search,
+  CheckCircle2,
+  ListChecks
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { AlternativeCoachModal } from "@/components/AlternativeCoachModal";
 import { ExerciseSelectorModal } from "@/components/ExerciseSelectorModal";
 
+interface WorkoutPlanExercise {
+  exercise_id: string;
+  name: string;
+  planned_sets: number;
+  target_weight: number;
+  target_reps: number;
+  last_max_weight?: number;
+}
+
+interface WorkoutPlanSession {
+  id: number;
+  workout_id: number;
+  user_id: number;
+  plan_date: string;
+  status: string;
+  plan: {
+    workout_title: string;
+    target: string;
+    estimated_duration_min: number;
+    coach_note: string;
+    exercises: WorkoutPlanExercise[];
+  };
+}
+
 export default function WorkoutPage() {
   const [loading, setLoading] = React.useState(false);
+  const [finishing, setFinishing] = React.useState(false);
   const [recommendation, setRecommendation] = React.useState<any>(null);
   const [aiError, setAiError] = React.useState<string | null>(null);
   const [currentSet, setCurrentSet] = React.useState(1);
@@ -28,6 +55,8 @@ export default function WorkoutPage() {
     id: "Barbell_Bench_Press_-_Medium_Grip", 
     name: "ベンチプレス"
   });
+  const [workoutPlan, setWorkoutPlan] = React.useState<WorkoutPlanSession | null>(null);
+  const [currentExerciseIndex, setCurrentExerciseIndex] = React.useState(0);
   const [showAltModal, setShowAltModal] = React.useState(false);
   const [showExerciseSelector, setShowExerciseSelector] = React.useState(false);
   const [targetSets, setTargetSets] = React.useState(3);
@@ -39,6 +68,7 @@ export default function WorkoutPage() {
   // 種目が変わったら目標セット数を取得
   React.useEffect(() => {
     const fetchTargetSets = async () => {
+      if (workoutPlan) return;
       try {
         const res = await fetch(`${apiUrl}/api/exercises/target_sets?user_id=1&exercise_id=${encodeURIComponent(currentExercise.id)}`);
         if (res.ok) {
@@ -49,7 +79,7 @@ export default function WorkoutPage() {
       } catch { /* デフォルト3セットのまま */ }
     };
     fetchTargetSets();
-  }, [currentExercise.id]);
+  }, [apiUrl, currentExercise.id, workoutPlan]);
 
   const saveTargetSets = async (value: number) => {
     setTargetSets(value);
@@ -63,8 +93,46 @@ export default function WorkoutPage() {
     } catch { /* 無視 */ }
   };
 
-  const startWorkout = () => {
-    setWorkoutStarted(true);
+  const activatePlanExercise = (plan: WorkoutPlanSession, index: number) => {
+    const ex = plan.plan.exercises[index];
+    if (!ex) return;
+    setCurrentExerciseIndex(index);
+    setCurrentExercise({ id: ex.exercise_id, name: ex.name });
+    setTargetSets(ex.planned_sets || 3);
+    setTempTargetSets(ex.planned_sets || 3);
+    setCurrentSet(1);
+    setRecommendation(null);
+    setAiError(null);
+    setFormData({
+      weight: ex.target_weight ? String(ex.target_weight) : '',
+      reps: ex.target_reps ? String(ex.target_reps) : '',
+      feeling: ''
+    });
+  };
+
+  const startWorkout = async () => {
+    setLoading(true);
+    setAiError(null);
+    try {
+      const res = await fetch(`${apiUrl}/api/workout-plan/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 1 })
+      });
+      if (!res.ok) {
+        setAiError(await res.text() || '今日の計画作成に失敗しました。');
+        return;
+      }
+      const data = await res.json();
+      setWorkoutPlan(data);
+      setWorkoutStarted(true);
+      activatePlanExercise(data, 0);
+    } catch (e) {
+      console.error(e);
+      setAiError('バックエンドに接続できません。');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getRecommendation = async () => {
@@ -101,9 +169,54 @@ export default function WorkoutPage() {
 
   const handleNextSet = () => {
     setCurrentSet(prev => prev + 1);
+    if (recommendation?.target_weight) {
+      setFormData({
+        weight: String(recommendation.target_weight),
+        reps: recommendation.target_reps ? String(recommendation.target_reps) : formData.reps,
+        feeling: ''
+      });
+    } else {
+      setFormData({ ...formData, feeling: '' });
+    }
     setRecommendation(null);
     setAiError(null);
-    setFormData({ ...formData, feeling: '' });
+  };
+
+  const handleNextExercise = () => {
+    if (!workoutPlan) return;
+    const nextIndex = currentExerciseIndex + 1;
+    if (nextIndex >= workoutPlan.plan.exercises.length) {
+      finishWorkout();
+      return;
+    }
+    activatePlanExercise(workoutPlan, nextIndex);
+  };
+
+  const finishWorkout = async () => {
+    setFinishing(true);
+    setAiError(null);
+    try {
+      const res = await fetch(`${apiUrl}/api/workouts/finish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 1, workout_id: workoutPlan?.workout_id || 0 })
+      });
+      if (!res.ok) {
+        setAiError(await res.text() || 'ワークアウト終了に失敗しました。');
+        return;
+      }
+      setWorkoutStarted(false);
+      setWorkoutPlan(null);
+      setRecommendation(null);
+      setCurrentSet(1);
+      setCurrentExerciseIndex(0);
+      setFormData({ weight: '', reps: '', feeling: '' });
+    } catch (e) {
+      console.error(e);
+      setAiError('バックエンドに接続できません。');
+    } finally {
+      setFinishing(false);
+    }
   };
 
   if (!workoutStarted) {
@@ -121,13 +234,15 @@ export default function WorkoutPage() {
           <p className="text-white/50 mb-10">Start your AI-guided workout session and let the smart coach do the thinking.</p>
           <button 
             onClick={startWorkout}
-            className="w-full py-5 bg-primary text-black font-black rounded-2xl shadow-[0_0_30px_rgba(255,170,0,0.5)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 text-xl tracking-wider uppercase group relative overflow-hidden"
+            disabled={loading}
+            className="w-full py-5 bg-primary text-black font-black rounded-2xl shadow-[0_0_30px_rgba(255,170,0,0.5)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 text-xl tracking-wider uppercase group relative overflow-hidden disabled:opacity-50 disabled:pointer-events-none"
           >
             <div className="absolute inset-0 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/30 to-transparent skew-x-12" />
             <span className="relative z-10 flex items-center justify-center gap-2">
-              Start Workout <Sparkles className="w-5 h-5" />
+              {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <>Start Workout <Sparkles className="w-5 h-5" /></>}
             </span>
           </button>
+          {aiError && <p className="mt-5 text-sm text-red-300">{aiError}</p>}
         </div>
       </div>
     );
@@ -144,8 +259,11 @@ export default function WorkoutPage() {
             exerciseId={currentExercise.id}
             exerciseName={currentExercise.name}
             onClose={() => setShowAltModal(false)}
-            onReplace={(newEx: { id: string; name: string }) => {
-              setCurrentExercise({ id: newEx.id, name: newEx.name });
+            onReplace={(newExercise: string | { id?: string; name?: string }) => {
+              const nextExercise = typeof newExercise === "string"
+                ? { id: `custom_${Date.now()}`, name: newExercise }
+                : { id: newExercise.id || `custom_${Date.now()}`, name: newExercise.name || currentExercise.name };
+              setCurrentExercise({ id: nextExercise.id, name: nextExercise.name });
               setCurrentSet(1);
               setRecommendation(null);
               setShowAltModal(false);
@@ -167,17 +285,24 @@ export default function WorkoutPage() {
       )}
 
       <main className="max-w-3xl mx-auto relative z-10">
-        <header className="mb-8 flex justify-between items-center">
+        <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Active Workout</h1>
               <p className="text-primary font-medium text-sm flex items-center gap-2">
                  <BrainCircuit className="w-4 h-4" /> AI Coach Active
               </p>
             </div>
-            <div className="text-right">
+            <div className="flex items-center gap-3">
               <div className="px-4 py-1.5 glass rounded-full text-sm font-black text-white/50">
                 00:00:00 {/* Ideally a running timer here! */}
               </div>
+              <button
+                onClick={finishWorkout}
+                disabled={finishing}
+                className="px-4 py-2 bg-white/5 hover:bg-accent/20 border border-white/10 hover:border-accent/30 rounded-xl text-xs font-bold text-white/60 hover:text-accent transition-colors disabled:opacity-50"
+              >
+                {finishing ? "終了中..." : "終了"}
+              </button>
             </div>
         </header>
 
@@ -234,6 +359,42 @@ export default function WorkoutPage() {
               </button>
             )}
           </div>
+
+          {workoutPlan && (
+            <div className="mb-8 bg-black/30 rounded-2xl border border-white/5 p-4">
+              <div className="flex items-start justify-between gap-4 mb-4">
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-primary font-black mb-1">Today&apos;s Plan</p>
+                  <h3 className="text-lg font-bold">{workoutPlan.plan.workout_title}</h3>
+                  <p className="text-xs text-white/45 mt-1">{workoutPlan.plan.coach_note}</p>
+                </div>
+                <div className="text-right text-xs text-white/50 font-bold">
+                  約 {workoutPlan.plan.estimated_duration_min} 分
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {workoutPlan.plan.exercises.map((ex, idx) => (
+                  <button
+                    key={`${ex.exercise_id}-${idx}`}
+                    onClick={() => activatePlanExercise(workoutPlan, idx)}
+                    className={`text-left p-3 rounded-xl border transition-all ${
+                      idx === currentExerciseIndex
+                        ? 'bg-primary/15 border-primary/40 text-white'
+                        : 'bg-white/5 border-white/5 text-white/55 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {idx < currentExerciseIndex ? <CheckCircle2 className="w-4 h-4 text-green-400" /> : <ListChecks className="w-4 h-4 text-primary" />}
+                      <span className="text-sm font-bold truncate">{ex.name}</span>
+                    </div>
+                    <div className="mt-1 text-[10px] text-white/40">
+                      {ex.planned_sets} sets / {ex.target_weight}kg x {ex.target_reps}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-8">
             {/* Input Form */}
@@ -348,19 +509,42 @@ export default function WorkoutPage() {
 
                   <div className="pt-2">
                     {recommendation.next_action !== 'STOP' ? (
-                      <button 
-                        onClick={handleNextSet}
-                        className="w-full py-4 bg-white/10 hover:bg-white/20 text-white font-bold rounded-2xl transition-all"
-                      >
-                        Start Next Set
-                      </button>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <button 
+                          onClick={handleNextSet}
+                          className="w-full py-4 bg-white/10 hover:bg-white/20 text-white font-bold rounded-2xl transition-all"
+                        >
+                          Start Next Set
+                        </button>
+                        <button 
+                          onClick={handleNextExercise}
+                          className="w-full py-4 bg-primary/20 hover:bg-primary/30 text-primary font-bold rounded-2xl transition-all"
+                        >
+                          {currentExerciseIndex + 1 >= (workoutPlan?.plan.exercises.length || 1) ? 'Finish Workout' : 'Next Exercise'}
+                        </button>
+                      </div>
                     ) : (
-                      <button 
-                        onClick={() => {setWorkoutStarted(false); setRecommendation(null); setCurrentSet(1); setFormData({weight:'', reps:'', feeling:''})}}
-                        className="w-full py-4 bg-accent/20 hover:bg-accent/30 text-accent font-bold rounded-2xl transition-all"
-                      >
-                        Finish Exercise & Workout
-                      </button>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <button 
+                          onClick={handleNextSet}
+                          className="w-full py-4 bg-white/10 hover:bg-white/20 text-white font-bold rounded-2xl transition-all"
+                        >
+                          もう1セットだけ続ける
+                        </button>
+                        <button 
+                          onClick={handleNextExercise}
+                          className="w-full py-4 bg-primary/20 hover:bg-primary/30 text-primary font-bold rounded-2xl transition-all"
+                        >
+                          次の種目へ
+                        </button>
+                        <button 
+                          onClick={finishWorkout}
+                          disabled={finishing}
+                          className="w-full py-4 bg-accent/20 hover:bg-accent/30 text-accent font-bold rounded-2xl transition-all disabled:opacity-50"
+                        >
+                          {finishing ? '終了中...' : '終了する'}
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>

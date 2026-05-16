@@ -61,6 +61,8 @@ func main() {
 	http.HandleFunc("/api/dashboard", cors(app.handleDashboard))
 	http.HandleFunc("/api/calendar", cors(app.handleCalendar))
 	http.HandleFunc("/api/alternative", cors(app.handleAlternative))
+	http.HandleFunc("/api/workouts/finish", cors(app.handleFinishWorkout))
+	http.HandleFunc("/api/workout-plan/start", cors(app.handleStartWorkoutPlan))
 	http.HandleFunc("/api/monthly-plans", cors(app.handleMonthlyPlans))
 	http.HandleFunc("/api/monthly-plan", cors(app.handleMonthlyPlan))
 

@@ -135,6 +135,22 @@ fitlog/
 
 > `UNIQUE (user_id, plan_month)`。月間プランは削除せず、月ごとに履歴として保持する。既存DBではバックエンド起動時に `CREATE TABLE IF NOT EXISTS` で作成される。
 
+### `workout_plans`（日次ワークアウト計画）
+| カラム                 | 型                        | 説明                           |
+|----------------------|--------------------------|-------------------------------|
+| id                   | SERIAL PK                 |                               |
+| workout_id           | INTEGER FK                | 対応する `workouts.id`          |
+| user_id              | INTEGER FK                | 現在は固定ユーザー `1`          |
+| plan_date            | DATE NOT NULL             | 計画日                         |
+| title                | TEXT NOT NULL             | 今日のワークアウト名            |
+| estimated_duration_min | INTEGER                 | 目安時間（分）                  |
+| status               | TEXT DEFAULT 'active'     | active / completed / abandoned |
+| plan                 | JSONB NOT NULL            | 種目・セット数・目標重量など     |
+| created_at           | TIMESTAMPTZ DEFAULT NOW() |                               |
+| updated_at           | TIMESTAMPTZ DEFAULT NOW() |                               |
+
+> 今日の計画はワークアウト記録の一部としてDBに保持する。入力途中の重量・回数・感想など、一時的なUI状態はフロントエンド側で保持する。
+
 ---
 
 ## API エンドポイント一覧
@@ -319,6 +335,65 @@ fitlog/
 
 ---
 
+### `POST /api/workout-plan/start`
+今日のワークアウト計画を作成または再利用する。記録画面の Start Workout で呼び出す。
+
+**リクエスト**
+```json
+{ "user_id": 1 }
+```
+
+**処理フロー**
+1. 昨日以前の未終了ワークアウトを自動クローズし、対応する計画を `abandoned` にする
+2. 今日の active な `workout_plans` があれば再利用
+3. なければ今日の `workouts` を作成または再利用
+4. 当月の `monthly_plans` から今日の routine を選ぶ
+5. 直近重量・最大重量・目標セット数を反映したベース計画を作る
+6. AI API でベース計画を安全な範囲で微調整する
+7. AI API が失敗した場合はエラーを返し、ダミー計画やフォールバック計画は保存しない
+
+**レスポンス**
+```json
+{
+  "id": 1,
+  "workout_id": 10,
+  "user_id": 1,
+  "plan_date": "2026-05-17",
+  "status": "active",
+  "plan": {
+    "workout_title": "Push (胸・肩・三頭)",
+    "target": "Push (胸・肩・三頭)",
+    "estimated_duration_min": 36,
+    "coach_note": "月間プランの今日のメニューをもとに...",
+    "exercises": [
+      {
+        "exercise_id": "Barbell_Bench_Press_-_Medium_Grip",
+        "name": "ベンチプレス",
+        "planned_sets": 3,
+        "target_weight": 80,
+        "target_reps": 10,
+        "last_max_weight": 85
+      }
+    ]
+  }
+}
+```
+
+### `POST /api/workouts/finish`
+進行中のワークアウトを明示的に終了する。最後のセット時刻があればそれを `ended_at` に使い、なければ現在時刻で閉じる。
+
+**リクエスト**
+```json
+{
+  "user_id": 1,
+  "workout_id": 10
+}
+```
+
+> `workout_id` 省略時は、ユーザーの最新の未終了ワークアウトを終了する。対応する `workout_plans.status` は `completed` になる。
+
+---
+
 ### `POST /api/alternative`
 現在の種目の代替種目を AI が提案する。
 
@@ -406,15 +481,18 @@ AI 呼び出しが失敗した場合（APIキー未設定、レート制限等�
 - 最近のワークアウト履歴3件
 
 ### 記録する（`/workout`）
-1. **種目選択画面**：デフォルト「ベンチプレス」で Start Workout
+1. **開始画面**：Start Workout で `POST /api/workout-plan/start` を呼び、今日の計画をDBに作成または再利用
 2. **記録画面**：
-   - 種目名（タップで変更 or AI代替提案）
+   - 今日の計画カード（種目、予定セット数、目標重量・回数、目安時間）
+   - 計画内の種目を順番に進行。カードをタップして任意の種目へ移動可能
+   - 種目名（検索で変更 or AI代替提案）
    - `SET X / 目標Y` カウンター + 進捗ドット
    - 目標セット数の編集（± ボタン、DB に自動保存）
    - 重量・回数・感想入力
    - **「Set Completed - Analyze」** ボタン → AI アドバイス表示
    - CONTINUE の場合：次のセット目標（重量 / 回数）を表示
-   - STOP の場合：赤いストップ表示
+   - STOP の場合：赤いストップ表示。ただしユーザーは「もう1セットだけ続ける」「次の種目へ」「終了する」を選べる
+   - ヘッダーの「終了」または終了ボタンで `POST /api/workouts/finish`
 
 ### 辞書（`/exercises`）
 - 873件の種目をブラウジング
@@ -504,7 +582,8 @@ docker logs --tail 50 myfitlog-backend
 | マルチユーザー         | `user_id = 1` ハードコード                 | 認証実装 + ユーザー管理                  |
 | `stats` (カロリー等)  | ホーム画面はモックデータ                    | 実記録から計算                           |
 | 種目検索              | クライアント側フィルタ（全件取得後）         | サーバー側全文検索（pgベクトル等）        |
-| workout 終了         | `ended_at` が常に NULL（終了ボタンなし）   | 「ワークアウト終了」ボタンの実装          |
+| workout 終了         | 明示終了ボタンで `ended_at` を更新          | 完了サマリー画面の実装                    |
+| 日次ワークアウト計画   | DBに保存し、計画ベースで進行可能             | AI生成の精度向上、実績との差分分析        |
 | 月間プラン再利用       | 過去月の閲覧は可能。再利用・複製は未実装           | 先月プランを今月にコピーして編集           |
 | AI プロンプト         | バックエンドにハードコード                  | 管理画面または設定ファイルで変更可能にする |
 | PWA / モバイル対応    | ブラウザのみ                               | manifest.json / Service Worker 追加    |
