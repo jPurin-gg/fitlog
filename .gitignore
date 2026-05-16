@@ -1,5 +1,7 @@
 docker/env/
 frontend/node_modules/
 backend/fitlog
-backend/myfitlog-backend
 .env
+
+# 開発・移行用の不要ファイル群（other/ フォルダ）
+other/
