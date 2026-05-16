@@ -407,9 +407,6 @@ export default function WorkoutPage() {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <div className="px-4 py-1.5 glass rounded-full text-sm font-black text-white/50">
-                00:00:00 {/* Ideally a running timer here! */}
-              </div>
               <button
                 onClick={finishWorkout}
                 disabled={finishing}
