@@ -125,20 +125,21 @@ export default function Home() {
       <main className="max-w-7xl mx-auto relative z-10">
         {/* ヘッダー */}
         <header className="flex flex-col gap-5 sm:flex-row sm:justify-between sm:items-center mb-12">
-          <div>
-            <h1 className="text-4xl font-bold tracking-tight mb-1">
-              おかえりなさい、<span className="text-gradient">みつきさん</span>
+          <div className="min-w-0">
+            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight mb-1">
+              おかえりなさい
+              <span className="block text-gradient">みつきさん</span>
             </h1>
             <p className="text-white/50">今日のコンディションに合わせて進めましょう。</p>
           </div>
           <div className="flex flex-wrap gap-3 sm:gap-4 w-full sm:w-auto">
-            <Link href="/calendar" className="p-3 glass rounded-2xl hover:bg-white/10 transition-colors block">
+            <Link href="/calendar" className="flex-none p-3 glass rounded-2xl hover:bg-white/10 transition-colors block">
               <Calendar className="w-5 h-5 text-white/70" />
             </Link>
-            <button className="p-3 glass rounded-2xl hover:bg-white/10 transition-colors">
+            <button className="flex-none p-3 glass rounded-2xl hover:bg-white/10 transition-colors">
               <Bell className="w-5 h-5 text-white/70" />
             </button>
-            <button className="px-6 py-3 bg-primary text-black font-bold rounded-2xl glow-primary hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 flex-1 sm:flex-none justify-center">
+            <button className="w-full sm:w-auto px-6 py-3 bg-primary text-black font-bold rounded-2xl glow-primary hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 justify-center">
               <Plus className="w-5 h-5" />
               <span>記録を始める</span>
             </button>

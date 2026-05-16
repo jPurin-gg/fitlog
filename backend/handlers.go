@@ -65,10 +65,29 @@ type WorkoutPlanSessionResponse struct {
 }
 
 type FinishWorkoutResponse struct {
-	WorkoutID int    `json:"workout_id"`
-	StartedAt string `json:"started_at"`
-	EndedAt   string `json:"ended_at"`
-	Status    string `json:"status"`
+	WorkoutID int            `json:"workout_id"`
+	StartedAt string         `json:"started_at"`
+	EndedAt   string         `json:"ended_at"`
+	Status    string         `json:"status"`
+	Summary   WorkoutSummary `json:"summary"`
+}
+
+type WorkoutSummary struct {
+	TotalSets   int                      `json:"total_sets"`
+	TotalReps   int                      `json:"total_reps"`
+	TotalVolume float64                  `json:"total_volume"`
+	DurationMin int                      `json:"duration_min"`
+	PRCount     int                      `json:"pr_count"`
+	Exercises   []WorkoutSummaryExercise `json:"exercises"`
+}
+
+type WorkoutSummaryExercise struct {
+	ExerciseID  string  `json:"exercise_id"`
+	Name        string  `json:"name"`
+	Sets        int     `json:"sets"`
+	TotalReps   int     `json:"total_reps"`
+	BestWeight  float64 `json:"best_weight"`
+	TotalVolume float64 `json:"total_volume"`
 }
 
 func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
@@ -345,9 +364,73 @@ func (app *App) handleFinishWorkout(w http.ResponseWriter, r *http.Request) {
 		WHERE workout_id = $1 AND user_id = $2 AND status = 'active'
 	`, resp.WorkoutID, userID)
 	resp.Status = "completed"
+	summary, err := app.loadWorkoutSummary(userID, resp.WorkoutID)
+	if err != nil {
+		log.Printf("Failed to load workout summary: %v", err)
+		http.Error(w, "Failed to load workout summary", http.StatusInternalServerError)
+		return
+	}
+	resp.Summary = summary
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (app *App) loadWorkoutSummary(userID, workoutID int) (WorkoutSummary, error) {
+	summary := WorkoutSummary{Exercises: []WorkoutSummaryExercise{}}
+	err := app.db.QueryRow(`
+		SELECT GREATEST(1, CEIL(EXTRACT(EPOCH FROM (COALESCE(ended_at, CURRENT_TIMESTAMP) - started_at)) / 60))::int
+		FROM workouts
+		WHERE id = $1 AND user_id = $2
+	`, workoutID, userID).Scan(&summary.DurationMin)
+	if err != nil {
+		return summary, err
+	}
+
+	rows, err := app.db.Query(`
+		SELECT
+			ws.exercise_id,
+			COALESCE(e.name, ws.exercise_id) AS exercise_name,
+			COUNT(*)::int AS sets,
+			COALESCE(SUM(ws.reps), 0)::int AS total_reps,
+			COALESCE(MAX(ws.weight), 0) AS best_weight,
+			COALESCE(SUM(ws.weight * ws.reps), 0) AS total_volume,
+			COALESCE(SUM(CASE WHEN ws.is_pr THEN 1 ELSE 0 END), 0)::int AS pr_count
+		FROM workout_sets ws
+		LEFT JOIN exercises e ON e.id = ws.exercise_id
+		WHERE ws.workout_id = $1
+		GROUP BY ws.exercise_id, e.name
+		ORDER BY MIN(ws.created_at), MIN(ws.id)
+	`, workoutID)
+	if err != nil {
+		return summary, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var exercise WorkoutSummaryExercise
+		var prCount int
+		if err := rows.Scan(
+			&exercise.ExerciseID,
+			&exercise.Name,
+			&exercise.Sets,
+			&exercise.TotalReps,
+			&exercise.BestWeight,
+			&exercise.TotalVolume,
+			&prCount,
+		); err != nil {
+			return summary, err
+		}
+		summary.TotalSets += exercise.Sets
+		summary.TotalReps += exercise.TotalReps
+		summary.TotalVolume += exercise.TotalVolume
+		summary.PRCount += prCount
+		summary.Exercises = append(summary.Exercises, exercise)
+	}
+	if err := rows.Err(); err != nil {
+		return summary, err
+	}
+	return summary, nil
 }
 
 func (app *App) closeStaleWorkouts(userID int) error {

@@ -12,9 +12,15 @@ import {
   RefreshCw,
   Search,
   CheckCircle2,
-  ListChecks
+  ListChecks,
+  Trophy,
+  BarChart3,
+  Clock3,
+  RotateCcw,
+  Home
 } from "lucide-react";
 import { AnimatePresence } from "framer-motion";
+import Link from "next/link";
 import { AlternativeCoachModal } from "@/components/AlternativeCoachModal";
 import { ExerciseSelectorModal } from "@/components/ExerciseSelectorModal";
 
@@ -40,6 +46,24 @@ interface WorkoutPlanSession {
     coach_note: string;
     exercises: WorkoutPlanExercise[];
   };
+}
+
+interface WorkoutSummaryExercise {
+  exercise_id: string;
+  name: string;
+  sets: number;
+  total_reps: number;
+  best_weight: number;
+  total_volume: number;
+}
+
+interface WorkoutSummary {
+  total_sets: number;
+  total_reps: number;
+  total_volume: number;
+  duration_min: number;
+  pr_count: number;
+  exercises: WorkoutSummaryExercise[];
 }
 
 function displayPlanText(text?: string) {
@@ -73,6 +97,7 @@ export default function WorkoutPage() {
   const [targetSets, setTargetSets] = React.useState(3);
   const [editingTargetSets, setEditingTargetSets] = React.useState(false);
   const [tempTargetSets, setTempTargetSets] = React.useState(3);
+  const [finishedSummary, setFinishedSummary] = React.useState<WorkoutSummary | null>(null);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -124,6 +149,7 @@ export default function WorkoutPage() {
   const startWorkout = async () => {
     setLoading(true);
     setAiError(null);
+    setFinishedSummary(null);
     try {
       const res = await fetch(`${apiUrl}/api/workout-plan/start`, {
         method: 'POST',
@@ -216,6 +242,8 @@ export default function WorkoutPage() {
         setAiError(await res.text() || 'ワークアウト終了に失敗しました。');
         return;
       }
+      const data = await res.json();
+      setFinishedSummary(data.summary || null);
       setWorkoutStarted(false);
       setWorkoutPlan(null);
       setRecommendation(null);
@@ -229,6 +257,81 @@ export default function WorkoutPage() {
       setFinishing(false);
     }
   };
+
+  if (finishedSummary && !workoutStarted) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0a] text-white p-4 md:p-8 relative overflow-hidden">
+        <div className="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/10 blur-[120px] rounded-full pointer-events-none" />
+        <div className="fixed bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-secondary/10 blur-[120px] rounded-full pointer-events-none" />
+
+        <main className="max-w-3xl mx-auto relative z-10">
+          <div className="mb-8">
+            <div className="w-16 h-16 bg-primary/20 rounded-2xl flex items-center justify-center mb-5">
+              <Trophy className="w-8 h-8 text-primary" />
+            </div>
+            <h1 className="text-3xl font-bold tracking-tight mb-2">今日のまとめ</h1>
+            <p className="text-white/50">おつかれさまでした。今日の積み上げを記録しました。</p>
+          </div>
+
+          <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+            <SummaryMetric icon={<ListChecks className="w-5 h-5" />} label="セット数" value={`${finishedSummary.total_sets}`} unit="セット" />
+            <SummaryMetric icon={<BarChart3 className="w-5 h-5" />} label="総ボリューム" value={Math.round(finishedSummary.total_volume).toLocaleString("ja-JP")} unit="kg" />
+            <SummaryMetric icon={<Clock3 className="w-5 h-5" />} label="時間" value={`${finishedSummary.duration_min}`} unit="分" />
+            <SummaryMetric icon={<Trophy className="w-5 h-5" />} label="自己更新" value={`${finishedSummary.pr_count}`} unit="回" />
+          </section>
+
+          <section className="mb-6">
+            <h2 className="font-bold text-lg mb-4">種目別</h2>
+            {finishedSummary.exercises.length > 0 ? (
+              <div className="space-y-3">
+                {finishedSummary.exercises.map(ex => (
+                  <div key={ex.exercise_id} className="bg-white/5 rounded-2xl border border-white/5 p-4">
+                    <div className="flex items-start justify-between gap-4 mb-3">
+                      <h3 className="font-bold text-white leading-tight">{ex.name}</h3>
+                      <span className="text-xs font-bold text-primary bg-primary/10 border border-primary/20 rounded-full px-3 py-1 whitespace-nowrap">
+                        {ex.sets}セット
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="bg-black/25 rounded-xl p-3">
+                        <p className="text-[10px] text-white/35 font-bold mb-1">回数</p>
+                        <p className="text-sm font-bold">{ex.total_reps}回</p>
+                      </div>
+                      <div className="bg-black/25 rounded-xl p-3">
+                        <p className="text-[10px] text-white/35 font-bold mb-1">最大重量</p>
+                        <p className="text-sm font-bold">{ex.best_weight}kg</p>
+                      </div>
+                      <div className="bg-black/25 rounded-xl p-3">
+                        <p className="text-[10px] text-white/35 font-bold mb-1">量</p>
+                        <p className="text-sm font-bold">{Math.round(ex.total_volume).toLocaleString("ja-JP")}kg</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-white/45">セット記録はまだありません。次回は1セット目から記録していきましょう。</p>
+            )}
+          </section>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              onClick={() => setFinishedSummary(null)}
+              className="py-4 bg-primary text-black font-black rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+            >
+              <RotateCcw className="w-5 h-5" /> 新しく始める
+            </button>
+            <Link
+              href="/"
+              className="py-4 bg-white/10 text-white font-bold rounded-2xl hover:bg-white/15 transition-all flex items-center justify-center gap-2"
+            >
+              <Home className="w-5 h-5" /> ホームへ
+            </Link>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   if (!workoutStarted) {
     return (
@@ -564,6 +667,19 @@ export default function WorkoutPage() {
           </div>
         </section>
       </main>
+    </div>
+  );
+}
+
+function SummaryMetric({ icon, label, value, unit }: { icon: React.ReactNode; label: string; value: string; unit: string }) {
+  return (
+    <div className="glass rounded-2xl p-4 border border-white/5">
+      <div className="text-primary mb-3">{icon}</div>
+      <p className="text-[10px] font-bold text-white/35 mb-1">{label}</p>
+      <div className="flex items-baseline gap-1">
+        <span className="text-2xl font-black">{value}</span>
+        <span className="text-xs text-white/40 font-bold">{unit}</span>
+      </div>
     </div>
   );
 }

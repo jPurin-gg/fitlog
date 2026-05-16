@@ -20,7 +20,7 @@ export function BottomNav() {
       {/* Spacer so content isn't hidden behind the fixed nav */}
       <div className="h-20 md:h-24 w-full" />
       
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-[400px] pb-safe pointer-events-none">
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-[calc(100vw-2rem)] max-w-[400px] pb-safe pointer-events-none">
         <nav className="glass bg-black/80 backdrop-blur-xl border border-white/10 rounded-[32px] p-2 flex justify-between items-center pointer-events-auto shadow-2xl shadow-primary/10">
           {links.map((link) => {
             const Icon = link.icon;
