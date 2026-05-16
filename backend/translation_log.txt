@@ -1,0 +1,704 @@
+Resuming translation. Total items: 873
+Translating [101/873]: Box Skip
+Translating [102/873]: Box Squat
+Translating [103/873]: Box Squat with Bands
+Translating [104/873]: Box Squat with Chains
+Translating [105/873]: Brachialis-SMR
+Translating [106/873]: Bradford/Rocky Presses
+Translating [107/873]: Butt-Ups
+Translating [108/873]: Butt Lift (Bridge)
+Translating [109/873]: Butterfly
+Translating [110/873]: Cable Chest Press
+Translating [111/873]: Cable Crossover
+Translating [112/873]: Cable Crunch
+Translating [113/873]: Cable Deadlifts
+Translating [114/873]: Cable Hammer Curls - Rope Attachment
+Translating [115/873]: Cable Hip Adduction
+Translating [116/873]: Cable Incline Pushdown
+Translating [117/873]: Cable Incline Triceps Extension
+Translating [118/873]: Cable Internal Rotation
+Translating [119/873]: Cable Iron Cross
+Translating [120/873]: Cable Judo Flip
+--- Partial save completed ---
+Translating [121/873]: Cable Lying Triceps Extension
+Translating [122/873]: Cable One Arm Tricep Extension
+Translating [123/873]: Cable Preacher Curl
+Translating [124/873]: Cable Rear Delt Fly
+Translating [125/873]: Cable Reverse Crunch
+Translating [126/873]: Cable Rope Overhead Triceps Extension
+Translating [127/873]: Cable Rope Rear-Delt Rows
+Translating [128/873]: Cable Russian Twists
+Translating [129/873]: Cable Seated Crunch
+Translating [130/873]: Cable Seated Lateral Raise
+Translating [131/873]: Cable Shoulder Press
+Translating [132/873]: Cable Shrugs
+Translating [133/873]: Cable Wrist Curl
+Translating [134/873]: Calf-Machine Shoulder Shrug
+Translating [135/873]: Calf Press
+Translating [136/873]: Calf Press On The Leg Press Machine
+Translating [137/873]: Calf Raise On A Dumbbell
+Translating [138/873]: Calf Raises - With Bands
+Translating [139/873]: Calf Stretch Elbows Against Wall
+Translating [140/873]: Calf Stretch Hands Against Wall
+--- Partial save completed ---
+Translating [141/873]: Calves-SMR
+Translating [142/873]: Car Deadlift
+Translating [143/873]: Car Drivers
+Translating [144/873]: Carioca Quick Step
+Translating [145/873]: Cat Stretch
+Translating [146/873]: Catch and Overhead Throw
+Translating [147/873]: Chain Handle Extension
+Translating [148/873]: Chain Press
+Translating [149/873]: Chair Leg Extended Stretch
+Translating [150/873]: Chair Lower Back Stretch
+Translating [151/873]: Chair Squat
+Translating [152/873]: Chair Upper Body Stretch
+Translating [153/873]: Chest And Front Of Shoulder Stretch
+Translating [154/873]: Chest Push from 3 point stance
+Translating [155/873]: Chest Push (multiple response)
+Translating [156/873]: Chest Push (single response)
+Translating [157/873]: Chest Push with Run Release
+Translating [158/873]: Chest Stretch on Stability Ball
+Translating [159/873]: Child's Pose
+Translating [160/873]: Chin-Up
+--- Partial save completed ---
+Translating [161/873]: Chin To Chest Stretch
+Translating [162/873]: Circus Bell
+Translating [163/873]: Clean
+Translating [164/873]: Clean Deadlift
+Translating [165/873]: Clean Pull
+Translating [166/873]: Clean Shrug
+Translating [167/873]: Clean and Jerk
+Translating [168/873]: Clean and Press
+Translating [169/873]: Clean from Blocks
+Translating [170/873]: Clock Push-Up
+Translating [171/873]: Close-Grip Barbell Bench Press
+Translating [172/873]: Close-Grip Dumbbell Press
+Translating [173/873]: Close-Grip EZ-Bar Curl with Band
+Translating [174/873]: Close-Grip EZ-Bar Press
+Translating [175/873]: Close-Grip EZ Bar Curl
+Translating [176/873]: Close-Grip Front Lat Pulldown
+Translating [177/873]: Close-Grip Push-Up off of a Dumbbell
+Translating [178/873]: Close-Grip Standing Barbell Curl
+Translating [179/873]: Cocoons
+Translating [180/873]: Conan's Wheel
+--- Partial save completed ---
+Translating [181/873]: Concentration Curls
+Translating [182/873]: Cross-Body Crunch
+Translating [183/873]: Cross Body Hammer Curl
+Translating [184/873]: Cross Over - With Bands
+Translating [185/873]: Crossover Reverse Lunge
+Translating [186/873]: Crucifix
+Translating [187/873]: Crunch - Hands Overhead
+Translating [188/873]: Crunch - Legs On Exercise Ball
+Translating [189/873]: Crunches
+Translating [190/873]: Cuban Press
+Translating [191/873]: Dancer's Stretch
+Translating [192/873]: Dead Bug
+Translating [193/873]: Deadlift with Bands
+Translating [194/873]: Deadlift with Chains
+Translating [195/873]: Decline Barbell Bench Press
+Translating [196/873]: Decline Close-Grip Bench To Skull Crusher
+Translating [197/873]: Decline Crunch
+Translating [198/873]: Decline Dumbbell Bench Press
+Translating [199/873]: Decline Dumbbell Flyes
+Translating [200/873]: Decline Dumbbell Triceps Extension
+--- Partial save completed ---
+Translating [201/873]: Decline EZ Bar Triceps Extension
+Translating [202/873]: Decline Oblique Crunch
+Translating [203/873]: Decline Push-Up
+Translating [204/873]: Decline Reverse Crunch
+Translating [205/873]: Decline Smith Press
+Translating [206/873]: Deficit Deadlift
+Translating [207/873]: Depth Jump Leap
+Translating [208/873]: Dip Machine
+Translating [209/873]: Dips - Chest Version
+Translating [210/873]: Dips - Triceps Version
+Translating [211/873]: Donkey Calf Raises
+Translating [212/873]: Double Kettlebell Alternating Hang Clean
+Translating [213/873]: Double Kettlebell Jerk
+Translating [214/873]: Double Kettlebell Push Press
+Translating [215/873]: Double Kettlebell Snatch
+Translating [216/873]: Double Kettlebell Windmill
+Translating [217/873]: Double Leg Butt Kick
+Translating [218/873]: Downward Facing Balance
+Translating [219/873]: Drag Curl
+Translating [220/873]: Drop Push
+--- Partial save completed ---
+Translating [221/873]: Dumbbell Alternate Bicep Curl
+Translating [222/873]: Dumbbell Bench Press
+Translating [223/873]: Dumbbell Bench Press with Neutral Grip
+Translating [224/873]: Dumbbell Bicep Curl
+Translating [225/873]: Dumbbell Clean
+Translating [226/873]: Dumbbell Floor Press
+Translating [227/873]: Dumbbell Flyes
+Translating [228/873]: Dumbbell Incline Row
+Translating [229/873]: Dumbbell Incline Shoulder Raise
+Translating [230/873]: Dumbbell Lunges
+Translating [231/873]: Dumbbell Lying One-Arm Rear Lateral Raise
+Translating [232/873]: Dumbbell Lying Pronation
+Translating [233/873]: Dumbbell Lying Rear Lateral Raise
+Translating [234/873]: Dumbbell Lying Supination
+Translating [235/873]: Dumbbell One-Arm Shoulder Press
+Translating [236/873]: Dumbbell One-Arm Triceps Extension
+Translating [237/873]: Dumbbell One-Arm Upright Row
+Translating [238/873]: Dumbbell Prone Incline Curl
+Translating [239/873]: Dumbbell Raise
+Translating [240/873]: Dumbbell Rear Lunge
+--- Partial save completed ---
+Translating [241/873]: Dumbbell Scaption
+Translating [242/873]: Dumbbell Seated Box Jump
+Translating [243/873]: Dumbbell Seated One-Leg Calf Raise
+Translating [244/873]: Dumbbell Shoulder Press
+Translating [245/873]: Dumbbell Shrug
+Translating [246/873]: Dumbbell Side Bend
+Translating [247/873]: Dumbbell Squat
+Translating [248/873]: Dumbbell Squat To A Bench
+Translating [249/873]: Dumbbell Step Ups
+Translating [250/873]: Dumbbell Tricep Extension -Pronated Grip
+Translating [251/873]: Dynamic Back Stretch
+Translating [252/873]: Dynamic Chest Stretch
+Translating [253/873]: EZ-Bar Curl
+Translating [254/873]: EZ-Bar Skullcrusher
+Translating [255/873]: Elbow Circles
+Translating [256/873]: Elbow to Knee
+Translating [257/873]: Elbows Back
+Translating [258/873]: Elevated Back Lunge
+Translating [259/873]: Elevated Cable Rows
+Translating [260/873]: Elliptical Trainer
+--- Partial save completed ---
+Translating [261/873]: Exercise Ball Crunch
+Translating [262/873]: Exercise Ball Pull-In
+Translating [263/873]: Extended Range One-Arm Kettlebell Floor Press
+Translating [264/873]: External Rotation
+Translating [265/873]: External Rotation with Band
+Translating [266/873]: External Rotation with Cable
+Translating [267/873]: Face Pull
+Translating [268/873]: Farmer's Walk
+Translating [269/873]: Fast Skipping
+Translating [270/873]: Finger Curls
+Translating [271/873]: Flat Bench Cable Flyes
+Translating [272/873]: Flat Bench Leg Pull-In
+Translating [273/873]: Flat Bench Lying Leg Raise
+Translating [274/873]: Flexor Incline Dumbbell Curls
+Translating [275/873]: Floor Glute-Ham Raise
+Translating [276/873]: Floor Press
+Translating [277/873]: Floor Press with ChainsResuming translation. Total items: 873
+Translating [381/873]: Kettlebell Seesaw Press
+Translating [382/873]: Kettlebell Sumo High Pull
+Translating [383/873]: Kettlebell Thruster
+Translating [384/873]: Kettlebell Turkish Get-Up (Lunge style)
+Translating [385/873]: Kettlebell Turkish Get-Up (Squat style)
+Translating [386/873]: Kettlebell Windmill
+Translating [387/873]: Kipping Muscle Up
+Translating [388/873]: Knee Across The Body
+Translating [389/873]: Knee Circles
+Translating [390/873]: Knee/Hip Raise On Parallel Bars
+Translating [391/873]: Knee Tuck Jump
+Translating [392/873]: Kneeling Arm Drill
+Translating [393/873]: Kneeling Cable Crunch With Alternating Oblique Twists
+Translating [394/873]: Kneeling Cable Triceps Extension
+Translating [395/873]: Kneeling Forearm Stretch
+Translating [396/873]: Kneeling High Pulley Row
+Translating [397/873]: Kneeling Hip Flexor
+Translating [398/873]: Kneeling Jump Squat
+Translating [399/873]: Kneeling Single-Arm High Pulley Row
+Translating [400/873]: Kneeling Squat
+--- Partial save completed ---
+Translating [401/873]: Landmine 180's
+Translating [402/873]: Landmine Linear Jammer
+Translating [403/873]: Lateral Bound
+Translating [404/873]: Lateral Box Jump
+Translating [405/873]: Lateral Cone Hops
+Translating [406/873]: Lateral Raise - With Bands
+Translating [407/873]: Latissimus Dorsi-SMR
+Translating [408/873]: Leg-Over Floor Press
+Translating [409/873]: Leg-Up Hamstring Stretch
+Translating [410/873]: Leg Extensions
+Translating [411/873]: Leg Lift
+Translating [412/873]: Leg Press
+Translating [413/873]: Leg Pull-In
+Translating [414/873]: Leverage Chest Press
+Translating [415/873]: Leverage Deadlift
+Translating [416/873]: Leverage Decline Chest Press
+Translating [417/873]: Leverage High Row
+Translating [418/873]: Leverage Incline Chest Press
+Translating [419/873]: Leverage Iso Row
+Translating [420/873]: Leverage Shoulder Press
+--- Partial save completed ---
+Translating [421/873]: Leverage Shrug
+Translating [422/873]: Linear 3-Part Start Technique
+Translating [423/873]: Linear Acceleration Wall Drill
+Translating [424/873]: Linear Depth Jump
+Translating [425/873]: Log Lift
+Translating [426/873]: London Bridges
+Translating [427/873]: Looking At Ceiling
+Translating [428/873]: Low Cable Crossover
+Translating [429/873]: Low Cable Triceps Extension
+Translating [430/873]: Low Pulley Row To Neck
+Translating [431/873]: Lower Back-SMR
+Translating [432/873]: Lower Back Curl
+Translating [433/873]: Lunge Pass Through
+Translating [434/873]: Lunge Sprint
+Translating [435/873]: Lying Bent Leg Groin
+Translating [436/873]: Lying Cable Curl
+Translating [437/873]: Lying Cambered Barbell Row
+Translating [438/873]: Lying Close-Grip Bar Curl On High Pulley
+Translating [439/873]: Lying Close-Grip Barbell Triceps Extension Behind The Head
+Translating [440/873]: Lying Close-Grip Barbell Triceps Press To Chin
+--- Partial save completed ---
+Translating [441/873]: Lying Crossover
+Translating [442/873]: Lying Dumbbell Tricep Extension
+Translating [443/873]: Lying Face Down Plate Neck Resistance
+Translating [444/873]: Lying Face Up Plate Neck Resistance
+Translating [445/873]: Lying Glute
+Translating [446/873]: Lying Hamstring
+Translating [447/873]: Lying High Bench Barbell Curl
+Translating [448/873]: Lying Leg Curls
+Translating [449/873]: Lying Machine Squat
+Translating [450/873]: Lying One-Arm Lateral Raise
+Translating [451/873]: Lying Prone Quadriceps
+Translating [452/873]: Lying Rear Delt Raise
+Translating [453/873]: Lying Supine Dumbbell Curl
+Translating [454/873]: Lying T-Bar Row
+Translating [455/873]: Lying Triceps Press
+Translating [456/873]: Machine Bench Press
+Translating [457/873]: Machine Bicep Curl
+Translating [458/873]: Machine Preacher Curls
+Translating [459/873]: Machine Shoulder (Military) Press
+Translating [460/873]: Machine Triceps Extension
+--- Partial save completed ---
+Translating [461/873]: Medicine Ball Chest Pass
+Translating [462/873]: Medicine Ball Full Twist
+Translating [463/873]: Medicine Ball Scoop Throw
+Translating [464/873]: Middle Back Shrug
+Translating [465/873]: Middle Back Stretch
+Translating [466/873]: Mixed Grip Chin
+Translating [467/873]: Monster Walk
+Translating [468/873]: Mountain Climbers
+Translating [469/873]: Moving Claw Series
+Translating [470/873]: Muscle Snatch
+Translating [471/873]: Muscle Up
+Translating [472/873]: Narrow Stance Hack Squats
+Translating [473/873]: Narrow Stance Leg Press
+Translating [474/873]: Narrow Stance Squats
+Translating [475/873]: Natural Glute Ham Raise
+Translating [476/873]: Neck-SMR
+Translating [477/873]: Neck Press
+Translating [478/873]: Oblique Crunches
+Translating [479/873]: Oblique Crunches - On The Floor
+Translating [480/873]: Olympic Squat
+--- Partial save completed ---
+Translating [481/873]: On-Your-Back Quad Stretch
+Translating [482/873]: On Your Side Quad Stretch
+Translating [483/873]: One-Arm Dumbbell Row
+Translating [484/873]: One-Arm Flat Bench Dumbbell Flye
+Translating [485/873]: One-Arm High-Pulley Cable Side Bends
+Translating [486/873]: One-Arm Incline Lateral Raise
+Translating [487/873]: One-Arm Kettlebell Clean
+Translating [488/873]: One-Arm Kettlebell Clean and Jerk
+Translating [489/873]: One-Arm Kettlebell Floor Press
+Translating [490/873]: One-Arm Kettlebell Jerk
+Translating [491/873]: One-Arm Kettlebell Military Press To The Side
+Translating [492/873]: One-Arm Kettlebell Para Press
+Translating [493/873]: One-Arm Kettlebell Push Press
+Translating [494/873]: One-Arm Kettlebell Row
+Translating [495/873]: One-Arm Kettlebell Snatch
+Translating [496/873]: One-Arm Kettlebell Split Jerk
+Translating [497/873]: One-Arm Kettlebell Split Snatch
+Translating [498/873]: One-Arm Kettlebell Swings
+Translating [499/873]: One-Arm Long Bar Row
+Translating [500/873]: One-Arm Medicine Ball Slam
+--- Partial save completed ---
+Translating [501/873]: One-Arm Open Palm Kettlebell Clean
+Translating [502/873]: One-Arm Overhead Kettlebell Squats
+Translating [503/873]: One-Arm Side Deadlift
+Translating [504/873]: One-Arm Side Laterals
+Translating [505/873]: One-Legged Cable Kickback
+Translating [506/873]: One Arm Against Wall
+Translating [507/873]: One Arm Chin-Up
+Translating [508/873]: One Arm Dumbbell Bench Press
+Translating [509/873]: One Arm Dumbbell Preacher Curl
+Translating [510/873]: One Arm Floor Press
+Translating [511/873]: One Arm Lat Pulldown
+Translating [512/873]: One Arm Pronated Dumbbell Triceps Extension
+Translating [513/873]: One Arm Supinated Dumbbell Triceps Extension
+Translating [514/873]: One Half Locust
+Translating [515/873]: One Handed Hang
+Translating [516/873]: One Knee To Chest
+Translating [517/873]: One Leg Barbell Squat
+Translating [518/873]: Open Palm Kettlebell Clean
+Translating [519/873]: Otis-Up
+Translating [520/873]: Overhead Cable Curl
+--- Partial save completed ---
+Translating [521/873]: Overhead Lat
+Translating [522/873]: Overhead Slam
+Translating [523/873]: Overhead Squat
+Translating [524/873]: Overhead Stretch
+Translating [525/873]: Overhead Triceps
+Translating [526/873]: Pallof Press
+Translating [527/873]: Pallof Press With Rotation
+Translating [528/873]: Palms-Down Dumbbell Wrist Curl Over A Bench
+Translating [529/873]: Palms-Down Wrist Curl Over A Bench
+Translating [530/873]: Palms-Up Barbell Wrist Curl Over A Bench
+Translating [531/873]: Palms-Up Dumbbell Wrist Curl Over A Bench
+Translating [532/873]: Parallel Bar Dip
+Translating [533/873]: Pelvic Tilt Into Bridge
+Translating [534/873]: Peroneals-SMR
+Translating [535/873]: Peroneals Stretch
+Translating [536/873]: Physioball Hip Bridge
+Translating [537/873]: Pin Presses
+Translating [538/873]: Piriformis-SMR
+Translating [539/873]: Plank
+Translating [540/873]: Plate Pinch
+--- Partial save completed ---
+Translating [541/873]: Plate Twist
+Translating [542/873]: Platform Hamstring Slides
+Translating [543/873]: Plie Dumbbell Squat
+Translating [544/873]: Plyo Kettlebell Pushups
+Translating [545/873]: Plyo Push-up
+Translating [546/873]: Posterior Tibialis Stretch
+Translating [547/873]: Power Clean
+Translating [548/873]: Power Clean from Blocks
+Translating [549/873]: Power Jerk
+Translating [550/873]: Power Partials
+Translating [551/873]: Power Snatch
+Translating [552/873]: Power Snatch from Blocks
+Translating [553/873]: Power Stairs
+Translating [554/873]: Preacher Curl
+Translating [555/873]: Preacher Hammer Dumbbell Curl
+Translating [556/873]: Press Sit-Up
+Translating [557/873]: Prone Manual Hamstring
+Translating [558/873]: Prowler Sprint
+Translating [559/873]: Pull Through
+Translating [560/873]: Pullups
+--- Partial save completed ---
+Translating [561/873]: Push-Up Wide
+Translating [562/873]: Push-Ups - Close Triceps Position
+Translating [563/873]: Push-Ups With Feet Elevated
+Translating [564/873]: Push-Ups With Feet On An Exercise Ball
+Translating [565/873]: Push Press
+Translating [566/873]: Push Press - Behind the Neck
+Translating [567/873]: Push Up to Side Plank
+Translating [568/873]: Pushups
+Translating [569/873]: Pushups (Close and Wide Hand Positions)
+Translating [570/873]: Pyramid
+Translating [571/873]: Quad Stretch
+Translating [572/873]: Quadriceps-SMR
+Translating [573/873]: Quick Leap
+Translating [574/873]: Rack Delivery
+Translating [575/873]: Rack Pull with Bands
+Translating [576/873]: Rack Pulls
+Translating [577/873]: Rear Leg Raises
+Translating [578/873]: Recumbent Bike
+Translating [579/873]: Return Push from Stance
+Translating [580/873]: Reverse Band Bench Press
+--- Partial save completed ---
+Translating [581/873]: Reverse Band Box Squat
+Translating [582/873]: Reverse Band Deadlift
+Translating [583/873]: Reverse Band Power Squat
+Translating [584/873]: Reverse Band Sumo Deadlift
+Translating [585/873]: Reverse Barbell Curl
+Translating [586/873]: Reverse Barbell Preacher Curls
+Translating [587/873]: Reverse Cable Curl
+Translating [588/873]: Reverse Crunch
+Translating [589/873]: Reverse Flyes
+Translating [590/873]: Reverse Flyes With External Rotation
+Translating [591/873]: Reverse Grip Bent-Over Rows
+Translating [592/873]: Reverse Grip Triceps Pushdown
+Translating [593/873]: Reverse Hyperextension
+Translating [594/873]: Reverse Machine Flyes
+Translating [595/873]: Reverse Plate Curls
+Translating [596/873]: Reverse Triceps Bench Press
+Translating [597/873]: Rhomboids-SMR
+Translating [598/873]: Rickshaw Carry
+Translating [599/873]: Rickshaw Deadlift
+Translating [600/873]: Ring Dips
+--- Partial save completed ---
+Translating [601/873]: Rocket Jump
+Translating [602/873]: Rocking Standing Calf Raise
+Translating [603/873]: Rocky Pull-Ups/Pulldowns
+Translating [604/873]: Romanian Deadlift
+Translating [605/873]: Romanian Deadlift from Deficit
+Translating [606/873]: Rope Climb
+Translating [607/873]: Rope Crunch
+Translating [608/873]: Rope Jumping
+Translating [609/873]: Rope Straight-Arm Pulldown
+Translating [610/873]: Round The World Shoulder Stretch
+Translating [611/873]: Rowing, Stationary
+Translating [612/873]: Runner's Stretch
+Translating [613/873]: Running, Treadmill
+Translating [614/873]: Russian Twist
+Translating [615/873]: Sandbag Load
+Translating [616/873]: Scapular Pull-Up
+Translating [617/873]: Scissor Kick
+Translating [618/873]: Scissors Jump
+Translating [619/873]: Seated Band Hamstring Curl
+Translating [620/873]: Seated Barbell Military Press
+--- Partial save completed ---
+Translating [621/873]: Seated Barbell Twist
+Translating [622/873]: Seated Bent-Over One-Arm Dumbbell Triceps Extension
+Translating [623/873]: Seated Bent-Over Rear Delt Raise
+Translating [624/873]: Seated Bent-Over Two-Arm Dumbbell Triceps Extension
+Translating [625/873]: Seated Biceps
+Translating [626/873]: Seated Cable Rows
+Translating [627/873]: Seated Cable Shoulder Press
+Translating [628/873]: Seated Calf Raise
+Translating [629/873]: Seated Calf Stretch
+Translating [630/873]: Seated Close-Grip Concentration Barbell Curl
+Translating [631/873]: Seated Dumbbell Curl
+Translating [632/873]: Seated Dumbbell Inner Biceps Curl
+Translating [633/873]: Seated Dumbbell Palms-Down Wrist Curl
+Translating [634/873]: Seated Dumbbell Palms-Up Wrist Curl
+Translating [635/873]: Seated Dumbbell Press
+Translating [636/873]: Seated Flat Bench Leg Pull-In
+Translating [637/873]: Seated Floor Hamstring Stretch
+Translating [638/873]: Seated Front Deltoid
+Translating [639/873]: Seated Glute
+Translating [640/873]: Seated Good Mornings
+--- Partial save completed ---
+Translating [641/873]: Seated Hamstring
+Translating [642/873]: Seated Hamstring and Calf Stretch
+Translating [643/873]: Seated Head Harness Neck Resistance
+Translating [644/873]: Seated Leg Curl
+Translating [645/873]: Seated Leg Tucks
+Translating [646/873]: Seated One-Arm Dumbbell Palms-Down Wrist Curl
+Translating [647/873]: Seated One-Arm Dumbbell Palms-Up Wrist Curl
+Translating [648/873]: Seated One-arm Cable Pulley Rows
+Translating [649/873]: Seated Overhead Stretch
+Translating [650/873]: Seated Palm-Up Barbell Wrist Curl
+Translating [651/873]: Seated Palms-Down Barbell Wrist Curl
+Translating [652/873]: Seated Side Lateral Raise
+Translating [653/873]: Seated Triceps Press
+Translating [654/873]: Seated Two-Arm Palms-Up Low-Pulley Wrist Curl
+Translating [655/873]: See-Saw Press (Alternating Side Press)
+Translating [656/873]: Shotgun Row
+Translating [657/873]: Shoulder Circles
+Translating [658/873]: Shoulder Press - With Bands
+Translating [659/873]: Shoulder Raise
+Translating [660/873]: Shoulder Stretch
+--- Partial save completed ---
+Translating [661/873]: Side-Lying Floor Stretch
+Translating [662/873]: Side Bridge
+Translating [663/873]: Side Hop-Sprint
+Translating [664/873]: Side Jackknife
+Translating [665/873]: Side Lateral Raise
+Translating [666/873]: Side Laterals to Front Raise
+Translating [667/873]: Side Leg Raises
+Translating [668/873]: Side Lying Groin Stretch
+Translating [669/873]: Side Neck Stretch
+Translating [670/873]: Side Standing Long Jump
+Translating [671/873]: Side To Side Chins
+Translating [672/873]: Side Wrist Pull
+Translating [673/873]: Side to Side Box Shuffle
+Translating [674/873]: Single-Arm Cable Crossover
+Translating [675/873]: Single-Arm Linear Jammer
+Translating [676/873]: Single-Arm Push-Up
+Translating [677/873]: Single-Cone Sprint Drill
+Translating [678/873]: Single-Leg High Box Squat
+Translating [679/873]: Single-Leg Hop Progression
+Translating [680/873]: Single-Leg Lateral Hop
+--- Partial save completed ---
+Translating [681/873]: Single-Leg Leg Extension
+Translating [682/873]: Single-Leg Stride Jump
+Translating [683/873]: Single Dumbbell Raise
+Translating [684/873]: Single Leg Butt Kick
+Translating [685/873]: Single Leg Glute Bridge
+Translating [686/873]: Single Leg Push-off
+Translating [687/873]: Sit-Up
+Translating [688/873]: Sit Squats
+Translating [689/873]: Skating
+Translating [690/873]: Sled Drag - Harness
+Translating [691/873]: Sled Overhead Backward Walk
+Translating [692/873]: Sled Overhead Triceps Extension
+Translating [693/873]: Sled Push
+Translating [694/873]: Sled Reverse Flye
+Translating [695/873]: Sled Row
+Translating [696/873]: Sledgehammer Swings
+Translating [697/873]: Smith Incline Shoulder Raise
+Translating [698/873]: Smith Machine Behind the Back Shrug
+Translating [699/873]: Smith Machine Bench Press
+Translating [700/873]: Smith Machine Bent Over Row
+--- Partial save completed ---
+Translating [701/873]: Smith Machine Calf Raise
+Translating [702/873]: Smith Machine Close-Grip Bench Press
+Translating [703/873]: Smith Machine Decline Press
+Translating [704/873]: Smith Machine Hang Power Clean
+Translating [705/873]: Smith Machine Hip Raise
+Translating [706/873]: Smith Machine Incline Bench Press
+Translating [707/873]: Smith Machine Leg Press
+Translating [708/873]: Smith Machine One-Arm Upright Row
+Translating [709/873]: Smith Machine Overhead Shoulder Press
+Translating [710/873]: Smith Machine Pistol Squat
+Translating [711/873]: Smith Machine Reverse Calf Raises
+Translating [712/873]: Smith Machine Squat
+Translating [713/873]: Smith Machine Stiff-Legged Deadlift
+Translating [714/873]: Smith Machine Upright Row
+Translating [715/873]: Smith Single-Leg Split Squat
+Translating [716/873]: Snatch
+Translating [717/873]: Snatch Balance
+Translating [718/873]: Snatch Deadlift
+Translating [719/873]: Snatch Pull
+Translating [720/873]: Snatch Shrug
+--- Partial save completed ---
+Translating [721/873]: Snatch from Blocks
+Translating [722/873]: Speed Band Overhead Triceps
+Translating [723/873]: Speed Box Squat
+Translating [724/873]: Speed Squats
+Translating [725/873]: Spell Caster
+Translating [726/873]: Spider Crawl
+Translating [727/873]: Spider Curl
+Translating [728/873]: Spinal Stretch
+Translating [729/873]: Split Clean
+Translating [730/873]: Split Jerk
+Translating [731/873]: Split Jump
+Translating [732/873]: Split Snatch
+Translating [733/873]: Split Squat with Dumbbells
+Translating [734/873]: Split Squats
+Translating [735/873]: Squat Jerk
+Translating [736/873]: Squat with Bands
+Translating [737/873]: Squat with Chains
+Translating [738/873]: Squat with Plate Movers
+Translating [739/873]: Squats - With Bands
+Translating [740/873]: Stairmaster
+--- Partial save completed ---
+Translating [741/873]: Standing Alternating Dumbbell Press
+Translating [742/873]: Standing Barbell Calf Raise
+Translating [743/873]: Standing Barbell Press Behind Neck
+Translating [744/873]: Standing Bent-Over One-Arm Dumbbell Triceps Extension
+Translating [745/873]: Standing Bent-Over Two-Arm Dumbbell Triceps Extension
+Translating [746/873]: Standing Biceps Cable Curl
+Translating [747/873]: Standing Biceps Stretch
+Translating [748/873]: Standing Bradford Press
+Translating [749/873]: Standing Cable Chest Press
+Translating [750/873]: Standing Cable Lift
+Translating [751/873]: Standing Cable Wood Chop
+Translating [752/873]: Standing Calf Raises
+Translating [753/873]: Standing Concentration Curl
+Translating [754/873]: Standing Dumbbell Calf Raise
+Translating [755/873]: Standing Dumbbell Press
+Translating [756/873]: Standing Dumbbell Reverse Curl
+Translating [757/873]: Standing Dumbbell Straight-Arm Front Delt Raise Above Head
+Translating [758/873]: Standing Dumbbell Triceps Extension
+Translating [759/873]: Standing Dumbbell Upright Row
+Translating [760/873]: Standing Elevated Quad Stretch
+--- Partial save completed ---
+Translating [761/873]: Standing Front Barbell Raise Over Head
+Translating [762/873]: Standing Gastrocnemius Calf Stretch
+Translating [763/873]: Standing Hamstring and Calf Stretch
+Translating [764/873]: Standing Hip Circles
+Translating [765/873]: Standing Hip Flexors
+Translating [766/873]: Standing Inner-Biceps Curl
+Translating [767/873]: Standing Lateral Stretch
+Translating [768/873]: Standing Leg Curl
+Translating [769/873]: Standing Long Jump
+Translating [770/873]: Standing Low-Pulley Deltoid Raise
+Translating [771/873]: Standing Low-Pulley One-Arm Triceps Extension
+Translating [772/873]: Standing Military Press
+Translating [773/873]: Standing Olympic Plate Hand Squeeze
+Translating [774/873]: Standing One-Arm Cable Curl
+Translating [775/873]: Standing One-Arm Dumbbell Curl Over Incline Bench
+Translating [776/873]: Standing One-Arm Dumbbell Triceps Extension
+Translating [777/873]: Standing Overhead Barbell Triceps Extension
+Translating [778/873]: Standing Palm-In One-Arm Dumbbell Press
+Translating [779/873]: Standing Palms-In Dumbbell Press
+Translating [780/873]: Standing Palms-Up Barbell Behind The Back Wrist Curl
+--- Partial save completed ---
+Translating [781/873]: Standing Pelvic Tilt
+Translating [782/873]: Standing Rope Crunch
+Translating [783/873]: Standing Soleus And Achilles Stretch
+Translating [784/873]: Standing Toe Touches
+Translating [785/873]: Standing Towel Triceps Extension
+Translating [786/873]: Standing Two-Arm Overhead Throw
+Translating [787/873]: Star Jump
+Translating [788/873]: Step-up with Knee Raise
+Translating [789/873]: Step Mill
+Translating [790/873]: Stiff-Legged Barbell Deadlift
+Translating [791/873]: Stiff-Legged Dumbbell Deadlift
+Translating [792/873]: Stiff Leg Barbell Good Morning
+Translating [793/873]: Stomach Vacuum
+Translating [794/873]: Straight-Arm Dumbbell Pullover
+Translating [795/873]: Straight-Arm Pulldown
+Translating [796/873]: Straight Bar Bench Mid Rows
+Translating [797/873]: Straight Raises on Incline Bench
+Translating [798/873]: Stride Jump Crossover
+Translating [799/873]: Sumo Deadlift
+Translating [800/873]: Sumo Deadlift with Bands
+--- Partial save completed ---
+Translating [801/873]: Sumo Deadlift with Chains
+Translating [802/873]: Superman
+Translating [803/873]: Supine Chest Throw
+Translating [804/873]: Supine One-Arm Overhead Throw
+Translating [805/873]: Supine Two-Arm Overhead Throw
+Translating [806/873]: Suspended Fallout
+Translating [807/873]: Suspended Push-Up
+Translating [808/873]: Suspended Reverse Crunch
+Translating [809/873]: Suspended Row
+Translating [810/873]: Suspended Split Squat
+Translating [811/873]: Svend Press
+Translating [812/873]: T-Bar Row with Handle
+Translating [813/873]: Tate Press
+Translating [814/873]: The Straddle
+Translating [815/873]: Thigh Abductor
+Translating [816/873]: Thigh Adductor
+Translating [817/873]: Tire Flip
+Translating [818/873]: Toe Touchers
+Translating [819/873]: Torso Rotation
+Translating [820/873]: Trail Running/Walking
+--- Partial save completed ---
+Translating [821/873]: Trap Bar Deadlift
+Translating [822/873]: Tricep Dumbbell Kickback
+Translating [823/873]: Tricep Side Stretch
+Translating [824/873]: Triceps Overhead Extension with Rope
+Translating [825/873]: Triceps Pushdown
+Translating [826/873]: Triceps Pushdown - Rope Attachment
+Translating [827/873]: Triceps Pushdown - V-Bar Attachment
+Translating [828/873]: Triceps Stretch
+Translating [829/873]: Tuck Crunch
+Translating [830/873]: Two-Arm Dumbbell Preacher Curl
+Translating [831/873]: Two-Arm Kettlebell Clean
+Translating [832/873]: Two-Arm Kettlebell Jerk
+Translating [833/873]: Two-Arm Kettlebell Military Press
+Translating [834/873]: Two-Arm Kettlebell Row
+Translating [835/873]: Underhand Cable Pulldowns
+Translating [836/873]: Upper Back-Leg Grab
+Translating [837/873]: Upper Back Stretch
+Translating [838/873]: Upright Barbell Row
+Translating [839/873]: Upright Cable Row
+Translating [840/873]: Upright Row - With Bands
+--- Partial save completed ---
+Translating [841/873]: Upward Stretch
+Translating [842/873]: V-Bar Pulldown
+Translating [843/873]: V-Bar Pullup
+Translating [844/873]: Vertical Swing
+Translating [845/873]: Walking, Treadmill
+Translating [846/873]: Weighted Ball Hyperextension
+Translating [847/873]: Weighted Ball Side Bend
+Translating [848/873]: Weighted Bench Dip
+Translating [849/873]: Weighted Crunches
+Translating [850/873]: Weighted Jump Squat
+Translating [851/873]: Weighted Pull Ups
+Translating [852/873]: Weighted Sissy Squat
+Translating [853/873]: Weighted Sit-Ups - With Bands
+Translating [854/873]: Weighted Squat
+Translating [855/873]: Wide-Grip Barbell Bench Press
+Translating [856/873]: Wide-Grip Decline Barbell Bench Press
+Translating [857/873]: Wide-Grip Decline Barbell Pullover
+Translating [858/873]: Wide-Grip Lat Pulldown
+Translating [859/873]: Wide-Grip Pulldown Behind The Neck
+Translating [860/873]: Wide-Grip Rear Pull-Up
+--- Partial save completed ---
+Translating [861/873]: Wide-Grip Standing Barbell Curl
+Translating [862/873]: Wide Stance Barbell Squat
+Translating [863/873]: Wide Stance Stiff Legs
+Translating [864/873]: Wind Sprints
+Translating [865/873]: Windmills
+Translating [866/873]: World's Greatest Stretch
+Translating [867/873]: Wrist Circles
+Translating [868/873]: Wrist Roller
+Translating [869/873]: Wrist Rotations with Straight Bar
+Translating [870/873]: Yoke Walk
+Translating [871/873]: Zercher Squats
+Translating [872/873]: Zottman Curl
+Translating [873/873]: Zottman Preacher Curl
+All translation completed successfully!

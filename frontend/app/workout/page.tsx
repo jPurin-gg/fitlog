@@ -8,11 +8,13 @@ import {
   BrainCircuit,
   Loader2,
   Play,
-  RefreshCw
+  RefreshCw,
+  Search
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { AlternativeCoachModal } from "@/components/AlternativeCoachModal";
+import { ExerciseSelectorModal } from "@/components/ExerciseSelectorModal";
 
 export default function WorkoutPage() {
   const [loading, setLoading] = React.useState(false);
@@ -20,8 +22,44 @@ export default function WorkoutPage() {
   const [currentSet, setCurrentSet] = React.useState(1);
   const [formData, setFormData] = React.useState({ weight: '', reps: '', feeling: '' });
   const [workoutStarted, setWorkoutStarted] = React.useState(false);
-  const [currentExercise, setCurrentExercise] = React.useState("Bench Press");
+  const [currentExercise, setCurrentExercise] = React.useState({
+    id: "Barbell_Bench_Press_-_Medium_Grip", 
+    name: "ベンチプレス"
+  });
   const [showAltModal, setShowAltModal] = React.useState(false);
+  const [showExerciseSelector, setShowExerciseSelector] = React.useState(false);
+  const [targetSets, setTargetSets] = React.useState(3);
+  const [editingTargetSets, setEditingTargetSets] = React.useState(false);
+  const [tempTargetSets, setTempTargetSets] = React.useState(3);
+
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+
+  // 種目が変わったら目標セット数を取得
+  React.useEffect(() => {
+    const fetchTargetSets = async () => {
+      try {
+        const res = await fetch(`${apiUrl}/api/exercises/target_sets?user_id=1&exercise_id=${encodeURIComponent(currentExercise.id)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setTargetSets(data.target_sets ?? 3);
+          setTempTargetSets(data.target_sets ?? 3);
+        }
+      } catch { /* デフォルト3セットのまま */ }
+    };
+    fetchTargetSets();
+  }, [currentExercise.id]);
+
+  const saveTargetSets = async (value: number) => {
+    setTargetSets(value);
+    setEditingTargetSets(false);
+    try {
+      await fetch(`${apiUrl}/api/exercises/target_sets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 1, exercise_id: currentExercise.id, target_sets: value })
+      });
+    } catch { /* 無視 */ }
+  };
 
   const startWorkout = () => {
     setWorkoutStarted(true);
@@ -36,7 +74,7 @@ export default function WorkoutPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          exercise_id: 1, 
+          exercise_id: currentExercise.id, 
           user_id: 1, 
           set_order: currentSet,
           weight: parseFloat(formData.weight),
@@ -102,10 +140,11 @@ export default function WorkoutPage() {
       <AnimatePresence>
         {showAltModal && (
           <AlternativeCoachModal 
-            exerciseName={currentExercise}
+            exerciseId={currentExercise.id}
+            exerciseName={currentExercise.name}
             onClose={() => setShowAltModal(false)}
-            onReplace={(newExName: string) => {
-              setCurrentExercise(newExName);
+            onReplace={(newEx: { id: string; name: string }) => {
+              setCurrentExercise({ id: newEx.id, name: newEx.name });
               setCurrentSet(1);
               setRecommendation(null);
               setShowAltModal(false);
@@ -113,6 +152,18 @@ export default function WorkoutPage() {
           />
         )}
       </AnimatePresence>
+
+      {showExerciseSelector && (
+        <ExerciseSelectorModal
+          onClose={() => setShowExerciseSelector(false)}
+          onSelect={(ex) => {
+            setCurrentExercise(ex);
+            setCurrentSet(1);
+            setRecommendation(null);
+            setShowExerciseSelector(false);
+          }}
+        />
+      )}
 
       <main className="max-w-3xl mx-auto relative z-10">
         <header className="mb-8 flex justify-between items-center">
@@ -132,17 +183,55 @@ export default function WorkoutPage() {
         <section className="glass rounded-[32px] p-6 lg:p-8 border-primary/20 bg-primary/5 overflow-hidden relative shadow-2xl shadow-primary/5">
           <div className="flex justify-between items-center mb-8 border-b border-white/5 pb-6">
             <div>
-              <h2 className="text-2xl font-bold italic tracking-wider mb-2">{currentExercise}</h2>
-              <button 
-                onClick={() => setShowAltModal(true)}
-                className="text-[10px] font-bold text-white/50 hover:text-primary flex items-center gap-1 transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/10"
-              >
-                <RefreshCw className="w-3 h-3" /> 機材が空いていない等で種目を変更
-              </button>
+              <h2 className="text-2xl font-bold italic tracking-wider mb-2">{currentExercise.name}</h2>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setShowExerciseSelector(true)}
+                  className="text-[10px] font-bold text-primary hover:text-primary/80 flex items-center gap-1 transition-colors bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg border border-primary/20"
+                >
+                  <Search className="w-3 h-3" /> 種目を検索して変更
+                </button>
+                <button 
+                  onClick={() => setShowAltModal(true)}
+                  className="text-[10px] font-bold text-white/50 hover:text-primary flex items-center gap-1 transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/10"
+                >
+                  <RefreshCw className="w-3 h-3" /> AIに代替種目を聞く
+                </button>
+              </div>
             </div>
+          </div>
+          {/* SET カウンター＆目標セット数 */}
+          <div className="flex flex-col items-end gap-1">
             <div className="px-5 py-2 bg-primary/20 rounded-2xl text-sm font-black text-primary border border-primary/30">
-              SET {currentSet}
+              SET {currentSet} / {targetSets}
             </div>
+            {/* 進捗バー */}
+            <div className="flex gap-1">
+              {Array.from({ length: targetSets }).map((_, i) => (
+                <div
+                  key={i}
+                  className={`h-1.5 w-5 rounded-full transition-colors ${
+                    i < currentSet ? 'bg-primary' : 'bg-white/10'
+                  }`}
+                />
+              ))}
+            </div>
+            {/* 目標セット数の編集 */}
+            {editingTargetSets ? (
+              <div className="flex items-center gap-1 mt-1">
+                <button onClick={() => saveTargetSets(Math.max(1, tempTargetSets - 1))} className="w-6 h-6 bg-white/10 rounded-lg text-white font-bold hover:bg-white/20 transition-colors flex items-center justify-center text-xs">−</button>
+                <span className="text-xs text-white/70 w-10 text-center font-bold">{tempTargetSets} セット</span>
+                <button onClick={() => saveTargetSets(Math.min(20, tempTargetSets + 1))} className="w-6 h-6 bg-white/10 rounded-lg text-white font-bold hover:bg-white/20 transition-colors flex items-center justify-center text-xs">＋</button>
+                <button onClick={() => setEditingTargetSets(false)} className="text-[10px] text-white/40 ml-1 hover:text-white/60">✕</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setTempTargetSets(targetSets); setEditingTargetSets(true); }}
+                className="text-[10px] text-white/30 hover:text-white/60 transition-colors mt-0.5"
+              >
+                目標セット数を変更
+              </button>
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-8">

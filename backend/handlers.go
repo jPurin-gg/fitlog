@@ -3,13 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 )
 
 type RecommendRequest struct {
 	UserID     int     `json:"user_id"`
-	ExerciseID int     `json:"exercise_id"`
+	ExerciseID string  `json:"exercise_id"`
 	SetOrder   int     `json:"set_order"`
 	Weight     float64 `json:"weight"`
 	Reps       int     `json:"reps"`
@@ -50,22 +51,61 @@ func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 	// 理由もあわせて返答してください。"
 	// -----------------------------
 	
-	// 1. 本来はここでDBに保存
-	// INSERT INTO workout_sets (user_id, exercise_id, weight, reps, feeling, set_order) VALUES (...)
-	
-	// 2. 過去最大重量の取得
+	// 1. 過去最大重量の取得
 	var maxWeight float64
 	if app.db != nil {
-		// 実際のDBから過去の最大重量を取得します
-		app.db.QueryRow("SELECT COALESCE(MAX(weight), 0) FROM workout_sets WHERE user_id = $1 AND exercise_id = $2", req.UserID, req.ExerciseID).Scan(&maxWeight)
+		app.db.QueryRow("SELECT COALESCE(max_weight, 0) FROM user_exercise_stats WHERE user_id = $1 AND exercise_id = $2", req.UserID, req.ExerciseID).Scan(&maxWeight)
 	}
 	
-	// 初回利用時、もしくは開発環境でDBに繋がっていない場合のダミー値
+	// 初回利用時のダミー値
 	if maxWeight == 0 {
-		maxWeight = 100.0
+		maxWeight = 10.0 // 何もない場合の基準
 	}
 
-	// 今回の入力が仮に最高重量を上回っていた場合、maxWeightを更新しておく（シミュレーション用）
+	// 2. 本物のDBへの保存処理
+	if app.db != nil {
+		var workoutID int
+		// 今日のワークアウトを探す
+		err := app.db.QueryRow(`
+			SELECT id FROM workouts 
+			WHERE user_id = $1 AND ended_at IS NULL AND DATE(started_at) = CURRENT_DATE 
+			LIMIT 1`, req.UserID).Scan(&workoutID)
+		
+		if err != nil {
+			// 新しく作成
+			err = app.db.QueryRow(`
+				INSERT INTO workouts (user_id) VALUES ($1) RETURNING id
+			`, req.UserID).Scan(&workoutID)
+			if err != nil {
+				log.Printf("Failed to create workout: %v", err)
+			}
+		}
+
+		if workoutID > 0 {
+			isPR := req.Weight > maxWeight
+
+			// workout_sets に挿入
+			_, err = app.db.Exec(`
+				INSERT INTO workout_sets (workout_id, exercise_id, weight, reps, set_order, feeling, is_pr)
+				VALUES ($1, $2, $3, $4, $5, $6, $7)
+			`, workoutID, req.ExerciseID, req.Weight, req.Reps, req.SetOrder, req.Feeling, isPR)
+			if err != nil {
+				log.Printf("Failed to insert workout_set: %v", err)
+			}
+
+			// user_exercise_stats を更新
+			_, err = app.db.Exec(`
+				INSERT INTO user_exercise_stats (user_id, exercise_id, weight, max_weight)
+				VALUES ($1, $2, $3, GREATEST($3, COALESCE((SELECT max_weight FROM user_exercise_stats WHERE user_id = $1 AND exercise_id = $2), 0)))
+				ON CONFLICT (user_id, exercise_id) 
+				DO UPDATE SET weight = EXCLUDED.weight, max_weight = GREATEST(user_exercise_stats.max_weight, EXCLUDED.weight), updated_at = CURRENT_TIMESTAMP
+			`, req.UserID, req.ExerciseID, req.Weight)
+			if err != nil {
+				log.Printf("Failed to upsert user_exercise_stats: %v", err)
+			}
+		}
+	}
+	// 今回の入力が仮に最高重量を上回っていた場合、maxWeightを更新しておく（シミュレーション用ではなく実際のデータとして使う）
 	if req.Weight > maxWeight {
 		maxWeight = req.Weight
 	}

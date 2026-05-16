@@ -4,7 +4,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import { Loader2, X, MessageSquare, BrainCircuit, ArrowRight } from "lucide-react";
 
-export function AlternativeCoachModal({ exerciseName, onClose, onReplace }: any) {
+export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onReplace }: any) {
   const [loading, setLoading] = React.useState(false);
   const [reason, setReason] = React.useState("");
   const [customName, setCustomName] = React.useState("");
@@ -17,13 +17,12 @@ export function AlternativeCoachModal({ exerciseName, onClose, onReplace }: any)
       const res = await fetch(`${apiUrl}/api/alternative`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ exercise: exerciseName, reason: reason })
+        body: JSON.stringify({ exercise_id: exerciseId, exercise: exerciseName, reason: reason })
       });
       const data = await res.json();
       setResult(data);
     } catch (e) {
       console.error(e);
-      // フォールバック
       setResult({
         message: "ネットワークエラーが発生しました。手動で種目名を入力して変更できます。",
         alternatives: []
@@ -119,7 +118,7 @@ export function AlternativeCoachModal({ exerciseName, onClose, onReplace }: any)
               {result.alternatives.map((alt: any, idx: number) => (
                 <button 
                   key={idx}
-                  onClick={() => onReplace(alt.name)}
+                  onClick={() => onReplace({ id: alt.id || `custom_${Date.now()}`, name: alt.name })}
                   className="w-full text-left p-4 bg-white/5 rounded-2xl border border-white/5 hover:border-primary/50 hover:bg-primary/5 transition-all group"
                 >
                   <div className="flex justify-between items-center mb-1">
@@ -140,7 +139,7 @@ export function AlternativeCoachModal({ exerciseName, onClose, onReplace }: any)
                 placeholder="リストにない種目を手動で入力"
               />
               <button 
-                onClick={() => customName && onReplace(customName)}
+                onClick={() => customName && onReplace({ id: `custom_${Date.now()}`, name: customName })}
                 disabled={!customName}
                 className="px-6 bg-white/10 text-white font-bold rounded-xl hover:bg-white/20 transition-colors disabled:opacity-30"
               >

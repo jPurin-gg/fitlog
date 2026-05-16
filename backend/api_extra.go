@@ -50,42 +50,82 @@ func (app *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ChartData (Last 7 days mock data, just static for now as simple DB fetch isn't fully comprehensive)
-resp.ChartData = []int{40, 70, 45, 90, 65, 80, 55}
+	resp.ChartData = []int{0, 0, 0, 0, 0, 0, 0}
+	if app.db != nil {
+		rows, err := app.db.Query(`
+			SELECT generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, '1 day')::date AS d
+		`)
+		if err == nil {
+			defer rows.Close()
+			var dates []time.Time
+			for rows.Next() {
+				var d time.Time
+				rows.Scan(&d)
+				dates = append(dates, d)
+			}
+			
+			for i, d := range dates {
+				var count int
+				app.db.QueryRow(`
+					SELECT COUNT(*) FROM workout_sets ws
+					JOIN workouts w ON ws.workout_id = w.id
+					WHERE w.user_id = $1 AND DATE(ws.created_at) = $2
+				`, userID, d).Scan(&count)
+				if i < len(resp.ChartData) {
+					resp.ChartData[i] = count
+				}
+			}
+		}
+	}
 
-// Fetch up to 3 recent workouts
-rows, err := app.db.Query(`
-SELECT id, started_at, COALESCE(ended_at, started_at), notes
-FROM workouts
-WHERE user_id = $1
-ORDER BY started_at DESC
-LIMIT 3
-`, userID)
+	// Fetch up to 3 recent workouts
+	if app.db != nil {
+		rows, err := app.db.Query(`
+			SELECT w.id, w.started_at, COALESCE(w.ended_at, w.started_at), COALESCE(w.notes, 'Strength')
+			FROM workouts w
+			WHERE w.user_id = $1
+			ORDER BY w.started_at DESC
+			LIMIT 3
+		`, userID)
 
-if err == nil {
-defer rows.Close()
-for rows.Next() {
-var id int
-var start time.Time
-var end time.Time
-var notes string
-if err := rows.Scan(&id, &start, &end, &notes); err == nil {
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var id int
+				var start time.Time
+				var end time.Time
+				var notes string
+				if err := rows.Scan(&id, &start, &end, &notes); err == nil {
+					
+					// もし終了時間が同じ（記録中）なら、最後のセットの時間を取得
+					var lastSetTime time.Time
+					err = app.db.QueryRow("SELECT MAX(created_at) FROM workout_sets WHERE workout_id = $1", id).Scan(&lastSetTime)
+					if err == nil && !lastSetTime.IsZero() && lastSetTime.After(start) {
+						end = lastSetTime
+					}
 
-dur := end.Sub(start).Minutes()
-if dur < 0 {
-dur = 0
-}
+					dur := end.Sub(start).Minutes()
+					if dur < 1 {
+						dur = 1 // 少なくとも1分
+					}
 
-resp.RecentWorkouts = append(resp.RecentWorkouts, WorkoutItemData{
-ID:       id,
-Title    : notes + " Workout",
-Type     : "Strength",
-Duration : fmt.Sprintf("%.0f min", dur),
-Calories : fmt.Sprintf("%.0f kcal", dur*6+50), // silly mock
-Time     : start.Format("03:04 PM"),
-})
-}
-}
-}
+					title := notes + " Workout"
+					if notes == "Strength" {
+						title = "Workout Session"
+					}
+
+					resp.RecentWorkouts = append(resp.RecentWorkouts, WorkoutItemData{
+						ID:       id,
+						Title:    title,
+						Type:     notes,
+						Duration: fmt.Sprintf("%.0f min", dur),
+						Calories: fmt.Sprintf("%.0f kcal", dur*5), // mock
+						Time:     start.Format("03:04 PM"),
+					})
+				}
+			}
+		}
+	}
 
 if len(resp.RecentWorkouts) == 0 {
 resp.RecentWorkouts = []WorkoutItemData{
@@ -157,11 +197,13 @@ json.NewEncoder(w).Encode(resp)
 }
 
 type AlternativeRequest struct {
-	Exercise string `json:"exercise"`
-	Reason   string `json:"reason"`
+	ExerciseID string `json:"exercise_id"`
+	Exercise   string `json:"exercise"`
+	Reason     string `json:"reason"`
 }
 
 type AlternativeExercise struct {
+	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 }
@@ -185,43 +227,90 @@ func (app *App) handleAlternative(w http.ResponseWriter, r *http.Request) {
 
 	resp := AlternativeResponse{
 		Alternatives: []AlternativeExercise{},
-		Message:      "機材が埋まっていても大丈夫です。代わりに以下の種目で同じ部位をしっかり追い込みましょう！",
+		Message:      "機材が埋まっていても大丈夫です。代わりに以下の種目でしっかり追い込みましょう！",
 	}
 
-	// 簡易的な文字列マッチングによるモックAI
-	ex := req.Exercise
-	
-	switch {
-	case strings.Contains(ex, "ベンチ") || strings.Contains(ex, "胸"):
-		resp.Alternatives = []AlternativeExercise{
-			{Name: "ダンベルプレス", Description: "ベンチ台が空いていれば、ダンベルを使って同じように大胸筋を効果的に鍛えられます。"},
-			{Name: "チェストプレスマシン", Description: "マシンを使えば安全かつピンポイントで胸を追い込めます。軌道が固定されているので初心者にもおすすめです。"},
-			{Name: "プッシュアップ (ディップス)", Description: "もし何も空いていなければ、自重やディップススタンドで極限まで追い込みましょう！"},
+	if app.db != nil && req.ExerciseID != "" {
+		// 1. 元の種目の対象筋肉を取得
+		var pMusclesJSON []byte
+		err := app.db.QueryRow("SELECT primary_muscles FROM exercises WHERE id = $1 LIMIT 1", req.ExerciseID).Scan(&pMusclesJSON)
+		
+		if err == nil {
+			var pMuscles []string
+			json.Unmarshal(pMusclesJSON, &pMuscles)
+			
+			if len(pMuscles) > 0 {
+				var arr []string
+				for _, m := range pMuscles {
+					arr = append(arr, fmt.Sprintf("'%s'", strings.ReplaceAll(m, "'", "''")))
+				}
+				arrStr := "ARRAY[" + strings.Join(arr, ",") + "]"
+				
+				// 同じ筋肉を鍛えられる他の種目を最大30件取得
+				rows, err := app.db.Query(fmt.Sprintf(`
+					SELECT id, name, equipment FROM exercises 
+					WHERE primary_muscles ?| %s 
+					  AND id != $1 
+					LIMIT 30
+				`, arrStr), req.ExerciseID)
+				
+				if err == nil {
+					defer rows.Close()
+					var exList []string
+					for rows.Next() {
+						var idStr, nStr, eqStr string
+						rows.Scan(&idStr, &nStr, &eqStr)
+						exList = append(exList, fmt.Sprintf("- ID: %s, Name: %s (器具: %s)", idStr, nStr, eqStr))
+					}
+					
+					if len(exList) > 0 {
+						dbContext := "以下の種目が同じ筋肉( " + strings.Join(pMuscles, ", ") + " )を鍛えられるデータベース内の候補です:\n" + strings.Join(exList, "\n")
+						
+						systemPrompt := `あなたは優秀なパーソナルトレーナーAIです。ユーザーが現在行おうとしている種目を別の種目に変更したいと考えています。
+データベース内の候補リストの中から、ユーザーの理由（例: マシンが空いていない等）に最も適した代替種目を2〜3個選び、JSON形式で出力してください。
+選んだ種目のIDとNameは必ず候補リストにあるものをそのまま使用してください。
+以下のJSONフォーマットに必ず従ってください:
+{
+  "message": "励ましのメッセージやアドバイス",
+  "alternatives": [
+    {
+      "id": "候補リストにあるID",
+      "name": "候補リストにあるName",
+      "description": "なぜこの種目がおすすめなのか、理由や簡単なやり方"
+    }
+  ]
+}`
+						userPrompt := fmt.Sprintf("変更したい元の種目: %s\n変更したい理由: %s\n\n%s", req.Exercise, req.Reason, dbContext)
+						
+						aiJSON, err := callAI(systemPrompt, userPrompt, true)
+						if err == nil {
+							aiStr := strings.TrimSpace(aiJSON)
+							if strings.HasPrefix(aiStr, "```json") {
+								aiStr = strings.TrimPrefix(aiStr, "```json")
+								aiStr = strings.TrimSuffix(strings.TrimSpace(aiStr), "```")
+							}
+							json.Unmarshal([]byte(aiStr), &resp)
+						} else {
+							fmt.Printf("AI Alternative Error: %v\n", err)
+						}
+					}
+				}
+			}
 		}
-	case strings.Contains(ex, "スクワット") || strings.Contains(ex, "脚"):
-		resp.Alternatives = []AlternativeExercise{
-			{Name: "レッグプレスマシン", Description: "フリーウェイトが使えない場合、レッグプレスで脚全体に高負荷をかけるのが最適です。"},
-			{Name: "ブルガリアンスクワット", Description: "ダンベルと適当な台があれば、片脚ずつ強烈な刺激を入れられます。"},
-			{Name: "レッグエクステンション", Description: "大腿四頭筋に絞って集中的に追い込むのも一つの手です。"},
+	}
+
+	// AI失敗時のフォールバック
+	if len(resp.Alternatives) == 0 {
+		ex := req.Exercise
+		if strings.Contains(ex, "ベンチ") || strings.Contains(ex, "胸") {
+			resp.Alternatives = []AlternativeExercise{
+				{ID: "Dumbbell_Bench_Press", Name: "ダンベルプレス", Description: "ベンチ台が空いていればダンベルで同等の効果を得られます。"},
+			}
+		} else {
+			resp.Alternatives = []AlternativeExercise{
+				{ID: "custom_alt_" + fmt.Sprintf("%d", time.Now().Unix()), Name: ex + " (代替)", Description: "現在AIが代替種目を取得できませんでした。"},
+			}
 		}
-	case strings.Contains(ex, "デッドリフト") || strings.Contains(ex, "背中") || strings.Contains(ex, "懸垂") || strings.Contains(ex, "ラット"):
-		resp.Alternatives = []AlternativeExercise{
-			{Name: "ラットプルダウン", Description: "懸垂やデッドリフトの代わりに、広背筋を安全に鍛える王道マシンです。"},
-			{Name: "ダンベルロウ", Description: "ダンベル一つで背中の厚みを作ることができます。"},
-			{Name: "シーテッドロウ", Description: "マシンのケーブルを使って、背中の中央部を集中的に刺激します。"},
-		}
-	case strings.Contains(ex, "プレス") || strings.Contains(ex, "肩"):
-		resp.Alternatives = []AlternativeExercise{
-			{Name: "ダンベルショルダープレス", Description: "バーベルがなくてもダンベルがあれば同等の効果を得られます。"},
-			{Name: "サイドレイズ", Description: "マシンの代わりにダンベルやケーブルで肩の側部を集中的に狙いましょう。"},
-		}
-	default:
-		// フォールバック
-		resp.Alternatives = []AlternativeExercise{
-			{Name: "ダンベルバリエーション", Description: "対象の部位をダンベルを使って鍛える種目に変更しましょう。"},
-			{Name: "専用マシン", Description: "同じ部位をターゲットにした空いているマシンを活用しましょう。"},
-		}
-		resp.Message = fmt.Sprintf("「%s」のフリーウェイトが空いていない場合、ターゲットとする筋肉をマシンやダンベルで代替できます！", ex)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

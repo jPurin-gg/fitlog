@@ -3,13 +3,14 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home as HomeIcon, Calendar as CalendarIcon, PlusCircle } from "lucide-react";
+import { Home as HomeIcon, Calendar as CalendarIcon, PlusCircle, Library as LibraryIcon } from "lucide-react";
 
 export function BottomNav() {
   const pathname = usePathname();
 
   const links = [
     { href: "/", label: "ホーム", icon: HomeIcon },
+    { href: "/exercises", label: "辞書", icon: LibraryIcon },
     { href: "/workout", label: "記録する", icon: PlusCircle },
     { href: "/calendar", label: "カレンダー", icon: CalendarIcon },
   ];

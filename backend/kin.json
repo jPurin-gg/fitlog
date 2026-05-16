@@ -1,0 +1,134 @@
+[
+  {
+    "name": "ベンチプレス",
+    "category": "胸",
+    "target_muscle": "大胸筋",
+    "default_reps": 10
+  },
+  {
+    "name": "ダンベルプレス",
+    "category": "胸",
+    "target_muscle": "大胸筋",
+    "default_reps": 15
+  },
+  {
+    "name": "ダンベルフライ",
+    "category": "胸",
+    "target_muscle": "大胸筋",
+    "default_reps": 15
+  },
+  {
+    "name": "チェストプレスマシン",
+    "category": "胸",
+    "target_muscle": "大胸筋",
+    "default_reps": 15
+  },
+  {
+    "name": "デッドリフト",
+    "category": "背中",
+    "target_muscle": "広背筋・脊柱起立筋",
+    "default_reps": 10
+  },
+  {
+    "name": "懸垂（チンニング）",
+    "category": "背中",
+    "target_muscle": "広背筋",
+    "default_reps": 15
+  },
+  {
+    "name": "ラットプルダウン",
+    "category": "背中",
+    "target_muscle": "広背筋",
+    "default_reps": 15
+  },
+  {
+    "name": "ベントオーバーロウ",
+    "category": "背中",
+    "target_muscle": "広背筋",
+    "default_reps": 10
+  },
+  {
+    "name": "スクワット",
+    "category": "脚",
+    "target_muscle": "大腿四頭筋・大臀筋",
+    "default_reps": 10
+  },
+  {
+    "name": "レッグプレス",
+    "category": "脚",
+    "target_muscle": "大腿四頭筋・大臀筋",
+    "default_reps": 15
+  },
+  {
+    "name": "レッグエクステンション",
+    "category": "脚",
+    "target_muscle": "大腿四頭筋",
+    "default_reps": 15
+  },
+  {
+    "name": "ブルガリアンスクワット",
+    "category": "脚",
+    "target_muscle": "大臀筋・ハムストリングス",
+    "default_reps": 15
+  },
+  {
+    "name": "カーフレイズ",
+    "category": "脚",
+    "target_muscle": "下腿三頭筋",
+    "default_reps": 15
+  },
+  {
+    "name": "ショルダープレス",
+    "category": "肩",
+    "target_muscle": "三角筋",
+    "default_reps": 10
+  },
+  {
+    "name": "サイドレイズ",
+    "category": "肩",
+    "target_muscle": "三角筋中部長",
+    "default_reps": 15
+  },
+  {
+    "name": "リアレイズ",
+    "category": "肩",
+    "target_muscle": "三角筋後部長",
+    "default_reps": 15
+  },
+  {
+    "name": "バーベルカール",
+    "category": "腕",
+    "target_muscle": "上腕二頭筋",
+    "default_reps": 10
+  },
+  {
+    "name": "ハンマーカール",
+    "category": "腕",
+    "target_muscle": "上腕二頭筋",
+    "default_reps": 15
+  },
+  {
+    "name": "トライセプスエクステンション",
+    "category": "腕",
+    "target_muscle": "上腕三頭筋",
+    "default_reps": 15
+  },
+  {
+    "name": "ディップス",
+    "category": "腕",
+    "target_muscle": "上腕三頭筋・大胸筋下部",
+    "default_reps": 15
+  },
+  {
+    "name": "クランチ",
+    "category": "腹",
+    "target_muscle": "腹直筋",
+    "default_reps": 15
+  },
+  {
+    "name": "プランク",
+    "category": "腹",
+    "target_muscle": "体幹",
+    "default_reps": 60
+  }
+]

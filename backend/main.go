@@ -22,6 +22,12 @@ func main() {
 
 	// データベース初期化
 	db := initDB()
+
+	// マスターデータの自動挿入（初回のみ）
+	if err := seedDatabase(db); err != nil {
+		log.Fatalf("Failed to seed database: %v", err)
+	}
+
 	app := &App{db: db}
 
 	// エンドポイント
@@ -33,7 +39,7 @@ func main() {
 				allowedOrigin = "http://localhost:3000"
 			}
 			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusOK)
@@ -43,11 +49,16 @@ func main() {
 		}
 	}
 
+	// 注意: より具体的なパスを先に登録する（Go の http.ServeMux は最長マッチのため）
+	http.HandleFunc("/api/exercises/target_sets", cors(app.handleTargetSets))
+	http.HandleFunc("/api/exercises/custom", cors(app.handleAddCustomExercise))
+	http.HandleFunc("/api/exercises", cors(app.handleExercises))
 	http.HandleFunc("/api/recommend", cors(app.handleRecommend))
-	http.HandleFunc("/api/monthly-plan", cors(app.handleMonthlyPlan))
 	http.HandleFunc("/api/dashboard", cors(app.handleDashboard))
 	http.HandleFunc("/api/calendar", cors(app.handleCalendar))
 	http.HandleFunc("/api/alternative", cors(app.handleAlternative))
+	http.HandleFunc("/api/monthly-plan", cors(app.handleMonthlyPlan))
+
 
 	fmt.Println("Server started on :8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
