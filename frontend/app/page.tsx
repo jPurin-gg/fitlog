@@ -46,6 +46,7 @@ export default function Home() {
   const [monthlyPlan, setMonthlyPlan] = React.useState<any>(null);
   const [dashboardData, setDashboardData] = React.useState<any>(null);
   const [altModalData, setAltModalData] = React.useState<{dayIdx: number, exIdx: number, exName: string} | null>(null);
+  const [today, setToday] = React.useState<Date | null>(null);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
   const currentMonth = getCurrentPlanMonth();
 
@@ -68,6 +69,7 @@ export default function Home() {
   };
 
   React.useEffect(() => {
+    setToday(new Date());
     fetch(`${apiUrl}/api/dashboard`)
       .then(res => res.json())
       .then(data => setDashboardData(data))
@@ -160,7 +162,7 @@ export default function Home() {
                 </div>
                 <div>
                   <h2 className="text-2xl font-bold tracking-tight">今日のメニュー</h2>
-                  <p className="text-white/50 text-sm font-medium">{new Date().toLocaleDateString('ja-JP', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
+                  <p className="text-white/50 text-sm font-medium">{today ? today.toLocaleDateString('ja-JP', { weekday: 'long', month: 'long', day: 'numeric' }) : ''}</p>
                 </div>
               </div>
 
@@ -177,7 +179,7 @@ export default function Home() {
                   );
                 }
 
-                const dayOfWeek = new Date().getDay();
+                const dayOfWeek = today ? today.getDay() : -1;
                 const days = monthlyPlan.recommended_days || [1, 3, 5];
                 const idx = days.indexOf(dayOfWeek);
                 if (idx === -1) {
