@@ -71,6 +71,8 @@ func ensureSchema(db *sql.DB) error {
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE (user_id, plan_date, status)
 		);
+
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
 	`)
 	return err
 }

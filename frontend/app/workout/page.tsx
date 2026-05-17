@@ -22,6 +22,7 @@ import Link from "next/link";
 import { AlternativeCoachModal } from "@/components/AlternativeCoachModal";
 import { ExerciseSelectorModal } from "@/components/ExerciseSelectorModal";
 import { WorkoutSummaryView, type WorkoutSummary } from "@/components/WorkoutSummaryView";
+import { useAuth } from "@/components/AuthGate";
 
 interface WorkoutPlanExercise {
   exercise_id: string;
@@ -60,6 +61,7 @@ function displayPlanText(text?: string) {
 }
 
 export default function WorkoutPage() {
+  const { user } = useAuth();
   const [loading, setLoading] = React.useState(false);
   const [finishing, setFinishing] = React.useState(false);
   const [recommendation, setRecommendation] = React.useState<any>(null);
@@ -87,7 +89,7 @@ export default function WorkoutPage() {
     const fetchTargetSets = async () => {
       if (workoutPlan) return;
       try {
-        const res = await fetch(`${apiUrl}/api/exercises/target_sets?user_id=1&exercise_id=${encodeURIComponent(currentExercise.id)}`);
+        const res = await fetch(`${apiUrl}/api/exercises/target_sets?user_id=${user.id}&exercise_id=${encodeURIComponent(currentExercise.id)}`);
         if (res.ok) {
           const data = await res.json();
           setTargetSets(data.target_sets ?? 3);
@@ -96,7 +98,7 @@ export default function WorkoutPage() {
       } catch { /* デフォルト3セットのまま */ }
     };
     fetchTargetSets();
-  }, [apiUrl, currentExercise.id, workoutPlan]);
+  }, [apiUrl, currentExercise.id, user.id, workoutPlan]);
 
   const saveTargetSets = async (value: number) => {
     setTargetSets(value);
@@ -105,7 +107,7 @@ export default function WorkoutPage() {
       await fetch(`${apiUrl}/api/exercises/target_sets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 1, exercise_id: currentExercise.id, target_sets: value })
+        body: JSON.stringify({ user_id: user.id, exercise_id: currentExercise.id, target_sets: value })
       });
     } catch { /* 無視 */ }
   };
@@ -135,7 +137,7 @@ export default function WorkoutPage() {
       const res = await fetch(`${apiUrl}/api/workout-plan/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 1 })
+        body: JSON.stringify({ user_id: user.id })
       });
       if (!res.ok) {
         setAiError(await res.text() || '今日の計画作成に失敗しました。');
@@ -164,7 +166,7 @@ export default function WorkoutPage() {
         body: JSON.stringify({ 
           exercise_id: currentExercise.id, 
           workout_id: workoutPlan?.workout_id || 0,
-          user_id: 1, 
+          user_id: user.id,
           set_order: currentSet,
           weight: parseFloat(formData.weight),
           reps: parseInt(formData.reps),
@@ -218,7 +220,7 @@ export default function WorkoutPage() {
       const res = await fetch(`${apiUrl}/api/workouts/finish`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 1, workout_id: workoutPlan?.workout_id || 0 })
+        body: JSON.stringify({ user_id: user.id, workout_id: workoutPlan?.workout_id || 0 })
       });
       if (!res.ok) {
         setAiError(await res.text() || 'ワークアウト終了に失敗しました。');

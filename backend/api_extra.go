@@ -37,7 +37,7 @@ func (app *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := 1
+	userID := parseUserID(r.URL.Query().Get("user_id"))
 	_ = app.closeStaleWorkouts(userID)
 
 	var resp DashboardResponse
@@ -128,8 +128,9 @@ func (app *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 type WorkedOutDay struct {
-	Date int    `json:"date"`
-	Type string `json:"type"`
+	Date      int    `json:"date"`
+	WorkoutID int    `json:"workout_id"`
+	Type      string `json:"type"`
 }
 
 type CalendarResponse struct {
@@ -143,7 +144,7 @@ func (app *App) handleCalendar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := 1
+	userID := parseUserID(r.URL.Query().Get("user_id"))
 	_ = app.closeStaleWorkouts(userID)
 	yearStr := r.URL.Query().Get("year")
 	monthStr := r.URL.Query().Get("month")
@@ -162,27 +163,32 @@ func (app *App) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	resp.WorkedOutDates = []int{}
 	resp.WorkedOutDays = []WorkedOutDay{}
 
-	// get unique days in that month the user worked out
+	// get the latest completed workout for each day in that month
 	rows, err := app.db.Query(`
-		SELECT EXTRACT(DAY FROM started_at), MAX(COALESCE(notes, 'ワークアウト'))
+		SELECT DISTINCT ON (EXTRACT(DAY FROM started_at))
+			EXTRACT(DAY FROM started_at),
+			id,
+			COALESCE(notes, 'ワークアウト')
 		FROM workouts
 		WHERE user_id = $1
-		  AND ended_at IS NOT NULL
-		  AND EXTRACT(YEAR FROM started_at) = $2
-		  AND EXTRACT(MONTH FROM started_at) = $3
-		GROUP BY EXTRACT(DAY FROM started_at)
+			AND ended_at IS NOT NULL
+			AND EXTRACT(YEAR FROM started_at) = $2
+			AND EXTRACT(MONTH FROM started_at) = $3
+		ORDER BY EXTRACT(DAY FROM started_at), started_at DESC, id DESC
 	`, userID, year, month)
 
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var d float64
+			var workoutID int
 			var t string
-			if err := rows.Scan(&d, &t); err == nil {
+			if err := rows.Scan(&d, &workoutID, &t); err == nil {
 				resp.WorkedOutDates = append(resp.WorkedOutDates, int(d))
 				resp.WorkedOutDays = append(resp.WorkedOutDays, WorkedOutDay{
-					Date: int(d),
-					Type: displayWorkoutType(t),
+					Date:      int(d),
+					WorkoutID: workoutID,
+					Type:      displayWorkoutType(t),
 				})
 			}
 		}

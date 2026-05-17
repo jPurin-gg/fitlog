@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { WorkoutSummaryView, type WorkoutSummary } from "@/components/WorkoutSummaryView";
+import { useAuth } from "@/components/AuthGate";
 
 interface WorkoutDetail {
   id: number;
@@ -28,6 +29,7 @@ function formatDateTime(value: string) {
 }
 
 export default function WorkoutDetailPage() {
+  const { user } = useAuth();
   const params = useParams<{ id: string }>();
   const [workout, setWorkout] = React.useState<WorkoutDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -39,7 +41,7 @@ export default function WorkoutDetailPage() {
       setLoading(true);
       setError("");
       try {
-        const res = await fetch(`${apiUrl}/api/workouts/${params.id}?user_id=1`);
+        const res = await fetch(`${apiUrl}/api/workouts/${params.id}?user_id=${user.id}`);
         if (!res.ok) {
           setError(await res.text() || "ワークアウト履歴を読み込めませんでした。");
           return;
@@ -53,7 +55,7 @@ export default function WorkoutDetailPage() {
       }
     };
     if (params.id) loadWorkout();
-  }, [apiUrl, params.id]);
+  }, [apiUrl, params.id, user.id]);
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white p-4 md:p-8 relative overflow-hidden">

@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlternativeCoachModal } from "@/components/AlternativeCoachModal";
+import { LogoutButton, useAuth } from "@/components/AuthGate";
 
 function getCurrentPlanMonth() {
   const now = new Date();
@@ -43,6 +44,7 @@ function displayPlanText(text?: string) {
 }
 
 export default function Home() {
+  const { user } = useAuth();
   const [showMonthlyModal, setShowMonthlyModal] = React.useState(false);
   const [monthlyPlan, setMonthlyPlan] = React.useState<any>(null);
   const [dashboardData, setDashboardData] = React.useState<any>(null);
@@ -52,7 +54,7 @@ export default function Home() {
   const currentMonth = getCurrentPlanMonth();
 
   const saveMonthlyPlan = async (plan: any) => {
-    const planToSave = { ...plan, user_id: 1, plan_month: plan.plan_month || currentMonth };
+    const planToSave = { ...plan, user_id: user.id, plan_month: plan.plan_month || currentMonth };
     setMonthlyPlan(planToSave);
     try {
       const res = await fetch(`${apiUrl}/api/monthly-plan`, {
@@ -71,12 +73,12 @@ export default function Home() {
 
   React.useEffect(() => {
     setToday(new Date());
-    fetch(`${apiUrl}/api/dashboard`)
+    fetch(`${apiUrl}/api/dashboard?user_id=${user.id}`)
       .then(res => res.json())
       .then(data => setDashboardData(data))
       .catch(console.error);
 
-    fetch(`${apiUrl}/api/monthly-plan?user_id=1&month=${currentMonth}`)
+    fetch(`${apiUrl}/api/monthly-plan?user_id=${user.id}&month=${currentMonth}`)
       .then(async res => {
         if (res.status === 404) {
           setTimeout(() => setShowMonthlyModal(true), 1000);
@@ -92,13 +94,14 @@ export default function Home() {
         console.error("Failed to fetch monthly plan:", err);
         setTimeout(() => setShowMonthlyModal(true), 1000);
       });
-  }, [apiUrl, currentMonth]);
+  }, [apiUrl, currentMonth, user.id]);
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white p-4 md:p-8 font-sans selection:bg-primary/30">
       <AnimatePresence>
         {showMonthlyModal && (
-          <MonthlyPlanModal 
+          <MonthlyPlanModal
+            userId={user.id}
             onClose={() => setShowMonthlyModal(false)} 
             onPlanGenerated={(plan: any) => {
               setMonthlyPlan(plan);
@@ -131,7 +134,7 @@ export default function Home() {
           <div className="min-w-0">
             <h1 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight mb-1">
               おかえりなさい
-              <span className="block text-gradient">みつきさん</span>
+              <span className="block text-gradient">{user.nickname}さん</span>
             </h1>
             <p className="text-white/50">今日のコンディションに合わせて進めましょう。</p>
           </div>
@@ -142,6 +145,7 @@ export default function Home() {
             <button className="flex-none p-3 glass rounded-2xl hover:bg-white/10 transition-colors">
               <Bell className="w-5 h-5 text-white/70" />
             </button>
+            <LogoutButton />
             <Link href="/workout" className="w-full sm:w-auto px-6 py-3 bg-primary text-black font-bold rounded-2xl glow-primary hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 justify-center">
               <Plus className="w-5 h-5" />
               <span>記録を始める</span>
@@ -276,7 +280,7 @@ export default function Home() {
 }
 
 
-function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
+function MonthlyPlanModal({ userId, onClose, onPlanGenerated }: any) {
   const [motivation, setMotivation] = React.useState("健康維持");
   const [frequency, setFrequency] = React.useState("週3-4回");
   const [loading, setLoading] = React.useState(false);
@@ -289,7 +293,7 @@ function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: 1,
+          user_id: userId,
           plan_month: getCurrentPlanMonth(),
           motivation,
           frequency

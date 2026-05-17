@@ -57,6 +57,7 @@ func main() {
 	http.HandleFunc("/api/exercises/target_sets", cors(app.handleTargetSets))
 	http.HandleFunc("/api/exercises/custom", cors(app.handleAddCustomExercise))
 	http.HandleFunc("/api/exercises", cors(app.handleExercises))
+	http.HandleFunc("/api/auth/login", cors(app.handleLogin))
 	http.HandleFunc("/api/recommend", cors(app.handleRecommend))
 	http.HandleFunc("/api/dashboard", cors(app.handleDashboard))
 	http.HandleFunc("/api/calendar", cors(app.handleCalendar))

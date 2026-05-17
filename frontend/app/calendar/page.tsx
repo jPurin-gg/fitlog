@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { ArrowLeft, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Dumbbell, Sparkles, Check } from "lucide-react";
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { useAuth } from "@/components/AuthGate";
 
 interface DayRoutine {
   day_name: string;
@@ -25,6 +26,7 @@ interface MonthlyPlan {
 
 interface WorkedOutDay {
   date: number;
+  workout_id: number;
   type: string;
 }
 
@@ -65,6 +67,7 @@ function displayPlanText(text?: string) {
 }
 
 export default function CalendarPage() {
+  const { user } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [plan, setPlan] = useState<MonthlyPlan | null>(null);
   const [planHistory, setPlanHistory] = useState<MonthlyPlan[]>([]);
@@ -75,17 +78,17 @@ export default function CalendarPage() {
   const selectedPlanMonth = formatPlanMonth(currentDate);
 
   useEffect(() => {
-    fetch(`${apiUrl}/api/monthly-plans?user_id=1`)
+    fetch(`${apiUrl}/api/monthly-plans?user_id=${user.id}`)
       .then(res => {
         if (!res.ok) throw new Error("Failed to fetch monthly plan history");
         return res.json();
       })
       .then(data => setPlanHistory(Array.isArray(data) ? data : []))
       .catch(err => console.error("Failed to fetch monthly plan history:", err));
-  }, [apiUrl]);
+  }, [apiUrl, user.id]);
 
   useEffect(() => {
-    fetch(`${apiUrl}/api/monthly-plan?user_id=1&month=${selectedPlanMonth}`)
+    fetch(`${apiUrl}/api/monthly-plan?user_id=${user.id}&month=${selectedPlanMonth}`)
       .then(res => {
         if (res.status === 404) return null;
         if (!res.ok) throw new Error("Failed to fetch monthly plan");
@@ -103,7 +106,7 @@ export default function CalendarPage() {
       .catch(err => console.error("Failed to fetch monthly plan:", err));
 
     // DBから実施済みの日付を取得する
-    fetch(`${apiUrl}/api/calendar?year=${currentDate.getFullYear()}&month=${currentDate.getMonth() + 1}`)
+    fetch(`${apiUrl}/api/calendar?user_id=${user.id}&year=${currentDate.getFullYear()}&month=${currentDate.getMonth() + 1}`)
       .then(res => res.json())
       .then(data => {
         if (data && data.worked_out_dates) {
@@ -118,7 +121,7 @@ export default function CalendarPage() {
         }
       })
       .catch(err => console.error("Failed to fetch calendar data:", err));
-  }, [apiUrl, currentDate, selectedPlanMonth]);
+  }, [apiUrl, currentDate, selectedPlanMonth, user.id]);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -139,7 +142,7 @@ export default function CalendarPage() {
   const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
 
   const getDayStatus = (dateNum: number | null) => {
-    if (!dateNum) return { isToday: false, isWorkedOut: false, isPlanned: false, type: "" };
+    if (!dateNum) return { isToday: false, isWorkedOut: false, isPlanned: false, type: "", workoutId: null as number | null };
     const dateObj = new Date(year, month, dateNum);
     const isToday = isCurrentMonth && dateNum === today.getDate();
     const isWorkedOut = workedOutDates.includes(dateNum);
@@ -159,11 +162,13 @@ export default function CalendarPage() {
 
     const workedOutDay = workedOutDays.find(d => d.date === dateNum);
     const type = workedOutDay ? displayPlanText(workedOutDay.type) : "";
+    const workoutId = workedOutDay?.workout_id || null;
 
     return { 
       isToday, 
       isWorkedOut, 
       type,
+      workoutId,
       plannedTarget,
       isPlanned: isPlanned && !isWorkedOut && (!isCurrentMonth || dateObj >= new Date(today.getFullYear(), today.getMonth(), today.getDate())) 
     };
@@ -269,13 +274,15 @@ export default function CalendarPage() {
                     textClass = "text-white font-black";
                   }
 
-                  return (
-                    <motion.div 
+                  const dayContent = (
+                    <motion.div
                       key={day}
                       initial={{ opacity: 0, scale: 0.9 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: idx * 0.01 }}
-                      className={`relative aspect-square rounded-2xl border flex flex-col items-center justify-center transition-all hover:scale-105 cursor-pointer group ${bgClass}`}
+                      className={`relative aspect-square rounded-2xl border flex flex-col items-center justify-center transition-all ${
+                        status.workoutId ? "hover:scale-105 cursor-pointer group" : "cursor-default"
+                      } ${bgClass}`}
                     >
                       {status.isPlanned && !status.isWorkedOut && (
                         <div className="absolute inset-0 bg-gradient-to-tr from-primary/10 to-transparent opacity-50" />
@@ -311,6 +318,21 @@ export default function CalendarPage() {
                       </div>
                     </motion.div>
                   );
+
+                  if (status.workoutId) {
+                    return (
+                      <Link
+                        key={day}
+                        href={`/workouts/${status.workoutId}`}
+                        aria-label={`${selectedPlanMonth}-${String(day).padStart(2, "0")} のワークアウト履歴を見る`}
+                        className="block"
+                      >
+                        {dayContent}
+                      </Link>
+                    );
+                  }
+
+                  return dayContent;
                 })}
               </div>
             </div>
