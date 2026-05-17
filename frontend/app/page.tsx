@@ -247,7 +247,7 @@ export default function Home() {
             </h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {dashboardData && dashboardData.recent_workouts ? dashboardData.recent_workouts.map((w: any) => (
+            {dashboardData?.recent_workouts?.length > 0 ? dashboardData.recent_workouts.map((w: any) => (
               <Link key={w.id} href={`/workouts/${w.id}`} className="bg-white/5 rounded-2xl p-5 border border-white/5 hover:bg-white/10 transition-colors group">
                 <div className="flex justify-between items-start gap-3 mb-1">
                   <h4 className="font-bold truncate">{w.title}</h4>
@@ -259,7 +259,11 @@ export default function Home() {
                   <span className="font-medium text-sm">{w.duration}</span>
                 </div>
               </Link>
-            )) : (
+            )) : dashboardData ? (
+              <div className="col-span-full text-center py-8 text-white/40 text-sm bg-white/5 rounded-2xl border border-white/5">
+                まだ完了したワークアウトはありません。
+              </div>
+            ) : (
               <div className="col-span-full text-center py-6 text-white/30 text-sm flex items-center justify-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin" /> 記録を読み込み中...
               </div>

@@ -83,9 +83,20 @@ export default function WorkoutDetailPage() {
             <ArrowLeft className="w-5 h-5" />
           </Link>
           <p className="text-primary text-xs font-black tracking-widest mb-2">ワークアウト履歴</p>
-          <h1 className="text-3xl font-bold tracking-tight mb-2">{workout ? workout.title : "読み込み中"}</h1>
+          <div className="flex flex-wrap items-center gap-3 mb-2">
+            <h1 className="text-3xl font-bold tracking-tight">{workout ? workout.title : "読み込み中"}</h1>
+            {workout?.status === "active" && (
+              <span className="text-[10px] font-black text-black bg-primary px-2.5 py-1 rounded-full">
+                進行中
+              </span>
+            )}
+          </div>
           <p className="text-white/50 text-sm">
-            {workout ? `${formatDateTime(workout.started_at)} から` : "記録を確認しています。"}
+            {workout
+              ? workout.status === "active"
+                ? `${formatDateTime(workout.started_at)} から継続中`
+                : `${formatDateTime(workout.started_at)} から ${workout.ended_at ? formatDateTime(workout.ended_at) : ""} まで`
+              : "記録を確認しています。"}
           </p>
         </header>
 

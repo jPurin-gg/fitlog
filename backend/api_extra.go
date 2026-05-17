@@ -38,6 +38,7 @@ func (app *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := 1
+	_ = app.closeStaleWorkouts(userID)
 
 	var resp DashboardResponse
 
@@ -78,13 +79,13 @@ func (app *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fetch up to 3 recent workouts
+	// Fetch up to 3 completed recent workouts
 	if app.db != nil {
 		rows, err := app.db.Query(`
-			SELECT w.id, w.started_at, COALESCE(w.ended_at, w.started_at), COALESCE(w.notes, '筋トレ')
+			SELECT w.id, w.started_at, w.ended_at, COALESCE(w.notes, '筋トレ')
 			FROM workouts w
-			WHERE w.user_id = $1
-			ORDER BY w.started_at DESC
+			WHERE w.user_id = $1 AND w.ended_at IS NOT NULL
+			ORDER BY w.ended_at DESC, w.started_at DESC
 			LIMIT 3
 		`, userID)
 
@@ -96,13 +97,6 @@ func (app *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 				var end time.Time
 				var notes string
 				if err := rows.Scan(&id, &start, &end, &notes); err == nil {
-
-					// もし終了時間が同じ（記録中）なら、最後のセットの時間を取得
-					var lastSetTime time.Time
-					err = app.db.QueryRow("SELECT MAX(created_at) FROM workout_sets WHERE workout_id = $1", id).Scan(&lastSetTime)
-					if err == nil && !lastSetTime.IsZero() && lastSetTime.After(start) {
-						end = lastSetTime
-					}
 
 					dur := end.Sub(start).Minutes()
 					if dur < 1 {
@@ -126,9 +120,7 @@ func (app *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(resp.RecentWorkouts) == 0 {
-		resp.RecentWorkouts = []WorkoutItemData{
-			{ID: 1, Title: "朝のストレッチ", Type: "柔軟性", Duration: "30分", Calories: "120 kcal", Time: "08:00"},
-		}
+		resp.RecentWorkouts = []WorkoutItemData{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -152,6 +144,7 @@ func (app *App) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := 1
+	_ = app.closeStaleWorkouts(userID)
 	yearStr := r.URL.Query().Get("year")
 	monthStr := r.URL.Query().Get("month")
 
@@ -174,6 +167,7 @@ func (app *App) handleCalendar(w http.ResponseWriter, r *http.Request) {
 		SELECT EXTRACT(DAY FROM started_at), MAX(COALESCE(notes, 'ワークアウト'))
 		FROM workouts
 		WHERE user_id = $1
+		  AND ended_at IS NOT NULL
 		  AND EXTRACT(YEAR FROM started_at) = $2
 		  AND EXTRACT(MONTH FROM started_at) = $3
 		GROUP BY EXTRACT(DAY FROM started_at)

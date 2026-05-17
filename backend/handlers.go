@@ -403,6 +403,9 @@ func (app *App) handleWorkoutDetail(w http.ResponseWriter, r *http.Request) {
 	if userID == 0 {
 		userID = 1
 	}
+	if err := app.closeStaleWorkouts(userID); err != nil {
+		log.Printf("Failed to close stale workouts: %v", err)
+	}
 
 	var resp WorkoutDetailResponse
 	err = app.db.QueryRow(`
