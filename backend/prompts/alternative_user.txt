@@ -1,0 +1,4 @@
+変更したい元の種目: {{.Exercise}}
+変更したい理由: {{.Reason}}
+
+{{.DBContext}}

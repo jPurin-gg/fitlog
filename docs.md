@@ -46,6 +46,14 @@ fitlog/
 │   ├── api_custom_exercise.go# /api/exercises/custom
 │   ├── api_extra.go          # /api/dashboard, /api/calendar, /api/alternative
 │   ├── api_ai.go             # AI APIクライアント（callAI関数）
+│   ├── ai_prompts.go         # AIプロンプトテンプレート読み込み
+│   ├── prompts/              # AIに送るプロンプトテンプレート
+│   │   ├── recommend_system.txt
+│   │   ├── recommend_user.txt
+│   │   ├── workout_plan_system.txt
+│   │   ├── workout_plan_user.txt
+│   │   ├── alternative_system.txt
+│   │   └── alternative_user.txt
 │   └── tmpkin_jp.json        # 種目マスターデータ（873件・日本語）
 └── docker/
     ├── db/init.sql            # DB スキーマ定義
@@ -533,6 +541,17 @@ OPENAI_MODEL=gemini-2.5-flash
 
 > Gemini の OpenAI 互換エンドポイントを使用しているため、コードは OpenAI SDK 互換の形式でそのまま動作する。
 
+### プロンプトテンプレート
+AI に送る system / user プロンプトは `backend/prompts/` に配置する。
+
+| ファイル | 用途 |
+|---------|------|
+| `recommend_system.txt` / `recommend_user.txt` | セット完了後の次セット提案 |
+| `workout_plan_system.txt` / `workout_plan_user.txt` | 今日のワークアウト計画の微調整 |
+| `alternative_system.txt` / `alternative_user.txt` | 代替種目提案 |
+
+テンプレートは Go の `text/template` 形式で、`{{.Weight}}` や `{{.BasePlanJSON}}` のように値を差し込む。バックエンドはリクエストごとにファイルを読み込むため、ローカル開発中はプロンプトファイルを変更すると次回呼び出しから反映される。配置場所を変えたい場合は `PROMPT_DIR` 環境変数で指定できる。
+
 ### AI失敗時の扱い
 AI 呼び出しが失敗した場合（APIキー未設定、レート制限等）の扱いは用途ごとに分ける。
 
@@ -642,6 +661,7 @@ docker logs --tail 50 myfitlog-backend
 | OPENAI_MODEL    | gemini-2.5-flash                                                            |                   |
 | FRONTEND_URL    | http://localhost:3000                                                       | CORS 許可オリジン  |
 | SEED_FILE_PATH  | tmpkin_jp.json                                                              | 種目JSONのパス    |
+| PROMPT_DIR      | prompts                                                                     | AIプロンプトテンプレートのディレクトリ |
 
 ---
 
@@ -667,7 +687,7 @@ docker logs --tail 50 myfitlog-backend
 | workout 終了         | 明示終了ボタンで `ended_at` を更新し、完了サマリーを表示 | 終了後メモ・疲労度・次回への引き継ぎ入力       |
 | 日次ワークアウト計画   | DBに保存し、計画ベースで進行可能             | AI生成の精度向上、実績との差分分析        |
 | 月間プラン再利用       | 過去月の閲覧は可能。再利用・複製は未実装           | 先月プランを今月にコピーして編集           |
-| AI プロンプト         | バックエンドにハードコード                  | 管理画面または設定ファイルで変更可能にする |
+| AI プロンプト         | `backend/prompts/` のテンプレートファイルから読み込み | 管理画面で変更可能にする |
 | PWA / モバイル対応    | ブラウザのみ                               | manifest.json / Service Worker 追加    |
 
 ---

@@ -317,21 +317,16 @@ func (app *App) handleAlternative(w http.ResponseWriter, r *http.Request) {
 
 	dbContext := "以下の種目が同じ筋肉( " + strings.Join(pMuscles, ", ") + " )を鍛えられるデータベース内の候補です:\n" + strings.Join(exList, "\n")
 
-	systemPrompt := `あなたは優秀なパーソナルトレーナーAIです。ユーザーが現在行おうとしている種目を別の種目に変更したいと考えています。
-データベース内の候補リストの中から、ユーザーの理由（例: マシンが空いていない等）に最も適した代替種目を2〜3個選び、JSON形式で出力してください。
-選んだ種目のIDとNameは必ず候補リストにあるものをそのまま使用してください。
-以下のJSONフォーマットに必ず従ってください:
-{
-  "message": "励ましのメッセージやアドバイス",
-  "alternatives": [
-    {
-      "id": "候補リストにあるID",
-      "name": "候補リストにあるName",
-      "description": "なぜこの種目がおすすめなのか、理由や簡単なやり方"
-    }
-  ]
-}`
-	userPrompt := fmt.Sprintf("変更したい元の種目: %s\n変更したい理由: %s\n\n%s", req.Exercise, req.Reason, dbContext)
+	systemPrompt, userPrompt, err := renderPromptPair("alternative_system.txt", "alternative_user.txt", map[string]any{
+		"Exercise":  req.Exercise,
+		"Reason":    req.Reason,
+		"DBContext": dbContext,
+	})
+	if err != nil {
+		fmt.Printf("Alternative prompt render error: %v\n", err)
+		http.Error(w, "AIプロンプトの読み込みに失敗しました。", http.StatusInternalServerError)
+		return
+	}
 
 	aiJSON, err := callAI(systemPrompt, userPrompt, true)
 	if err != nil {

@@ -113,19 +113,6 @@ func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ここで本来はDBから過去の履歴を取得し、AI API (OpenAI等) を叩く
-	// 今回はロジックの骨組みとして「いい感じの出力」をシミュレートします
-
-	// --- AI API 連携のアドバイス ---
-	// 良い出力を得るためのプロンプト例:
-	// "以下のユーザーの履歴と今回のセット結果（重量、回数、感想）を分析してください。
-	// また、この種目におけるユーザーの過去最大重量(MaxWeight: XX kg)も考慮し、
-	// 次の1セットに最適な『重量(kg)』と『回数』を提案してください。
-	// 例えば、現在の重量が過去最大に近く、かつ感想に余裕がある場合は重量更新を提案し、
-	// 過去最大から遠い場合は、ボリューム（回数）を稼ぐアプローチを提案してください。
-	// 理由もあわせて返答してください。"
-	// -----------------------------
-
 	// 1. 過去最大重量の取得
 	var maxWeight float64
 	if app.db != nil {
@@ -201,24 +188,18 @@ func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 		maxWeight = req.Weight
 	}
 
-	systemPrompt := `あなたはエリートパーソナルトレーナーAIです。ユーザーの直近の筋トレセットの結果を分析し、次のセットの提案をJSON形式でのみ出力してください。
-以下のJSON構造に必ず従ってください（マークダウンブロックを含めず、JSONのみを返してください）:
-{
-	"next_action": "CONTINUE" または "STOP", // 怪我の恐れがある「痛み」や「違和感」、または過度の疲労がある場合は "STOP"
-	"recommendation": "string", // 短く、励ましと具体的なアドバイス
-	"target_weight": 80.0, // 次のセットの推奨重量（数値のみ）
-	"target_reps": 10, // 次のセットの推奨回数（数値のみ）
-	"reason": "string" // なぜこの重量・回数を提案するかの理由
-}`
-
-	userPrompt := fmt.Sprintf(`現在の入力データ:
-- 今回のセット数: %d
-- 今回扱った重量: %.1f kg
-- 今回こなした回数: %d
-- ユーザーの感想・状態: "%s"
-- (参考) この種目の過去最大重量: %.1f kg
-
-上記に基づき、次のセットはどうすべきかJSONで提案してください。`, req.SetOrder, req.Weight, req.Reps, req.Feeling, maxWeight)
+	systemPrompt, userPrompt, err := renderPromptPair("recommend_system.txt", "recommend_user.txt", map[string]any{
+		"SetOrder":  req.SetOrder,
+		"Weight":    req.Weight,
+		"Reps":      req.Reps,
+		"Feeling":   req.Feeling,
+		"MaxWeight": maxWeight,
+	})
+	if err != nil {
+		log.Printf("Failed to render recommend prompts: %v", err)
+		http.Error(w, "AIプロンプトの読み込みに失敗しました。", http.StatusInternalServerError)
+		return
+	}
 
 	aiJSON, err := callAI(systemPrompt, userPrompt, true)
 	if err != nil {
@@ -666,19 +647,12 @@ func refineWorkoutPlanWithAI(base WorkoutPlanPayload) (WorkoutPlanPayload, error
 		return WorkoutPlanPayload{}, err
 	}
 
-	systemPrompt := `あなたは安全重視の筋トレAIコーチです。
-ユーザーの今日のワークアウト計画をJSONで微調整してください。
-以下の制約を守ってください:
-- 返答はJSONのみ
-- exercise_id と name は入力された候補から変更しない
-- planned_sets は1〜6の整数
-- target_weight と target_reps は無理のない範囲にする
-- 疲労や痛みが出たら短縮できる前提の coach_note にする`
-
-	userPrompt := fmt.Sprintf(`以下のベース計画を、今日実施しやすいワークアウト計画に調整してください。
-同じJSON構造で返してください。
-
-%s`, string(baseJSON))
+	systemPrompt, userPrompt, err := renderPromptPair("workout_plan_system.txt", "workout_plan_user.txt", map[string]any{
+		"BasePlanJSON": string(baseJSON),
+	})
+	if err != nil {
+		return WorkoutPlanPayload{}, fmt.Errorf("AIプロンプトの読み込みに失敗しました。")
+	}
 
 	aiJSON, err := callAI(systemPrompt, userPrompt, true)
 	if err != nil {
