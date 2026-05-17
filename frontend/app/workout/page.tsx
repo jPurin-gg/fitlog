@@ -14,8 +14,6 @@ import {
   CheckCircle2,
   ListChecks,
   Trophy,
-  BarChart3,
-  Clock3,
   RotateCcw,
   Home
 } from "lucide-react";
@@ -23,6 +21,7 @@ import { AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { AlternativeCoachModal } from "@/components/AlternativeCoachModal";
 import { ExerciseSelectorModal } from "@/components/ExerciseSelectorModal";
+import { WorkoutSummaryView, type WorkoutSummary } from "@/components/WorkoutSummaryView";
 
 interface WorkoutPlanExercise {
   exercise_id: string;
@@ -46,24 +45,6 @@ interface WorkoutPlanSession {
     coach_note: string;
     exercises: WorkoutPlanExercise[];
   };
-}
-
-interface WorkoutSummaryExercise {
-  exercise_id: string;
-  name: string;
-  sets: number;
-  total_reps: number;
-  best_weight: number;
-  total_volume: number;
-}
-
-interface WorkoutSummary {
-  total_sets: number;
-  total_reps: number;
-  total_volume: number;
-  duration_min: number;
-  pr_count: number;
-  exercises: WorkoutSummaryExercise[];
 }
 
 function displayPlanText(text?: string) {
@@ -274,46 +255,12 @@ export default function WorkoutPage() {
             <p className="text-white/50">おつかれさまでした。今日の積み上げを記録しました。</p>
           </div>
 
-          <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-            <SummaryMetric icon={<ListChecks className="w-5 h-5" />} label="セット数" value={`${finishedSummary.total_sets}`} unit="セット" />
-            <SummaryMetric icon={<BarChart3 className="w-5 h-5" />} label="総ボリューム" value={Math.round(finishedSummary.total_volume).toLocaleString("ja-JP")} unit="kg" />
-            <SummaryMetric icon={<Clock3 className="w-5 h-5" />} label="時間" value={`${finishedSummary.duration_min}`} unit="分" />
-            <SummaryMetric icon={<Trophy className="w-5 h-5" />} label="自己更新" value={`${finishedSummary.pr_count}`} unit="回" />
-          </section>
-
-          <section className="mb-6">
-            <h2 className="font-bold text-lg mb-4">種目別</h2>
-            {finishedSummary.exercises.length > 0 ? (
-              <div className="space-y-3">
-                {finishedSummary.exercises.map(ex => (
-                  <div key={ex.exercise_id} className="bg-white/5 rounded-2xl border border-white/5 p-4">
-                    <div className="flex items-start justify-between gap-4 mb-3">
-                      <h3 className="font-bold text-white leading-tight">{ex.name}</h3>
-                      <span className="text-xs font-bold text-primary bg-primary/10 border border-primary/20 rounded-full px-3 py-1 whitespace-nowrap">
-                        {ex.sets}セット
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-center">
-                      <div className="bg-black/25 rounded-xl p-3">
-                        <p className="text-[10px] text-white/35 font-bold mb-1">回数</p>
-                        <p className="text-sm font-bold">{ex.total_reps}回</p>
-                      </div>
-                      <div className="bg-black/25 rounded-xl p-3">
-                        <p className="text-[10px] text-white/35 font-bold mb-1">最大重量</p>
-                        <p className="text-sm font-bold">{ex.best_weight}kg</p>
-                      </div>
-                      <div className="bg-black/25 rounded-xl p-3">
-                        <p className="text-[10px] text-white/35 font-bold mb-1">量</p>
-                        <p className="text-sm font-bold">{Math.round(ex.total_volume).toLocaleString("ja-JP")}kg</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-white/45">セット記録はまだありません。次回は1セット目から記録していきましょう。</p>
-            )}
-          </section>
+          <WorkoutSummaryView
+            summary={finishedSummary}
+            emptyText="セット記録はまだありません。次回は1セット目から記録していきましょう。"
+            emptyStateClassName="text-sm text-white/45"
+            exerciseSectionClassName="mb-6"
+          />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
@@ -357,7 +304,19 @@ export default function WorkoutPage() {
               {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <>ワークアウトを開始 <Sparkles className="w-5 h-5" /></>}
             </span>
           </button>
-          {aiError && <p className="mt-5 text-sm text-red-300">{aiError}</p>}
+          {aiError && (
+            <div className="mt-5 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-left">
+              <p className="text-red-300 font-bold text-sm">エラーが発生しました</p>
+              <p className="text-red-200/70 text-xs mt-1 whitespace-pre-line">{aiError}</p>
+              <button
+                onClick={startWorkout}
+                disabled={loading}
+                className="mt-3 text-xs text-red-300 hover:text-red-200 underline transition-colors disabled:opacity-50 flex items-center gap-1"
+              >
+                <RefreshCw className="w-3 h-3" /> もう一度試す
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -665,19 +624,6 @@ export default function WorkoutPage() {
           </div>
         </section>
       </main>
-    </div>
-  );
-}
-
-function SummaryMetric({ icon, label, value, unit }: { icon: React.ReactNode; label: string; value: string; unit: string }) {
-  return (
-    <div className="glass rounded-2xl p-4 border border-white/5 min-w-0">
-      <div className="text-primary mb-3">{icon}</div>
-      <p className="text-[10px] font-bold text-white/35 mb-1">{label}</p>
-      <div className="flex items-baseline gap-1 min-w-0">
-        <span className="text-xl sm:text-2xl font-black leading-tight break-words min-w-0">{value}</span>
-        <span className="text-xs text-white/40 font-bold">{unit}</span>
-      </div>
     </div>
   );
 }

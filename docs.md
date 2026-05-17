@@ -12,7 +12,7 @@ Gemini 2.5 Flash（OpenAI互換エンドポイント）を AI バックエンド
 
 | レイヤー       | 技術                              |
 |-------------|-----------------------------------|
-| フロントエンド | Next.js 14 (App Router / TypeScript / Tailwind CSS) |
+| フロントエンド | Next.js 15 (App Router / TypeScript / Tailwind CSS) |
 | バックエンド   | Go 1.22（標準 `net/http`、`air` でホットリロード）|
 | データベース   | PostgreSQL 16                     |
 | AI           | Google Gemini 2.5 Flash（OpenAI互換 API）|
@@ -30,6 +30,7 @@ fitlog/
 │   ├── app/
 │   │   ├── page.tsx          # ホーム（ダッシュボード）
 │   │   ├── workout/page.tsx  # 記録する
+│   │   ├── workouts/[id]/page.tsx # ワークアウト履歴詳細
 │   │   ├── exercises/page.tsx# 辞書（種目ライブラリ）
 │   │   └── calendar/page.tsx # カレンダー
 │   └── components/
@@ -191,7 +192,7 @@ fitlog/
 }
 ```
 
-> `next_action` は `"CONTINUE"` または `"STOP"`。AI 呼び出しが失敗した場合はルールベースのフォールバックロジックが動作する。
+> `next_action` は `"CONTINUE"` または `"STOP"`。AI 呼び出しが失敗した場合は `503` を返し、ダミーの提案は返さない。
 
 ---
 
@@ -338,7 +339,7 @@ fitlog/
 ---
 
 ### `POST /api/workout-plan/start`
-今日のワークアウト計画を作成または再利用する。記録画面の Start Workout で呼び出す。
+今日のワークアウト計画を作成または再利用する。記録画面の「ワークアウトを開始」で呼び出す。
 
 **リクエスト**
 ```json
@@ -394,6 +395,73 @@ fitlog/
 
 > `workout_id` 省略時は、ユーザーの最新の未終了ワークアウトを終了する。対応する `workout_plans.status` は `completed` になる。
 
+**レスポンス**
+```json
+{
+  "workout_id": 10,
+  "started_at": "2026-05-17 20:00:00+09",
+  "ended_at": "2026-05-17 20:42:00+09",
+  "status": "completed",
+  "summary": {
+    "total_sets": 9,
+    "total_reps": 86,
+    "total_volume": 5120,
+    "duration_min": 42,
+    "pr_count": 1,
+    "exercises": [
+      {
+        "exercise_id": "Barbell_Bench_Press_-_Medium_Grip",
+        "name": "ベンチプレス",
+        "sets": 3,
+        "total_reps": 28,
+        "best_weight": 80,
+        "total_volume": 2240
+      }
+    ]
+  }
+}
+```
+
+> 完了後、記録画面は summary を使ってセット数・総ボリューム・時間・自己更新回数・種目別内訳を表示する。
+
+### `GET /api/workouts/{id}`
+ワークアウト履歴の詳細を取得する。ホーム画面の最近のワークアウトから遷移する `/workouts/[id]` で使用する。
+
+| クエリパラメータ | 説明                    |
+|-------------|------------------------|
+| user_id     | ユーザーID（省略時: `1`） |
+
+**レスポンス**
+```json
+{
+  "id": 10,
+  "user_id": 1,
+  "title": "押す日（胸・肩・三頭）",
+  "started_at": "2026-05-17 20:00:00+09",
+  "ended_at": "2026-05-17 20:42:00+09",
+  "status": "completed",
+  "summary": {
+    "total_sets": 9,
+    "total_reps": 86,
+    "total_volume": 5120,
+    "duration_min": 42,
+    "pr_count": 1,
+    "exercises": [
+      {
+        "exercise_id": "Barbell_Bench_Press_-_Medium_Grip",
+        "name": "ベンチプレス",
+        "sets": 3,
+        "total_reps": 28,
+        "best_weight": 80,
+        "total_volume": 2240
+      }
+    ]
+  }
+}
+```
+
+> `status` は `active` または `completed`。昨日以前の未終了ワークアウトは詳細取得時にも自動クローズされる。
+
 ---
 
 ### `POST /api/alternative`
@@ -412,7 +480,7 @@ fitlog/
 1. `exercise_id` の `primary_muscles` を DB から取得
 2. 同じ筋肉を鍛えられる他の種目を最大 30 件検索
 3. 候補リストと理由を Gemini に渡し、2〜3 件に絞らせる
-4. AI 失敗時はキーワードベースのフォールバック
+4. AI 失敗時やAI返答の解析失敗時はエラーを返し、ダミー候補は返さない
 
 **レスポンス**
 ```json
@@ -465,8 +533,12 @@ OPENAI_MODEL=gemini-2.5-flash
 
 > Gemini の OpenAI 互換エンドポイントを使用しているため、コードは OpenAI SDK 互換の形式でそのまま動作する。
 
-### フォールバック
-AI 呼び出しが失敗した場合（APIキー未設定、レート制限等）、ルールベースロジックで代替レスポンスを生成する。アプリはクラッシュしない。
+### AI失敗時の扱い
+AI 呼び出しが失敗した場合（APIキー未設定、レート制限等）の扱いは用途ごとに分ける。
+
+- `POST /api/workout-plan/start`: エラーを返し、ダミー計画やフォールバック計画は保存しない
+- `POST /api/recommend`: エラーを返し、ダミーの次セット提案は返さない
+- `POST /api/alternative`: エラーを返し、ダミーの代替候補は返さない。フロントエンドでは再試行ボタンと手動変更欄を表示する
 
 ---
 
@@ -480,10 +552,11 @@ AI 呼び出しが失敗した場合（APIキー未設定、レート制限等�
 - 今日が推奨日でない場合は Rest Day 表示
 - ホーム上で代替種目を選んだ場合、`PUT /api/monthly-plan` で当月プランに保存
 - 過去7日間のセット数グラフ
-- 最近のワークアウト履歴3件
+- 最近の完了済みワークアウト履歴3件
+- 最近のワークアウトをタップすると `/workouts/[id]` の履歴詳細へ遷移
 
 ### 記録する（`/workout`）
-1. **開始画面**：Start Workout で `POST /api/workout-plan/start` を呼び、今日の計画をDBに作成または再利用
+1. **開始画面**：「ワークアウトを開始」で `POST /api/workout-plan/start` を呼び、今日の計画をDBに作成または再利用
 2. **記録画面**：
    - 今日の計画カード（種目、予定セット数、目標重量・回数、目安時間）
    - 計画内の種目を順番に進行。カードをタップして任意の種目へ移動可能
@@ -491,10 +564,17 @@ AI 呼び出しが失敗した場合（APIキー未設定、レート制限等�
    - `SET X / 目標Y` カウンター + 進捗ドット
    - 目標セット数の編集（± ボタン、DB に自動保存）
    - 重量・回数・感想入力
-   - **「Set Completed - Analyze」** ボタン → AI アドバイス表示
+   - **「セット完了・AIに相談」** ボタン → AI アドバイス表示
    - CONTINUE の場合：次のセット目標（重量 / 回数）を表示
    - STOP の場合：赤いストップ表示。ただしユーザーは「もう1セットだけ続ける」「次の種目へ」「終了する」を選べる
    - ヘッダーの「終了」または終了ボタンで `POST /api/workouts/finish`
+3. **完了画面**：`POST /api/workouts/finish` の summary を使い、セット数・総ボリューム・時間・自己更新回数・種目別内訳を表示
+
+### 履歴詳細（`/workouts/[id]`）
+- `GET /api/workouts/{id}` でワークアウト単位の詳細を取得
+- 開始時刻・終了時刻、進行中バッジ、セット数・総ボリューム・時間・自己更新回数を表示
+- 種目別にセット数、合計回数、最大重量、総ボリュームを表示
+- セット記録がない場合は空状態を表示
 
 ### 辞書（`/exercises`）
 - 873件の種目をブラウジング
@@ -584,7 +664,7 @@ docker logs --tail 50 myfitlog-backend
 | マルチユーザー         | `user_id = 1` ハードコード                 | 認証実装 + ユーザー管理                  |
 | `stats` (カロリー等)  | ホーム画面はモックデータ                    | 実記録から計算                           |
 | 種目検索              | クライアント側フィルタ（全件取得後）         | サーバー側全文検索（pgベクトル等）        |
-| workout 終了         | 明示終了ボタンで `ended_at` を更新          | 完了サマリー画面の実装                    |
+| workout 終了         | 明示終了ボタンで `ended_at` を更新し、完了サマリーを表示 | 終了後メモ・疲労度・次回への引き継ぎ入力       |
 | 日次ワークアウト計画   | DBに保存し、計画ベースで進行可能             | AI生成の精度向上、実績との差分分析        |
 | 月間プラン再利用       | 過去月の閲覧は可能。再利用・複製は未実装           | 先月プランを今月にコピーして編集           |
 | AI プロンプト         | バックエンドにハードコード                  | 管理画面または設定ファイルで変更可能にする |

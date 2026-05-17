@@ -3,16 +3,19 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
 import { motion } from "framer-motion";
-import { Loader2, X, MessageSquare, BrainCircuit, ArrowRight } from "lucide-react";
+import { Loader2, X, MessageSquare, BrainCircuit, ArrowRight, AlertCircle } from "lucide-react";
 
 export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onReplace }: any) {
   const [loading, setLoading] = React.useState(false);
   const [reason, setReason] = React.useState("");
   const [customName, setCustomName] = React.useState("");
   const [result, setResult] = React.useState<any>(null);
+  const [error, setError] = React.useState("");
 
   const fetchAlternatives = async () => {
     setLoading(true);
+    setError("");
+    setResult(null);
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
       const res = await fetch(`${apiUrl}/api/alternative`, {
@@ -20,14 +23,15 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ exercise_id: exerciseId, exercise: exerciseName, reason: reason })
       });
+      if (!res.ok) {
+        setError(await res.text() || "AIによる代替種目の提案に失敗しました。");
+        return;
+      }
       const data = await res.json();
       setResult(data);
     } catch (e) {
       console.error(e);
-      setResult({
-        message: "ネットワークエラーが発生しました。手動で種目名を入力して変更できます。",
-        alternatives: []
-      });
+      setError("ネットワークエラーが発生しました。バックエンドに接続できません。");
     } finally {
       setLoading(false);
     }
@@ -81,6 +85,23 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
             >
               {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><BrainCircuit className="w-5 h-5" /> AIに代替種目を相談する</>}
             </button>
+
+            {error && (
+              <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-red-300 font-bold text-sm">エラーが発生しました</p>
+                  <p className="text-red-200/70 text-xs mt-1 whitespace-pre-line">{error}</p>
+                  <button
+                    onClick={fetchAlternatives}
+                    disabled={loading}
+                    className="mt-3 text-xs text-red-300 hover:text-red-200 underline transition-colors disabled:opacity-50"
+                  >
+                    もう一度試す
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="relative pt-6 pb-2">
               <div className="absolute inset-0 flex items-center">
