@@ -90,6 +90,7 @@ type WorkoutSummary struct {
 	TotalVolume float64                  `json:"total_volume"`
 	DurationMin int                      `json:"duration_min"`
 	PRCount     int                      `json:"pr_count"`
+	AIComment   string                   `json:"ai_comment,omitempty"`
 	Exercises   []WorkoutSummaryExercise `json:"exercises"`
 }
 
@@ -100,6 +101,10 @@ type WorkoutSummaryExercise struct {
 	TotalReps   int     `json:"total_reps"`
 	BestWeight  float64 `json:"best_weight"`
 	TotalVolume float64 `json:"total_volume"`
+}
+
+type WorkoutSummaryCommentResponse struct {
+	Comment string `json:"comment"`
 }
 
 func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +203,7 @@ func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 		exerciseName = app.loadExerciseName(req.ExerciseID)
 		recentExerciseHistory = app.loadRecentExerciseHistory(req.UserID, req.ExerciseID)
 		if savedWorkoutID > 0 {
-			todayWorkoutContext = app.loadTodayWorkoutContext(req.UserID, savedWorkoutID)
+			todayWorkoutContext = app.loadWorkoutSetContext(req.UserID, savedWorkoutID)
 		}
 	}
 
@@ -303,7 +308,7 @@ func (app *App) loadRecentExerciseHistory(userID int, exerciseID string) string 
 	return strings.Join(lines, "\n")
 }
 
-func (app *App) loadTodayWorkoutContext(userID, workoutID int) string {
+func (app *App) loadWorkoutSetContext(userID, workoutID int) string {
 	rows, err := app.db.Query(`
 		SELECT
 			COALESCE(e.name, ws.exercise_id),
@@ -500,6 +505,20 @@ func (app *App) handleFinishWorkout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to load workout summary", http.StatusInternalServerError)
 		return
 	}
+	if summary.AIComment == "" {
+		comment, err := app.generateWorkoutSummaryComment(userID, resp.WorkoutID, summary)
+		if err != nil {
+			log.Printf("Failed to generate workout summary comment: %v", err)
+			comment = "AIコメントの生成でエラーが発生しました。"
+		} else {
+			_, _ = app.db.Exec(`
+				UPDATE workouts
+				SET summary_comment = $1
+				WHERE id = $2 AND user_id = $3
+			`, comment, resp.WorkoutID, userID)
+		}
+		summary.AIComment = comment
+	}
 	resp.Summary = summary
 
 	w.Header().Set("Content-Type", "application/json")
@@ -562,6 +581,20 @@ func (app *App) handleWorkoutDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to load workout summary", http.StatusInternalServerError)
 		return
 	}
+	if summary.AIComment == "" && resp.Status == "completed" {
+		comment, err := app.generateWorkoutSummaryComment(userID, workoutID, summary)
+		if err != nil {
+			log.Printf("Failed to generate workout summary comment: %v", err)
+			comment = "AIコメントの生成でエラーが発生しました。"
+		} else {
+			_, _ = app.db.Exec(`
+				UPDATE workouts
+				SET summary_comment = $1
+				WHERE id = $2 AND user_id = $3
+			`, comment, workoutID, userID)
+		}
+		summary.AIComment = comment
+	}
 	resp.Title = displayWorkoutTitle(resp.Title)
 	resp.Summary = summary
 
@@ -572,10 +605,12 @@ func (app *App) handleWorkoutDetail(w http.ResponseWriter, r *http.Request) {
 func (app *App) loadWorkoutSummary(userID, workoutID int) (WorkoutSummary, error) {
 	summary := WorkoutSummary{Exercises: []WorkoutSummaryExercise{}}
 	err := app.db.QueryRow(`
-		SELECT GREATEST(1, CEIL(EXTRACT(EPOCH FROM (COALESCE(ended_at, CURRENT_TIMESTAMP) - started_at)) / 60))::int
+		SELECT
+			GREATEST(1, CEIL(EXTRACT(EPOCH FROM (COALESCE(ended_at, CURRENT_TIMESTAMP) - started_at)) / 60))::int,
+			COALESCE(summary_comment, '')
 		FROM workouts
 		WHERE id = $1 AND user_id = $2
-	`, workoutID, userID).Scan(&summary.DurationMin)
+	`, workoutID, userID).Scan(&summary.DurationMin, &summary.AIComment)
 	if err != nil {
 		return summary, err
 	}
@@ -624,6 +659,41 @@ func (app *App) loadWorkoutSummary(userID, workoutID int) (WorkoutSummary, error
 		return summary, err
 	}
 	return summary, nil
+}
+
+func (app *App) generateWorkoutSummaryComment(userID, workoutID int, summary WorkoutSummary) (string, error) {
+	summaryJSON, err := json.Marshal(summary)
+	if err != nil {
+		return "", err
+	}
+
+	systemPrompt, userPrompt, err := renderPromptPair("workout_summary_system.txt", "workout_summary_user.txt", map[string]any{
+		"SummaryJSON":       string(summaryJSON),
+		"WorkoutSetContext": app.loadWorkoutSetContext(userID, workoutID),
+	})
+	if err != nil {
+		return "", fmt.Errorf("AIプロンプトの読み込みに失敗しました。")
+	}
+
+	aiJSON, err := callAI(systemPrompt, userPrompt, true)
+	if err != nil {
+		return "", fmt.Errorf("AIによる終了コメント作成に失敗しました。")
+	}
+
+	aiStr := strings.TrimSpace(aiJSON)
+	if strings.HasPrefix(aiStr, "```json") {
+		aiStr = strings.TrimPrefix(aiStr, "```json")
+		aiStr = strings.TrimSuffix(strings.TrimSpace(aiStr), "```")
+	}
+
+	var resp WorkoutSummaryCommentResponse
+	if err := json.Unmarshal([]byte(aiStr), &resp); err != nil {
+		return "", fmt.Errorf("AIの終了コメントレスポンスを解析できませんでした。")
+	}
+	if strings.TrimSpace(resp.Comment) == "" {
+		return "", fmt.Errorf("AIの終了コメントが空でした。")
+	}
+	return strings.TrimSpace(resp.Comment), nil
 }
 
 func displayWorkoutTitle(value string) string {

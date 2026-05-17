@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { BarChart3, Clock3, ListChecks, Trophy } from "lucide-react";
+import { BarChart3, BrainCircuit, Clock3, ListChecks, Trophy } from "lucide-react";
 
 export interface WorkoutSummaryExercise {
   exercise_id: string;
@@ -18,6 +18,7 @@ export interface WorkoutSummary {
   total_volume: number;
   duration_min: number;
   pr_count: number;
+  ai_comment?: string;
   exercises: WorkoutSummaryExercise[];
 }
 
@@ -42,6 +43,16 @@ export function WorkoutSummaryView({
         <SummaryMetric icon={<Clock3 className="w-5 h-5" />} label="時間" value={`${summary.duration_min}`} unit="分" />
         <SummaryMetric icon={<Trophy className="w-5 h-5" />} label="自己更新" value={`${summary.pr_count}`} unit="回" />
       </section>
+
+      {summary.ai_comment && (
+        <section className="glass rounded-2xl border border-primary/15 bg-primary/5 p-5 mb-6">
+          <div className="flex items-center gap-2 text-primary font-bold text-sm mb-3">
+            <BrainCircuit className="w-4 h-4" />
+            AIコーチの総評
+          </div>
+          <p className="text-white/85 text-sm leading-relaxed whitespace-pre-wrap">{summary.ai_comment}</p>
+        </section>
+      )}
 
       <section className={exerciseSectionClassName}>
         <h2 className="font-bold text-lg mb-4">種目別</h2>

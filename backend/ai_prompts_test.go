@@ -44,6 +44,15 @@ func TestRenderPromptPair(t *testing.T) {
 				"DBContext": "- ID: Dumbbell_Bench_Press, Name: ダンベルベンチプレス",
 			},
 		},
+		{
+			name:       "workout summary",
+			systemFile: "workout_summary_system.txt",
+			userFile:   "workout_summary_user.txt",
+			data: map[string]any{
+				"SummaryJSON":       `{"total_sets":3,"total_reps":30,"total_volume":2400,"duration_min":35,"pr_count":1,"exercises":[]}`,
+				"WorkoutSetContext": "- ベンチプレス 1セット目: 80.0kg x 10回 / 感想: かなり効いた",
+			},
+		},
 	}
 
 	for _, tt := range tests {

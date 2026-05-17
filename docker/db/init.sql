@@ -38,7 +38,8 @@ CREATE TABLE workouts (
     user_id INTEGER REFERENCES users(id),
     started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     ended_at TIMESTAMP WITH TIME ZONE,
-    notes TEXT
+    notes TEXT,
+    summary_comment TEXT
 );
 
 -- セットごとの記録

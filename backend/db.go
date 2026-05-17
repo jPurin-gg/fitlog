@@ -73,6 +73,7 @@ func ensureSchema(db *sql.DB) error {
 		);
 
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+		ALTER TABLE workouts ADD COLUMN IF NOT EXISTS summary_comment TEXT;
 	`)
 	return err
 }
