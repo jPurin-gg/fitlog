@@ -27,6 +27,7 @@ type RecommendResponse struct {
 	TargetWeight   float64 `json:"target_weight"`
 	TargetReps     int     `json:"target_reps"`
 	Reason         string  `json:"reason"`
+	RecordTemplate string  `json:"record_template"`
 	MaxWeight      float64 `json:"max_weight"` // 参考用の過去最大重量
 }
 
@@ -125,6 +126,7 @@ func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. 本物のDBへの保存処理
+	savedWorkoutID := req.WorkoutID
 	if app.db != nil {
 		var workoutID int
 		var err error
@@ -160,6 +162,7 @@ func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if workoutID > 0 {
+			savedWorkoutID = workoutID
 			isPR := req.Weight > maxWeight
 
 			// workout_sets に挿入
@@ -188,12 +191,26 @@ func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 		maxWeight = req.Weight
 	}
 
+	exerciseName := req.ExerciseID
+	recentExerciseHistory := "記録なし"
+	todayWorkoutContext := "記録なし"
+	if app.db != nil {
+		exerciseName = app.loadExerciseName(req.ExerciseID)
+		recentExerciseHistory = app.loadRecentExerciseHistory(req.UserID, req.ExerciseID)
+		if savedWorkoutID > 0 {
+			todayWorkoutContext = app.loadTodayWorkoutContext(req.UserID, savedWorkoutID)
+		}
+	}
+
 	systemPrompt, userPrompt, err := renderPromptPair("recommend_system.txt", "recommend_user.txt", map[string]any{
-		"SetOrder":  req.SetOrder,
-		"Weight":    req.Weight,
-		"Reps":      req.Reps,
-		"Feeling":   req.Feeling,
-		"MaxWeight": maxWeight,
+		"ExerciseName":          exerciseName,
+		"SetOrder":              req.SetOrder,
+		"Weight":                req.Weight,
+		"Reps":                  req.Reps,
+		"Feeling":               req.Feeling,
+		"MaxWeight":             maxWeight,
+		"RecentExerciseHistory": recentExerciseHistory,
+		"TodayWorkoutContext":   todayWorkoutContext,
 	})
 	if err != nil {
 		log.Printf("Failed to render recommend prompts: %v", err)
@@ -225,6 +242,111 @@ func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (app *App) loadExerciseName(exerciseID string) string {
+	var name string
+	err := app.db.QueryRow("SELECT name FROM exercises WHERE id = $1", exerciseID).Scan(&name)
+	if err != nil || name == "" {
+		return exerciseID
+	}
+	return name
+}
+
+func (app *App) loadRecentExerciseHistory(userID int, exerciseID string) string {
+	rows, err := app.db.Query(`
+		SELECT
+			ws.created_at::date::text,
+			ws.weight,
+			ws.reps,
+			COALESCE(ws.feeling, ''),
+			ws.is_pr
+		FROM workout_sets ws
+		JOIN workouts w ON w.id = ws.workout_id
+		WHERE w.user_id = $1 AND ws.exercise_id = $2
+		ORDER BY ws.created_at DESC, ws.id DESC
+		LIMIT 8
+	`, userID, exerciseID)
+	if err != nil {
+		log.Printf("Failed to load recent exercise history: %v", err)
+		return "記録なし"
+	}
+	defer rows.Close()
+
+	lines := []string{}
+	for rows.Next() {
+		var date string
+		var weight float64
+		var reps int
+		var feeling string
+		var isPR bool
+		if err := rows.Scan(&date, &weight, &reps, &feeling, &isPR); err != nil {
+			log.Printf("Failed to scan recent exercise history: %v", err)
+			return "記録なし"
+		}
+		prMark := ""
+		if isPR {
+			prMark = " 自己ベスト"
+		}
+		if feeling == "" {
+			feeling = "感想なし"
+		}
+		lines = append(lines, fmt.Sprintf("- %s: %.1fkg x %d回%s / 感想: %s", date, weight, reps, prMark, feeling))
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("Failed to iterate recent exercise history: %v", err)
+		return "記録なし"
+	}
+	if len(lines) == 0 {
+		return "記録なし"
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (app *App) loadTodayWorkoutContext(userID, workoutID int) string {
+	rows, err := app.db.Query(`
+		SELECT
+			COALESCE(e.name, ws.exercise_id),
+			ws.set_order,
+			ws.weight,
+			ws.reps,
+			COALESCE(ws.feeling, '')
+		FROM workout_sets ws
+		JOIN workouts w ON w.id = ws.workout_id
+		LEFT JOIN exercises e ON e.id = ws.exercise_id
+		WHERE w.user_id = $1 AND ws.workout_id = $2
+		ORDER BY ws.created_at, ws.id
+	`, userID, workoutID)
+	if err != nil {
+		log.Printf("Failed to load today workout context: %v", err)
+		return "記録なし"
+	}
+	defer rows.Close()
+
+	lines := []string{}
+	for rows.Next() {
+		var exerciseName string
+		var setOrder int
+		var weight float64
+		var reps int
+		var feeling string
+		if err := rows.Scan(&exerciseName, &setOrder, &weight, &reps, &feeling); err != nil {
+			log.Printf("Failed to scan today workout context: %v", err)
+			return "記録なし"
+		}
+		if feeling == "" {
+			feeling = "感想なし"
+		}
+		lines = append(lines, fmt.Sprintf("- %s %dセット目: %.1fkg x %d回 / 感想: %s", exerciseName, setOrder, weight, reps, feeling))
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("Failed to iterate today workout context: %v", err)
+		return "記録なし"
+	}
+	if len(lines) == 0 {
+		return "記録なし"
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (app *App) handleStartWorkoutPlan(w http.ResponseWriter, r *http.Request) {

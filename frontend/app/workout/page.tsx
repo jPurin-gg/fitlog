@@ -578,6 +578,14 @@ export default function WorkoutPage() {
                         <p className="text-sm font-bold text-white/70">{recommendation.max_weight}<span className="text-[10px] ml-0.5">kg</span></p>
                       </div>
                     </div>
+                    {recommendation.record_template && (
+                      <div className="pt-4 border-t border-white/5">
+                        <p className="text-[10px] text-white/30 font-black mb-2">記録テンプレート</p>
+                        <pre className="whitespace-pre-wrap rounded-xl border border-white/10 bg-black/50 p-3 text-xs leading-relaxed text-white/70">
+                          {recommendation.record_template}
+                        </pre>
+                      </div>
+                    )}
                   </div>
 
                   <div className="pt-2">

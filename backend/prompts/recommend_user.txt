@@ -1,8 +1,15 @@
 現在の入力データ:
+- 種目名: {{.ExerciseName}}
 - 今回のセット数: {{.SetOrder}}
 - 今回扱った重量: {{printf "%.1f" .Weight}} kg
 - 今回こなした回数: {{.Reps}}
 - ユーザーの感想・状態: "{{.Feeling}}"
 - 参考: この種目の過去最大重量: {{printf "%.1f" .MaxWeight}} kg
 
-上記に基づき、次のセットはどうすべきかJSONで提案してください。
+この種目の最近の記録:
+{{.RecentExerciseHistory}}
+
+今日すでに行ったセット:
+{{.TodayWorkoutContext}}
+
+上記に基づき、直前セットを最重要視して、次のセットはどうすべきかJSONで提案してください。
