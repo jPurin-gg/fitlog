@@ -273,7 +273,7 @@ export default function WorkoutPage() {
             <p className="text-white/50">おつかれさまでした。今日の積み上げを記録しました。</p>
           </div>
 
-          <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+          <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
             <SummaryMetric icon={<ListChecks className="w-5 h-5" />} label="セット数" value={`${finishedSummary.total_sets}`} unit="セット" />
             <SummaryMetric icon={<BarChart3 className="w-5 h-5" />} label="総ボリューム" value={Math.round(finishedSummary.total_volume).toLocaleString("ja-JP")} unit="kg" />
             <SummaryMetric icon={<Clock3 className="w-5 h-5" />} label="時間" value={`${finishedSummary.duration_min}`} unit="分" />
@@ -292,7 +292,7 @@ export default function WorkoutPage() {
                         {ex.sets}セット
                       </span>
                     </div>
-                    <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-center">
                       <div className="bg-black/25 rounded-xl p-3">
                         <p className="text-[10px] text-white/35 font-bold mb-1">回数</p>
                         <p className="text-sm font-bold">{ex.total_reps}回</p>
@@ -670,11 +670,11 @@ export default function WorkoutPage() {
 
 function SummaryMetric({ icon, label, value, unit }: { icon: React.ReactNode; label: string; value: string; unit: string }) {
   return (
-    <div className="glass rounded-2xl p-4 border border-white/5">
+    <div className="glass rounded-2xl p-4 border border-white/5 min-w-0">
       <div className="text-primary mb-3">{icon}</div>
       <p className="text-[10px] font-bold text-white/35 mb-1">{label}</p>
-      <div className="flex items-baseline gap-1">
-        <span className="text-2xl font-black">{value}</span>
+      <div className="flex items-baseline gap-1 min-w-0">
+        <span className="text-xl sm:text-2xl font-black leading-tight break-words min-w-0">{value}</span>
         <span className="text-xs text-white/40 font-bold">{unit}</span>
       </div>
     </div>

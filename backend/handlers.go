@@ -72,6 +72,16 @@ type FinishWorkoutResponse struct {
 	Summary   WorkoutSummary `json:"summary"`
 }
 
+type WorkoutDetailResponse struct {
+	ID        int            `json:"id"`
+	UserID    int            `json:"user_id"`
+	Title     string         `json:"title"`
+	StartedAt string         `json:"started_at"`
+	EndedAt   string         `json:"ended_at"`
+	Status    string         `json:"status"`
+	Summary   WorkoutSummary `json:"summary"`
+}
+
 type WorkoutSummary struct {
 	TotalSets   int                      `json:"total_sets"`
 	TotalReps   int                      `json:"total_reps"`
@@ -376,6 +386,66 @@ func (app *App) handleFinishWorkout(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func (app *App) handleWorkoutDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idText := strings.TrimPrefix(r.URL.Path, "/api/workouts/")
+	workoutID, err := strconv.Atoi(strings.Trim(idText, "/"))
+	if err != nil || workoutID <= 0 {
+		http.Error(w, "Invalid workout id", http.StatusBadRequest)
+		return
+	}
+
+	userID, _ := strconv.Atoi(r.URL.Query().Get("user_id"))
+	if userID == 0 {
+		userID = 1
+	}
+
+	var resp WorkoutDetailResponse
+	err = app.db.QueryRow(`
+		SELECT
+			id,
+			user_id,
+			COALESCE(notes, 'ワークアウト'),
+			started_at::text,
+			COALESCE(ended_at::text, ''),
+			CASE WHEN ended_at IS NULL THEN 'active' ELSE 'completed' END
+		FROM workouts
+		WHERE id = $1 AND user_id = $2
+	`, workoutID, userID).Scan(
+		&resp.ID,
+		&resp.UserID,
+		&resp.Title,
+		&resp.StartedAt,
+		&resp.EndedAt,
+		&resp.Status,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Workout not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Failed to load workout detail: %v", err)
+		http.Error(w, "Failed to load workout detail", http.StatusInternalServerError)
+		return
+	}
+
+	summary, err := app.loadWorkoutSummary(userID, workoutID)
+	if err != nil {
+		log.Printf("Failed to load workout summary: %v", err)
+		http.Error(w, "Failed to load workout summary", http.StatusInternalServerError)
+		return
+	}
+	resp.Title = displayWorkoutTitle(resp.Title)
+	resp.Summary = summary
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
 func (app *App) loadWorkoutSummary(userID, workoutID int) (WorkoutSummary, error) {
 	summary := WorkoutSummary{Exercises: []WorkoutSummaryExercise{}}
 	err := app.db.QueryRow(`
@@ -431,6 +501,23 @@ func (app *App) loadWorkoutSummary(userID, workoutID int) (WorkoutSummary, error
 		return summary, err
 	}
 	return summary, nil
+}
+
+func displayWorkoutTitle(value string) string {
+	switch value {
+	case "Strength":
+		return "筋トレ"
+	case "Workout":
+		return "ワークアウト"
+	case "Push (胸・肩・三頭)":
+		return "押す日（胸・肩・三頭）"
+	case "Pull (背中・二頭)":
+		return "引く日（背中・二頭）"
+	case "Legs (脚・腹)":
+		return "脚の日（脚・腹）"
+	default:
+		return value
+	}
 }
 
 func (app *App) closeStaleWorkouts(userID int) error {

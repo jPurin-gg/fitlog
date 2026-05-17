@@ -15,6 +15,7 @@ import {
   X,
   Target,
   RefreshCw,
+  ChevronRight,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlternativeCoachModal } from "@/components/AlternativeCoachModal";
@@ -141,10 +142,10 @@ export default function Home() {
             <button className="flex-none p-3 glass rounded-2xl hover:bg-white/10 transition-colors">
               <Bell className="w-5 h-5 text-white/70" />
             </button>
-            <button className="w-full sm:w-auto px-6 py-3 bg-primary text-black font-bold rounded-2xl glow-primary hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 justify-center">
+            <Link href="/workout" className="w-full sm:w-auto px-6 py-3 bg-primary text-black font-bold rounded-2xl glow-primary hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 justify-center">
               <Plus className="w-5 h-5" />
               <span>記録を始める</span>
-            </button>
+            </Link>
           </div>
         </header>
 
@@ -247,21 +248,17 @@ export default function Home() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {dashboardData && dashboardData.recent_workouts ? dashboardData.recent_workouts.map((w: any) => (
-              <div key={w.id} className="bg-white/5 rounded-2xl p-5 border border-white/5 hover:bg-white/10 transition-colors">
-                <h4 className="font-bold mb-1 truncate">{w.title}</h4>
-                <p className="text-xs text-white/40 mb-4">{w.time}</p>
-                <div className="flex gap-6">
-                  <div>
-                    <span className="text-[10px] font-bold text-white/30 block mb-1">時間</span>
-                    <span className="font-medium text-sm">{w.duration}</span>
-                  </div>
-                  {/* Calorie mock logic was visible earlier but we keep it clean now */}
-                  <div className="hidden">
-                    <span className="text-[10px] font-bold text-white/30 block mb-1">消費カロリー</span>
-                    <span className="font-medium text-sm text-primary">{w.calories}</span>
-                  </div>
+              <Link key={w.id} href={`/workouts/${w.id}`} className="bg-white/5 rounded-2xl p-5 border border-white/5 hover:bg-white/10 transition-colors group">
+                <div className="flex justify-between items-start gap-3 mb-1">
+                  <h4 className="font-bold truncate">{w.title}</h4>
+                  <ChevronRight className="w-4 h-4 text-white/25 group-hover:text-primary transition-colors flex-shrink-0 mt-0.5" />
                 </div>
-              </div>
+                <p className="text-xs text-white/40 mb-4">{w.time}</p>
+                <div>
+                  <span className="text-[10px] font-bold text-white/30 block mb-1">時間</span>
+                  <span className="font-medium text-sm">{w.duration}</span>
+                </div>
+              </Link>
             )) : (
               <div className="col-span-full text-center py-6 text-white/30 text-sm flex items-center justify-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin" /> 記録を読み込み中...
