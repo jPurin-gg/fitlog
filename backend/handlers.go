@@ -13,6 +13,7 @@ import (
 
 type RecommendRequest struct {
 	UserID     int     `json:"user_id"`
+	WorkoutID  int     `json:"workout_id"`
 	ExerciseID string  `json:"exercise_id"`
 	SetOrder   int     `json:"set_order"`
 	Weight     float64 `json:"weight"`
@@ -139,19 +140,35 @@ func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 	// 2. 本物のDBへの保存処理
 	if app.db != nil {
 		var workoutID int
-		// 今日のワークアウトを探す
-		err := app.db.QueryRow(`
-			SELECT id FROM workouts 
-			WHERE user_id = $1 AND ended_at IS NULL AND DATE(started_at) = CURRENT_DATE 
-			LIMIT 1`, req.UserID).Scan(&workoutID)
-
-		if err != nil {
-			// 新しく作成
+		var err error
+		if req.WorkoutID > 0 {
 			err = app.db.QueryRow(`
-				INSERT INTO workouts (user_id) VALUES ($1) RETURNING id
-			`, req.UserID).Scan(&workoutID)
+				SELECT id FROM workouts
+				WHERE id = $1 AND user_id = $2 AND ended_at IS NULL
+			`, req.WorkoutID, req.UserID).Scan(&workoutID)
 			if err != nil {
-				log.Printf("Failed to create workout: %v", err)
+				if err == sql.ErrNoRows {
+					http.Error(w, "指定されたワークアウトが存在しないか、すでに終了しています。", http.StatusNotFound)
+					return
+				}
+				log.Printf("Failed to verify workout_id: %v", err)
+				http.Error(w, "ワークアウトの確認に失敗しました。", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			// workout_id がない古い呼び出しでは、従来通り今日の未終了ワークアウトを探す。
+			err = app.db.QueryRow(`
+				SELECT id FROM workouts
+				WHERE user_id = $1 AND ended_at IS NULL AND DATE(started_at) = CURRENT_DATE
+				LIMIT 1`, req.UserID).Scan(&workoutID)
+
+			if err != nil {
+				err = app.db.QueryRow(`
+					INSERT INTO workouts (user_id) VALUES ($1) RETURNING id
+				`, req.UserID).Scan(&workoutID)
+				if err != nil {
+					log.Printf("Failed to create workout: %v", err)
+				}
 			}
 		}
 

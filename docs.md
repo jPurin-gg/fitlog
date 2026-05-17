@@ -162,6 +162,7 @@ fitlog/
 ```json
 {
   "user_id": 1,
+  "workout_id": 10,
   "exercise_id": "Barbell_Bench_Press_-_Medium_Grip",
   "set_order": 2,
   "weight": 80.0,
@@ -172,10 +173,11 @@ fitlog/
 
 **処理フロー**
 1. `user_exercise_stats` から過去最大重量を取得
-2. 当日の `workouts` レコードを検索（なければ新規作成）
-3. `workout_sets` にセットを INSERT
-4. `user_exercise_stats` を UPSERT（max_weight を更新）
-5. Gemini にプロンプトを投げ、次のセットを提案
+2. `workout_id` が指定されていれば、その未終了ワークアウトに保存する
+3. `workout_id` が未指定の場合のみ、当日の `workouts` レコードを検索（なければ新規作成）
+4. `workout_sets` にセットを INSERT
+5. `user_exercise_stats` を UPSERT（max_weight を更新）
+6. Gemini にプロンプトを投げ、次のセットを提案
 
 **レスポンス**
 ```json

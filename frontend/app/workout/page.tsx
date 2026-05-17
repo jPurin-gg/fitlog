@@ -182,6 +182,7 @@ export default function WorkoutPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           exercise_id: currentExercise.id, 
+          workout_id: workoutPlan?.workout_id || 0,
           user_id: 1, 
           set_order: currentSet,
           weight: parseFloat(formData.weight),
