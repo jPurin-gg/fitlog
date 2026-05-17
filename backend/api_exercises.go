@@ -18,6 +18,7 @@ func (app *App) handleExercises(w http.ResponseWriter, r *http.Request) {
 	// equipment はカンマ区切りで複数指定可能 (例: ?equipment=ダンベル,バーベル)
 	equipmentParam := r.URL.Query().Get("equipment")
 	nameQuery := r.URL.Query().Get("name")
+	level := r.URL.Query().Get("level")
 
 	query := `SELECT id, name, force, level, mechanic, equipment, category, instructions, primary_muscles, secondary_muscles, images FROM exercises WHERE 1=1`
 	args := []interface{}{}
@@ -51,7 +52,25 @@ func (app *App) handleExercises(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	query += ` ORDER BY name ASC`
+	if level != "" {
+		query += ` AND level = $` + fmt.Sprint(argId)
+		args = append(args, level)
+		argId++
+	}
+
+	query += `
+		ORDER BY
+			CASE level
+				WHEN '初級' THEN 1
+				WHEN 'beginner' THEN 1
+				WHEN '中級' THEN 2
+				WHEN 'intermediate' THEN 2
+				WHEN '上級' THEN 3
+				WHEN 'expert' THEN 3
+				ELSE 4
+			END,
+			name ASC
+	`
 
 	rows, err := app.db.Query(query, args...)
 	if err != nil {
@@ -75,10 +94,18 @@ func (app *App) handleExercises(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if instJSON != nil { json.Unmarshal(instJSON, &ex.Instructions) }
-		if primJSON != nil { json.Unmarshal(primJSON, &ex.PrimaryMuscles) }
-		if secJSON != nil { json.Unmarshal(secJSON, &ex.SecondaryMuscles) }
-		if imgJSON != nil { json.Unmarshal(imgJSON, &ex.Images) }
+		if instJSON != nil {
+			json.Unmarshal(instJSON, &ex.Instructions)
+		}
+		if primJSON != nil {
+			json.Unmarshal(primJSON, &ex.PrimaryMuscles)
+		}
+		if secJSON != nil {
+			json.Unmarshal(secJSON, &ex.SecondaryMuscles)
+		}
+		if imgJSON != nil {
+			json.Unmarshal(imgJSON, &ex.Images)
+		}
 
 		exercises = append(exercises, ex)
 	}

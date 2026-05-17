@@ -35,6 +35,13 @@ const CATEGORY_OPTIONS = [
   { value: "その他", label: "その他" },
 ]
 
+const DIFFICULTY_OPTIONS = [
+  { value: "すべて", label: "すべて" },
+  { value: "初級", label: "初級" },
+  { value: "中級", label: "中級" },
+  { value: "上級", label: "上級" },
+]
+
 const EXERCISE_LABELS: Record<string, string> = {
   beginner: "初級",
   intermediate: "中級",
@@ -62,6 +69,7 @@ export default function ExercisesPage() {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
   const [exercises, setExercises] = useState<Exercise[]>([])
   const [muscle, setMuscle] = useState('すべて')
+  const [difficulty, setDifficulty] = useState('すべて')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedEquipments, setSelectedEquipments] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -76,6 +84,7 @@ export default function ExercisesPage() {
     secondaryMuscles: '',
     equipment: 'その他',
     category: 'strength',
+    level: '初級',
     instructions: '',
   })
 
@@ -93,6 +102,7 @@ export default function ExercisesPage() {
       try {
         const params = new URLSearchParams()
         if (muscle !== 'すべて') params.set('muscle', muscle)
+        if (difficulty !== 'すべて') params.set('level', difficulty)
         if (searchQuery.trim()) params.set('name', searchQuery.trim())
         if (selectedEquipments.length > 0) params.set('equipment', selectedEquipments.join(','))
         const qs = params.toString()
@@ -109,7 +119,7 @@ export default function ExercisesPage() {
     // 入力中に毎回叩かないよう 300ms debounce
     const timer = setTimeout(fetchExercises, 300)
     return () => clearTimeout(timer)
-  }, [apiUrl, muscle, searchQuery, selectedEquipments, reloadToken])
+  }, [apiUrl, muscle, difficulty, searchQuery, selectedEquipments, reloadToken])
 
   // モーダルが開いている間は背景のスクロールを無効化する（UX改善）
   useEffect(() => {
@@ -130,6 +140,7 @@ export default function ExercisesPage() {
       secondaryMuscles: '',
       equipment: 'その他',
       category: 'strength',
+      level: '初級',
       instructions: '',
     })
     setAddError('')
@@ -163,6 +174,7 @@ export default function ExercisesPage() {
           name: newExercise.name.trim(),
           category: newExercise.category,
           equipment: newExercise.equipment,
+          level: newExercise.level,
           primary_muscles: newExercise.primaryMuscle ? [newExercise.primaryMuscle] : [],
           secondary_muscles: secondaryMuscles,
           instructions,
@@ -240,6 +252,23 @@ export default function ExercisesPage() {
           </div>
 
           <div className="flex overflow-x-auto pb-2 gap-2 hide-scrollbar">
+            <div className="flex items-center text-white/40 text-xs font-bold whitespace-nowrap mr-2"><Shield className="w-4 h-4 mr-1"/> 難易度:</div>
+            {DIFFICULTY_OPTIONS.map(option => (
+              <button
+                key={option.value}
+                onClick={() => setDifficulty(option.value)}
+                className={`whitespace-nowrap px-5 py-2 text-sm rounded-xl font-medium transition-all border flex-shrink-0 ${
+                  difficulty === option.value
+                  ? 'bg-secondary text-black border-secondary font-bold shadow-[0_0_15px_rgba(0,210,255,0.25)]'
+                  : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex overflow-x-auto pb-2 gap-2 hide-scrollbar">
             <div className="flex items-center text-white/40 text-xs font-bold whitespace-nowrap mr-2"><Dumbbell className="w-4 h-4 mr-1"/> 器具:</div>
             {EQUIPMENTS.map(eq => (
               <button
@@ -297,6 +326,15 @@ export default function ExercisesPage() {
                     </button>
                   </span>
                 )}
+
+                {difficulty !== 'すべて' && (
+                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-secondary/20 text-secondary border border-secondary/30">
+                    難易度: {displayExerciseLabel(difficulty)}
+                    <button onClick={() => setDifficulty('すべて')} className="ml-1.5 text-secondary hover:text-white font-bold text-sm focus:outline-none leading-none">
+                      &times;
+                    </button>
+                  </span>
+                )}
                 
                 {searchQuery && (
                   <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-white/10 text-white/80 border border-white/20">
@@ -307,7 +345,7 @@ export default function ExercisesPage() {
                   </span>
                 )}
 
-                {muscle === 'すべて' && selectedEquipments.length === 0 && !searchQuery && (
+                {muscle === 'すべて' && difficulty === 'すべて' && selectedEquipments.length === 0 && !searchQuery && (
                   <span className="text-sm text-white/40 italic">絞り込みなし（全件表示）</span>
                 )}
               </div>
@@ -441,7 +479,7 @@ export default function ExercisesPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div className="space-y-2">
                   <label className="text-xs font-black text-white/40">メイン部位</label>
                   <select
@@ -470,6 +508,18 @@ export default function ExercisesPage() {
                     className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
                   >
                     {CATEGORY_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-white/40">難易度</label>
+                  <select
+                    value={newExercise.level}
+                    onChange={(e) => setNewExercise({ ...newExercise, level: e.target.value })}
+                    className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
+                  >
+                    {DIFFICULTY_OPTIONS.filter(option => option.value !== 'すべて').map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
                   </select>
                 </div>
               </div>
