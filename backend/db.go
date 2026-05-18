@@ -51,6 +51,7 @@ func ensureSchema(db *sql.DB) error {
 			frequency TEXT NOT NULL,
 			description TEXT,
 			rationale TEXT,
+			rest_days JSONB NOT NULL DEFAULT '[]'::jsonb,
 			recommended_days JSONB NOT NULL DEFAULT '[]'::jsonb,
 			weekly_routine JSONB NOT NULL DEFAULT '[]'::jsonb,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -74,6 +75,7 @@ func ensureSchema(db *sql.DB) error {
 
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
 		ALTER TABLE workouts ADD COLUMN IF NOT EXISTS summary_comment TEXT;
+		ALTER TABLE monthly_plans ADD COLUMN IF NOT EXISTS rest_days JSONB NOT NULL DEFAULT '[]'::jsonb;
 	`)
 	return err
 }

@@ -258,8 +258,16 @@ func (app *App) handleAlternative(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.ExerciseID == "" {
-		http.Error(w, "種目IDが指定されていません。", http.StatusBadRequest)
-		return
+		id, name, err := app.resolveExerciseForAlternative(req.Exercise)
+		if err != nil {
+			fmt.Printf("Alternative exercise name lookup error: %v\n", err)
+			http.Error(w, "種目を辞書から見つけられませんでした。手動で種目を変更してください。", http.StatusNotFound)
+			return
+		}
+		req.ExerciseID = id
+		if req.Exercise == "" {
+			req.Exercise = name
+		}
 	}
 
 	// 1. 元の種目の対象筋肉を取得
@@ -358,4 +366,33 @@ func (app *App) handleAlternative(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (app *App) resolveExerciseForAlternative(name string) (string, string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", "", fmt.Errorf("exercise name is empty")
+	}
+
+	var id string
+	var displayName string
+	err := app.db.QueryRow(`
+		SELECT id, name FROM exercises
+		WHERE name = $1 OR id = $1
+		LIMIT 1
+	`, name).Scan(&id, &displayName)
+	if err == nil {
+		return id, displayName, nil
+	}
+
+	err = app.db.QueryRow(`
+		SELECT id, name FROM exercises
+		WHERE name ILIKE $1 OR id ILIKE $1
+		ORDER BY name
+		LIMIT 1
+	`, "%"+name+"%").Scan(&id, &displayName)
+	if err != nil {
+		return "", "", err
+	}
+	return id, displayName, nil
 }

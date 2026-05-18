@@ -138,6 +138,7 @@ fitlog/
 | frequency      | TEXT NOT NULL             | 推奨頻度                      |
 | description    | TEXT                      | プラン説明                    |
 | rationale      | TEXT                      | 選定理由                      |
+| rest_days      | JSONB NOT NULL            | 休息曜日。日曜=0、月曜=1      |
 | recommended_days | JSONB NOT NULL          | 推奨曜日。日曜=0、月曜=1      |
 | weekly_routine | JSONB NOT NULL            | 曜日ごとの部位・種目リスト    |
 | created_at     | TIMESTAMPTZ DEFAULT NOW() |                              |
@@ -293,12 +294,14 @@ fitlog/
   "frequency": "週3〜4回",
   "description": "押す筋肉、引く筋肉、脚の3グループに分けて鍛える...",
   "rationale": "バランス良く全身を鍛えつつ...",
+  "rest_days": [0, 2],
   "recommended_days": [1, 3, 5],
   "weekly_routine": [
     {
       "day_name": "Day 1",
       "target": "Push (胸・肩・三頭)",
-      "example_exercises": ["ベンチプレス", "ショルダープレス", "ディップス"]
+      "example_exercises": ["ベンチプレス", "ショルダープレス", "ディップス"],
+      "exercise_ids": ["Barbell_Bench_Press_-_Medium_Grip", "..."]
     }
   ]
 }
@@ -324,6 +327,7 @@ fitlog/
     "frequency": "週3〜4回",
     "description": "...",
     "rationale": "...",
+    "rest_days": [0, 2],
     "recommended_days": [1, 3, 5],
     "weekly_routine": [...]
   }
@@ -333,7 +337,7 @@ fitlog/
 > `plan_month` の降順で返す。履歴がない場合は空配列 `[]`。
 
 ### `POST /api/monthly-plan`
-モチベーションと頻度から月間プランを生成し、DBに保存する。既に同じ `user_id + plan_month` のプランがある場合は更新する。
+モチベーション、頻度、休息曜日、種目辞書候補からAIで月間プランを生成し、DBに保存する。既に同じ `user_id + plan_month` のプランがある場合は更新する。
 
 **リクエスト**
 ```json
@@ -341,14 +345,20 @@ fitlog/
   "user_id": 1,
   "plan_month": "2026-05",
   "motivation": "健康維持",
-  "frequency": "週3-4回"
+  "frequency": "週3-4回",
+  "rest_days": [0, 2]
 }
 ```
 
 **処理フロー**
-1. `motivation` と `frequency` からルールベースでプランを生成
-2. `monthly_plans` に UPSERT
-3. 保存後のプランを返す
+1. DBの種目辞書から月間プラン用の候補種目を取得
+2. `motivation`、`frequency`、`rest_days`、候補種目をAIに渡す
+3. AIは候補内の `id` と `name` のみを使って `weekly_routine` を生成
+4. `rest_days` を避けるように `recommended_days` を調整
+5. `monthly_plans` に UPSERT
+6. 保存後のプランを返す
+
+> `weekly_routine[].example_exercises` は表示用の種目名、`weekly_routine[].exercise_ids` は辞書の種目ID。既存データとの互換のため、IDがない場合は種目名から辞書検索する。
 
 ### `PUT /api/monthly-plan`
 既存の月間プランを保存する。ホーム画面でAI代替種目を選び、当月プラン内の種目が置き換わった場合などに使用する。
@@ -362,8 +372,16 @@ fitlog/
   "frequency": "週3〜4回",
   "description": "...",
   "rationale": "...",
+  "rest_days": [0, 2],
   "recommended_days": [1, 3, 5],
-  "weekly_routine": [...]
+  "weekly_routine": [
+    {
+      "day_name": "1日目",
+      "target": "押す日（胸・肩・三頭）",
+      "example_exercises": ["ベンチプレス"],
+      "exercise_ids": ["Barbell_Bench_Press_-_Medium_Grip"]
+    }
+  ]
 }
 ```
 
@@ -607,6 +625,8 @@ AI 呼び出しが失敗した場合（APIキー未設定、レート制限等�
 - 今日のワークアウト概要
 - 当月の月間プランを `/api/monthly-plan` から取得
 - 当月プランが未作成の場合、月間プラン生成モーダルを表示
+- 月間プラン生成モーダルでは休みたい曜日を選択でき、選択曜日は `rest_days` として保存される
+- 月間プラン生成時、AIが種目辞書の候補からID付きでおすすめ種目を選ぶ
 - 今日が `recommended_days` に含まれる場合、その曜日に対応するメニューを表示
 - 今日が推奨日でない場合は Rest Day 表示
 - ホーム上で代替種目を選んだ場合、`PUT /api/monthly-plan` で当月プランに保存
@@ -646,6 +666,7 @@ AI 呼び出しが失敗した場合（APIキー未設定、レート制限等�
 - 月次カレンダー
 - ワークアウト実施日にドット表示
 - 当月の `monthly_plans.recommended_days` を予定日として表示
+- `monthly_plans.rest_days` を休息曜日としてプラン詳細に表示
 - `weekly_routine` の `target` を予定日のラベルとして表示
 - 前月 / 翌月ボタンで表示月を移動
 - `GET /api/monthly-plans` で保存済みプラン履歴を表示

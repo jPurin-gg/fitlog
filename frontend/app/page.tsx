@@ -26,6 +26,24 @@ function getCurrentPlanMonth() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
+const WEEKDAY_OPTIONS = [
+  { value: 0, label: "日" },
+  { value: 1, label: "月" },
+  { value: 2, label: "火" },
+  { value: 3, label: "水" },
+  { value: 4, label: "木" },
+  { value: 5, label: "金" },
+  { value: 6, label: "土" },
+];
+
+function weekdayLabels(days?: number[]) {
+  if (!days || days.length === 0) return "";
+  return WEEKDAY_OPTIONS
+    .filter(day => days.includes(day.value))
+    .map(day => `${day.label}曜`)
+    .join("・");
+}
+
 function displayPlanText(text?: string) {
   if (!text) return "";
   return text
@@ -48,7 +66,7 @@ export default function Home() {
   const [showMonthlyModal, setShowMonthlyModal] = React.useState(false);
   const [monthlyPlan, setMonthlyPlan] = React.useState<any>(null);
   const [dashboardData, setDashboardData] = React.useState<any>(null);
-  const [altModalData, setAltModalData] = React.useState<{dayIdx: number, exIdx: number, exName: string} | null>(null);
+  const [altModalData, setAltModalData] = React.useState<{dayIdx: number, exIdx: number, exName: string, exId?: string} | null>(null);
   const [today, setToday] = React.useState<Date | null>(null);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
   const currentMonth = getCurrentPlanMonth();
@@ -111,12 +129,18 @@ export default function Home() {
         )}
         {altModalData && (
           <AlternativeCoachModal 
+            exerciseId={altModalData.exId}
             exerciseName={altModalData.exName}
             onClose={() => setAltModalData(null)}
             onReplace={(newExercise: string | { id?: string; name?: string }) => {
               const newExName = typeof newExercise === "string" ? newExercise : newExercise.name || altModalData.exName;
               const updatedPlan = { ...monthlyPlan };
               updatedPlan.weekly_routine[altModalData.dayIdx].example_exercises[altModalData.exIdx] = newExName;
+              if (typeof newExercise !== "string" && newExercise.id) {
+                const routine = updatedPlan.weekly_routine[altModalData.dayIdx];
+                routine.exercise_ids = Array.isArray(routine.exercise_ids) ? [...routine.exercise_ids] : [];
+                routine.exercise_ids[altModalData.exIdx] = newExercise.id;
+              }
               saveMonthlyPlan(updatedPlan);
               setAltModalData(null);
             }}
@@ -208,7 +232,10 @@ export default function Home() {
                           {displayPlanText(routine.day_name)}
                         </span>
                         <h3 className="text-3xl md:text-4xl font-black tracking-tight text-white mb-2">{displayPlanText(routine.target)}</h3>
-                        <p className="text-white/50 text-sm">AIコーチが選んだ本日の最適メニュー</p>
+                        <p className="text-white/50 text-sm">
+                          AIコーチが選んだ本日の最適メニュー
+                          {monthlyPlan.rest_days?.length > 0 ? ` / 休息日: ${weekdayLabels(monthlyPlan.rest_days)}` : ""}
+                        </p>
                       </div>
                       <Link href="/workout" className="w-full md:w-auto px-8 py-4 bg-primary text-black font-black rounded-2xl hover:scale-105 transition-transform flex justify-center items-center gap-2 shadow-[0_0_20px_rgba(255,170,0,0.3)]">
                         <Plus className="w-5 h-5" /> 筋トレを開始
@@ -227,7 +254,7 @@ export default function Home() {
                               <span className="font-bold text-lg text-white/90">{ex}</span>
                             </div>
                             <button 
-                              onClick={() => setAltModalData({dayIdx: idx, exIdx: i, exName: ex})}
+                              onClick={() => setAltModalData({dayIdx: idx, exIdx: i, exName: ex, exId: routine.exercise_ids?.[i]})}
                               className="text-xs font-bold text-primary opacity-60 hover:opacity-100 flex items-center gap-1 mt-auto self-start bg-primary/10 px-3 py-1.5 rounded-lg border border-primary/20 transition-all"
                             >
                               <RefreshCw className="w-3 h-3" /> 種目を変更・AIに相談
@@ -283,10 +310,23 @@ export default function Home() {
 function MonthlyPlanModal({ userId, onClose, onPlanGenerated }: any) {
   const [motivation, setMotivation] = React.useState("健康維持");
   const [frequency, setFrequency] = React.useState("週3-4回");
+  const [restDays, setRestDays] = React.useState<number[]>([]);
   const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const canGenerate = restDays.length < 7;
+
+  const toggleRestDay = (day: number) => {
+    setRestDays(prev => (
+      prev.includes(day)
+        ? prev.filter(value => value !== day)
+        : [...prev, day].sort((a, b) => a - b)
+    ));
+  };
 
   const generatePlan = async () => {
+    if (!canGenerate) return;
     setLoading(true);
+    setError("");
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
       const res = await fetch(`${apiUrl}/api/monthly-plan`, {
@@ -296,25 +336,19 @@ function MonthlyPlanModal({ userId, onClose, onPlanGenerated }: any) {
           user_id: userId,
           plan_month: getCurrentPlanMonth(),
           motivation,
-          frequency
+          frequency,
+          rest_days: restDays
         })
       });
+      if (!res.ok) {
+        setError(await res.text() || "月間プランの作成に失敗しました。");
+        return;
+      }
       const data = await res.json();
       onPlanGenerated(data);
     } catch (e) {
       console.error(e);
-      // Fallback
-      onPlanGenerated({
-        plan_name: "PPL法（押す・引く・脚）",
-        frequency: "週3〜4回",
-        description: "押す筋肉、引く筋肉、脚の3グループに分けて鍛える、最もバランスが良く結果が出やすい王道のルーティンです。",
-        rationale: "バランス良く鍛えられるPPL法が最も適していると判断しました。まずはこれをベースに頑張りましょう！",
-        weekly_routine: [
-          { day_name: "1日目", target: "押す日", example_exercises: ["ベンチプレス", "ショルダープレス"] },
-          { day_name: "2日目", target: "引く日", example_exercises: ["懸垂", "ラットプルダウン"] },
-          { day_name: "3日目", target: "脚の日", example_exercises: ["スクワット", "レッグプレス"] }
-        ]
-      });
+      setError("エラーが発生しました。");
     } finally {
       setLoading(false);
     }
@@ -338,7 +372,7 @@ function MonthlyPlanModal({ userId, onClose, onPlanGenerated }: any) {
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="glass border-primary/20 w-full max-w-lg rounded-[32px] overflow-hidden relative shadow-2xl shadow-primary/10"
+        className="glass border-primary/20 w-full max-w-lg rounded-[32px] overflow-hidden relative shadow-2xl shadow-primary/10 max-h-[90vh] overflow-y-auto"
       >
         <button onClick={onClose} className="absolute top-6 right-6 p-2 bg-white/5 rounded-full hover:bg-white/10 transition z-10 text-white/60 hover:text-white">
           <X className="w-5 h-5" />
@@ -392,11 +426,44 @@ function MonthlyPlanModal({ userId, onClose, onPlanGenerated }: any) {
                 ))}
               </div>
             </div>
+
+            <div className="space-y-3">
+              <label className="text-xs font-black tracking-widest text-white/40 ml-1">休みたい曜日（任意）</label>
+              <div className="grid grid-cols-7 gap-2">
+                {WEEKDAY_OPTIONS.map(day => (
+                  <button
+                    key={day.value}
+                    onClick={() => toggleRestDay(day.value)}
+                    className={`aspect-square rounded-2xl border text-center font-black text-sm transition-all ${
+                      restDays.includes(day.value)
+                        ? 'bg-secondary/20 border-secondary text-secondary'
+                        : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'
+                    }`}
+                  >
+                    {day.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-white/40 leading-relaxed">
+                選んだ曜日は休息日として避けます。生活リズム優先でOKです。
+              </p>
+              {!canGenerate && (
+                <p className="text-[11px] text-red-300 leading-relaxed">
+                  すべての曜日が休息日になっています。少なくとも1日は候補日を残してください。
+                </p>
+              )}
+            </div>
           </div>
+
+          {error && (
+            <div className="mb-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200 whitespace-pre-line">
+              {error}
+            </div>
+          )}
 
           <button 
             onClick={generatePlan}
-            disabled={loading}
+            disabled={loading || !canGenerate}
             className="group relative w-full py-5 mt-2 bg-primary text-black font-black rounded-2xl shadow-[0_0_30px_rgba(255,170,0,0.5)] hover:shadow-[0_0_50px_rgba(255,170,0,0.7)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 disabled:opacity-50 disabled:pointer-events-none tracking-widest overflow-hidden"
           >
             {/* Shimmer effect inside button */}

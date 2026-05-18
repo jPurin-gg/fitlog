@@ -1,0 +1,10 @@
+ユーザー入力:
+- 目標・モチベーション: {{.Motivation}}
+- 通える頻度: {{.Frequency}}
+- 休息曜日: {{if .RestDays}}{{.RestDays}}{{else}}指定なし{{end}}
+- 休息曜日JSON: {{.RestDaysJSON}}
+
+種目辞書候補:
+{{.CandidatesJSON}}
+
+上記の候補リスト内から種目を選び、月間プランをJSONで作成してください。

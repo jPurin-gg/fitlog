@@ -799,8 +799,16 @@ func (app *App) buildTodayWorkoutPlan(userID int) (WorkoutPlanPayload, error) {
 	}
 
 	exercises := []WorkoutPlanExercise{}
-	for _, name := range routine.ExampleExercises {
-		exerciseID, displayName, err := app.findExerciseByName(name)
+	for i, name := range routine.ExampleExercises {
+		exerciseID := ""
+		displayName := name
+		var err error
+		if i < len(routine.ExerciseIDs) && routine.ExerciseIDs[i] != "" {
+			exerciseID = routine.ExerciseIDs[i]
+			err = app.db.QueryRow("SELECT name FROM exercises WHERE id = $1", exerciseID).Scan(&displayName)
+		} else {
+			exerciseID, displayName, err = app.findExerciseByName(name)
+		}
 		if err != nil {
 			log.Printf("Exercise lookup failed for %q: %v", name, err)
 			continue
@@ -946,12 +954,14 @@ type MonthlyPlanRequest struct {
 	PlanMonth  string `json:"plan_month"`
 	Motivation string `json:"motivation"`
 	Frequency  string `json:"frequency"`
+	RestDays   []int  `json:"rest_days"`
 }
 
 type DayRoutine struct {
 	DayName          string   `json:"day_name"`
 	Target           string   `json:"target"`
 	ExampleExercises []string `json:"example_exercises"`
+	ExerciseIDs      []string `json:"exercise_ids,omitempty"`
 }
 
 type MonthlyPlanResponse struct {
@@ -962,8 +972,18 @@ type MonthlyPlanResponse struct {
 	Frequency       string       `json:"frequency"`
 	Description     string       `json:"description"`
 	Rationale       string       `json:"rationale"`
+	RestDays        []int        `json:"rest_days"`
 	RecommendedDays []int        `json:"recommended_days"`
 	WeeklyRoutine   []DayRoutine `json:"weekly_routine"`
+}
+
+type MonthlyPlanExerciseCandidate struct {
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Equipment      string   `json:"equipment"`
+	Level          string   `json:"level"`
+	Category       string   `json:"category"`
+	PrimaryMuscles []string `json:"primary_muscles"`
 }
 
 func (app *App) handleMonthlyPlan(w http.ResponseWriter, r *http.Request) {
@@ -1032,7 +1052,17 @@ func (app *App) createMonthlyPlan(w http.ResponseWriter, r *http.Request) {
 	planMonth := normalizePlanMonth(req.PlanMonth)
 	motivation := req.Motivation
 	frequency := req.Frequency
-	resp := generateMonthlyPlan(motivation, frequency)
+	restDays := normalizeWeekdays(req.RestDays)
+	if len(restDays) >= 7 {
+		http.Error(w, "休息日は6日までにしてください。少なくとも1日はトレーニング候補日が必要です。", http.StatusBadRequest)
+		return
+	}
+	resp, err := app.generateMonthlyPlanWithAI(motivation, frequency, restDays)
+	if err != nil {
+		log.Printf("Failed to generate monthly plan with AI: %v", err)
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	resp.UserID = userID
 	resp.PlanMonth = planMonth
 
@@ -1067,6 +1097,7 @@ func (app *App) saveMonthlyPlan(w http.ResponseWriter, r *http.Request) {
 	planMonth := normalizePlanMonth(req.PlanMonth)
 	req.UserID = userID
 	req.PlanMonth = planMonth
+	req.RestDays = normalizeWeekdays(req.RestDays)
 
 	if req.PlanName == "" || len(req.WeeklyRoutine) == 0 {
 		http.Error(w, "Invalid monthly plan", http.StatusBadRequest)
@@ -1090,7 +1121,7 @@ func (app *App) saveMonthlyPlan(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(plan)
 }
 
-func generateMonthlyPlan(motivation, frequency string) MonthlyPlanResponse {
+func generateMonthlyPlan(motivation, frequency string, restDays []int) MonthlyPlanResponse {
 	var resp MonthlyPlanResponse
 	if strings.Contains(frequency, "週5") || strings.Contains(motivation, "本気") {
 		resp.PlanName = "ブロ割 (部位別特化)"
@@ -1127,16 +1158,209 @@ func generateMonthlyPlan(motivation, frequency string) MonthlyPlanResponse {
 			{DayName: "3日目", Target: "脚の日（脚・腹）", ExampleExercises: []string{"スクワット", "レッグプレス", "カーフレイズ"}},
 		}
 	}
+	applyRestDayPreference(&resp, restDays)
 	return resp
+}
+
+func (app *App) generateMonthlyPlanWithAI(motivation, frequency string, restDays []int) (MonthlyPlanResponse, error) {
+	candidates, err := app.loadMonthlyPlanExerciseCandidates()
+	if err != nil {
+		return MonthlyPlanResponse{}, fmt.Errorf("種目辞書の候補取得に失敗しました。")
+	}
+	if len(candidates) == 0 {
+		return MonthlyPlanResponse{}, fmt.Errorf("月間プラン用の種目候補が見つかりませんでした。")
+	}
+
+	candidatesJSON, err := json.Marshal(candidates)
+	if err != nil {
+		return MonthlyPlanResponse{}, err
+	}
+	restDays = normalizeWeekdays(restDays)
+	systemPrompt, userPrompt, err := renderPromptPair("monthly_plan_system.txt", "monthly_plan_user.txt", map[string]any{
+		"Motivation":     motivation,
+		"Frequency":      frequency,
+		"RestDays":       weekdayListText(restDays),
+		"RestDaysJSON":   mustMarshalString(restDays),
+		"CandidatesJSON": string(candidatesJSON),
+	})
+	if err != nil {
+		return MonthlyPlanResponse{}, fmt.Errorf("AIプロンプトの読み込みに失敗しました。")
+	}
+
+	aiJSON, err := callAI(systemPrompt, userPrompt, true)
+	if err != nil {
+		return MonthlyPlanResponse{}, fmt.Errorf("AIによる月間プラン作成に失敗しました。APIキーや接続状況を確認してください。")
+	}
+
+	aiStr := strings.TrimSpace(aiJSON)
+	if strings.HasPrefix(aiStr, "```json") {
+		aiStr = strings.TrimPrefix(aiStr, "```json")
+		aiStr = strings.TrimSuffix(strings.TrimSpace(aiStr), "```")
+	}
+
+	var plan MonthlyPlanResponse
+	if err := json.Unmarshal([]byte(aiStr), &plan); err != nil {
+		return MonthlyPlanResponse{}, fmt.Errorf("AIの月間プランレスポンスを解析できませんでした。もう一度お試しください。")
+	}
+	if err := validateMonthlyPlanFromAI(&plan, candidates); err != nil {
+		return MonthlyPlanResponse{}, err
+	}
+	if plan.Frequency == "" {
+		plan.Frequency = frequency
+	}
+	applyRestDayPreference(&plan, restDays)
+	return plan, nil
+}
+
+func (app *App) loadMonthlyPlanExerciseCandidates() ([]MonthlyPlanExerciseCandidate, error) {
+	rows, err := app.db.Query(`
+		SELECT id, name, COALESCE(equipment, ''), COALESCE(level, ''), COALESCE(category, ''), primary_muscles
+		FROM exercises
+		WHERE COALESCE(category, '') IN ('筋力トレーニング', 'strength')
+			AND COALESCE(level, '') IN ('初級', '中級', 'beginner', 'intermediate', '')
+			AND jsonb_array_length(primary_muscles) > 0
+		ORDER BY
+			CASE COALESCE(level, '')
+				WHEN '初級' THEN 1
+				WHEN 'beginner' THEN 1
+				WHEN '中級' THEN 2
+				WHEN 'intermediate' THEN 2
+				ELSE 3
+			END,
+			name
+		LIMIT 1000
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	candidates := []MonthlyPlanExerciseCandidate{}
+	muscleCounts := map[string]int{}
+	for rows.Next() {
+		var candidate MonthlyPlanExerciseCandidate
+		var musclesJSON []byte
+		if err := rows.Scan(&candidate.ID, &candidate.Name, &candidate.Equipment, &candidate.Level, &candidate.Category, &musclesJSON); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(musclesJSON, &candidate.PrimaryMuscles); err != nil {
+			return nil, err
+		}
+		primary := candidate.PrimaryMuscles[0]
+		if muscleCounts[primary] >= 14 {
+			continue
+		}
+		if len(candidates) >= 180 {
+			break
+		}
+		muscleCounts[primary]++
+		candidates = append(candidates, candidate)
+	}
+	return candidates, rows.Err()
+}
+
+func validateMonthlyPlanFromAI(plan *MonthlyPlanResponse, candidates []MonthlyPlanExerciseCandidate) error {
+	if plan.PlanName == "" || plan.Description == "" || plan.Rationale == "" || len(plan.WeeklyRoutine) == 0 {
+		return fmt.Errorf("AIの月間プランレスポンスが不正でした。もう一度お試しください。")
+	}
+
+	candidateNames := map[string]string{}
+	for _, candidate := range candidates {
+		candidateNames[candidate.ID] = candidate.Name
+	}
+
+	for rIdx := range plan.WeeklyRoutine {
+		routine := &plan.WeeklyRoutine[rIdx]
+		if routine.DayName == "" || routine.Target == "" {
+			return fmt.Errorf("AIの月間プランレスポンスが不正でした。もう一度お試しください。")
+		}
+		if len(routine.ExerciseIDs) == 0 || len(routine.ExerciseIDs) != len(routine.ExampleExercises) {
+			return fmt.Errorf("AIが辞書内の種目IDを返しませんでした。もう一度お試しください。")
+		}
+		for i, id := range routine.ExerciseIDs {
+			name, ok := candidateNames[id]
+			if !ok {
+				return fmt.Errorf("AIが辞書外の種目を選びました。もう一度お試しください。")
+			}
+			if strings.TrimSpace(routine.ExampleExercises[i]) == "" {
+				routine.ExampleExercises[i] = name
+			}
+		}
+	}
+	return nil
+}
+
+func mustMarshalString(value any) string {
+	bytes, err := json.Marshal(value)
+	if err != nil {
+		return "null"
+	}
+	return string(bytes)
+}
+
+func applyRestDayPreference(plan *MonthlyPlanResponse, restDays []int) {
+	restDays = normalizeWeekdays(restDays)
+	plan.RestDays = restDays
+	if len(restDays) == 0 {
+		if plan.RestDays == nil {
+			plan.RestDays = []int{}
+		}
+		return
+	}
+
+	restSet := map[int]bool{}
+	for _, day := range restDays {
+		restSet[day] = true
+	}
+
+	targetCount := len(plan.WeeklyRoutine)
+	availableCount := 7 - len(restDays)
+	if targetCount > availableCount {
+		targetCount = availableCount
+		if targetCount < len(plan.WeeklyRoutine) {
+			plan.WeeklyRoutine = plan.WeeklyRoutine[:targetCount]
+		}
+	}
+
+	selected := []int{}
+	seen := map[int]bool{}
+	appendDay := func(day int) {
+		if len(selected) >= targetCount || restSet[day] || seen[day] {
+			return
+		}
+		selected = append(selected, day)
+		seen[day] = true
+	}
+
+	for _, day := range plan.RecommendedDays {
+		appendDay(day)
+	}
+
+	preferredOrder := []int{1, 3, 5, 2, 4, 6, 0}
+	if targetCount <= 2 {
+		preferredOrder = []int{2, 5, 1, 4, 6, 3, 0}
+	} else if targetCount >= 5 {
+		preferredOrder = []int{1, 2, 3, 4, 5, 6, 0}
+	}
+	for _, day := range preferredOrder {
+		appendDay(day)
+	}
+
+	plan.RecommendedDays = selected
+	restText := weekdayListText(restDays)
+	if restText != "" {
+		plan.Rationale = strings.TrimSpace(plan.Rationale + " " + restText + "は休息日として避けて、実施曜日を調整しました。")
+	}
 }
 
 func (app *App) loadMonthlyPlan(userID int, planMonth string) (MonthlyPlanResponse, bool, error) {
 	var plan MonthlyPlanResponse
+	var restDaysJSON []byte
 	var recommendedDaysJSON []byte
 	var weeklyRoutineJSON []byte
 
 	err := app.db.QueryRow(`
-		SELECT id, user_id, plan_month, plan_name, frequency, COALESCE(description, ''), COALESCE(rationale, ''), recommended_days, weekly_routine
+		SELECT id, user_id, plan_month, plan_name, frequency, COALESCE(description, ''), COALESCE(rationale, ''), rest_days, recommended_days, weekly_routine
 		FROM monthly_plans
 		WHERE user_id = $1 AND plan_month = $2
 	`, userID, planMonth).Scan(
@@ -1147,6 +1371,7 @@ func (app *App) loadMonthlyPlan(userID int, planMonth string) (MonthlyPlanRespon
 		&plan.Frequency,
 		&plan.Description,
 		&plan.Rationale,
+		&restDaysJSON,
 		&recommendedDaysJSON,
 		&weeklyRoutineJSON,
 	)
@@ -1157,6 +1382,9 @@ func (app *App) loadMonthlyPlan(userID int, planMonth string) (MonthlyPlanRespon
 		return MonthlyPlanResponse{}, false, err
 	}
 
+	if err := json.Unmarshal(restDaysJSON, &plan.RestDays); err != nil {
+		return MonthlyPlanResponse{}, false, err
+	}
 	if err := json.Unmarshal(recommendedDaysJSON, &plan.RecommendedDays); err != nil {
 		return MonthlyPlanResponse{}, false, err
 	}
@@ -1168,7 +1396,7 @@ func (app *App) loadMonthlyPlan(userID int, planMonth string) (MonthlyPlanRespon
 
 func (app *App) loadMonthlyPlans(userID int) ([]MonthlyPlanResponse, error) {
 	rows, err := app.db.Query(`
-		SELECT id, user_id, plan_month, plan_name, frequency, COALESCE(description, ''), COALESCE(rationale, ''), recommended_days, weekly_routine
+		SELECT id, user_id, plan_month, plan_name, frequency, COALESCE(description, ''), COALESCE(rationale, ''), rest_days, recommended_days, weekly_routine
 		FROM monthly_plans
 		WHERE user_id = $1
 		ORDER BY plan_month DESC
@@ -1181,6 +1409,7 @@ func (app *App) loadMonthlyPlans(userID int) ([]MonthlyPlanResponse, error) {
 	plans := []MonthlyPlanResponse{}
 	for rows.Next() {
 		var plan MonthlyPlanResponse
+		var restDaysJSON []byte
 		var recommendedDaysJSON []byte
 		var weeklyRoutineJSON []byte
 		if err := rows.Scan(
@@ -1191,9 +1420,13 @@ func (app *App) loadMonthlyPlans(userID int) ([]MonthlyPlanResponse, error) {
 			&plan.Frequency,
 			&plan.Description,
 			&plan.Rationale,
+			&restDaysJSON,
 			&recommendedDaysJSON,
 			&weeklyRoutineJSON,
 		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(restDaysJSON, &plan.RestDays); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(recommendedDaysJSON, &plan.RecommendedDays); err != nil {
@@ -1208,6 +1441,11 @@ func (app *App) loadMonthlyPlans(userID int) ([]MonthlyPlanResponse, error) {
 }
 
 func (app *App) upsertMonthlyPlan(userID int, planMonth string, plan *MonthlyPlanResponse) error {
+	plan.RestDays = normalizeWeekdays(plan.RestDays)
+	restDaysJSON, err := json.Marshal(plan.RestDays)
+	if err != nil {
+		return err
+	}
 	recommendedDaysJSON, err := json.Marshal(plan.RecommendedDays)
 	if err != nil {
 		return err
@@ -1219,19 +1457,20 @@ func (app *App) upsertMonthlyPlan(userID int, planMonth string, plan *MonthlyPla
 
 	return app.db.QueryRow(`
 		INSERT INTO monthly_plans (
-			user_id, plan_month, plan_name, frequency, description, rationale, recommended_days, weekly_routine
+			user_id, plan_month, plan_name, frequency, description, rationale, rest_days, recommended_days, weekly_routine
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
+		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb)
 		ON CONFLICT (user_id, plan_month) DO UPDATE SET
 			plan_name = EXCLUDED.plan_name,
 			frequency = EXCLUDED.frequency,
 			description = EXCLUDED.description,
 			rationale = EXCLUDED.rationale,
+			rest_days = EXCLUDED.rest_days,
 			recommended_days = EXCLUDED.recommended_days,
 			weekly_routine = EXCLUDED.weekly_routine,
 			updated_at = CURRENT_TIMESTAMP
 		RETURNING id
-	`, userID, planMonth, plan.PlanName, plan.Frequency, plan.Description, plan.Rationale, string(recommendedDaysJSON), string(weeklyRoutineJSON)).Scan(&plan.ID)
+	`, userID, planMonth, plan.PlanName, plan.Frequency, plan.Description, plan.Rationale, string(restDaysJSON), string(recommendedDaysJSON), string(weeklyRoutineJSON)).Scan(&plan.ID)
 }
 
 func parseUserID(raw string) int {
@@ -1240,6 +1479,41 @@ func parseUserID(raw string) int {
 		return 1
 	}
 	return userID
+}
+
+func normalizeWeekdays(days []int) []int {
+	seen := map[int]bool{}
+	for _, day := range days {
+		if day >= 0 && day <= 6 {
+			seen[day] = true
+		}
+	}
+	normalized := []int{}
+	for _, day := range []int{0, 1, 2, 3, 4, 5, 6} {
+		if seen[day] {
+			normalized = append(normalized, day)
+		}
+	}
+	return normalized
+}
+
+func weekdayListText(days []int) string {
+	names := map[int]string{
+		0: "日曜",
+		1: "月曜",
+		2: "火曜",
+		3: "水曜",
+		4: "木曜",
+		5: "金曜",
+		6: "土曜",
+	}
+	labels := []string{}
+	for _, day := range normalizeWeekdays(days) {
+		if name, ok := names[day]; ok {
+			labels = append(labels, name)
+		}
+	}
+	return strings.Join(labels, "・")
 }
 
 func normalizePlanMonth(raw string) string {

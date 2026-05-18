@@ -64,6 +64,7 @@ CREATE TABLE monthly_plans (
     frequency TEXT NOT NULL,
     description TEXT,
     rationale TEXT,
+    rest_days JSONB NOT NULL DEFAULT '[]'::jsonb,
     recommended_days JSONB NOT NULL DEFAULT '[]'::jsonb,
     weekly_routine JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,

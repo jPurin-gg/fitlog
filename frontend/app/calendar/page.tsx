@@ -10,6 +10,7 @@ interface DayRoutine {
   day_name: string;
   target: string;
   example_exercises: string[];
+  exercise_ids?: string[];
 }
 
 interface MonthlyPlan {
@@ -20,6 +21,7 @@ interface MonthlyPlan {
   frequency: string;
   description: string;
   rationale: string;
+  rest_days?: number[];
   recommended_days: number[];
   weekly_routine: DayRoutine[];
 }
@@ -42,6 +44,24 @@ function formatPlanMonth(date: Date) {
 function dateFromPlanMonth(planMonth: string) {
   const [year, month] = planMonth.split("-").map(Number);
   return new Date(year, (month || 1) - 1, 1);
+}
+
+const WEEKDAY_OPTIONS = [
+  { value: 0, label: "日曜" },
+  { value: 1, label: "月曜" },
+  { value: 2, label: "火曜" },
+  { value: 3, label: "水曜" },
+  { value: 4, label: "木曜" },
+  { value: 5, label: "金曜" },
+  { value: 6, label: "土曜" },
+];
+
+function weekdayLabels(days?: number[]) {
+  if (!days || days.length === 0) return "";
+  return WEEKDAY_OPTIONS
+    .filter(day => days.includes(day.value))
+    .map(day => day.label)
+    .join("・");
 }
 
 function displayPlanText(text?: string) {
@@ -394,6 +414,11 @@ export default function CalendarPage() {
                   <div className="px-3 py-1 glass bg-white/5 rounded-lg inline-block text-xs font-bold text-white/70 mb-6">
                     {plan.plan_month || selectedPlanMonth} / {plan.frequency}
                   </div>
+                  {plan.rest_days && plan.rest_days.length > 0 && (
+                    <div className="mb-6 rounded-2xl border border-secondary/20 bg-secondary/10 px-4 py-3 text-sm text-secondary">
+                      休息日: {weekdayLabels(plan.rest_days)}
+                    </div>
+                  )}
                   
                   <div className="space-y-3">
                     {plan.weekly_routine.map((r: DayRoutine, i: number) => (
