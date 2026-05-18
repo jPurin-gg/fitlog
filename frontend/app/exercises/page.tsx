@@ -66,7 +66,7 @@ function displayExerciseLabel(value?: string) {
 }
 
 export default function ExercisesPage() {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
   const [exercises, setExercises] = useState<Exercise[]>([])
   const [muscle, setMuscle] = useState('すべて')
   const [difficulty, setDifficulty] = useState('すべて')

@@ -19,6 +19,7 @@ services:
     # ローカル開発中のホットリロードを安定させるため
     environment:
       - WATCHPACK_POLLING=true
+      - BACKEND_INTERNAL_URL=http://backend:8080
 
   # ⚙️ バックエンド（Go）
   backend:

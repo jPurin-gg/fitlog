@@ -94,7 +94,7 @@ export default function CalendarPage() {
   const [plannedWeekDays, setPlannedWeekDays] = useState<number[]>([]);
   const [workedOutDates, setWorkedOutDates] = useState<number[]>([]);
   const [workedOutDays, setWorkedOutDays] = useState<WorkedOutDay[]>([]);
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
   const selectedPlanMonth = formatPlanMonth(currentDate);
 
   useEffect(() => {

@@ -82,7 +82,7 @@ export default function WorkoutPage() {
   const [tempTargetSets, setTempTargetSets] = React.useState(3);
   const [finishedSummary, setFinishedSummary] = React.useState<WorkoutSummary | null>(null);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
 
   // 種目が変わったら目標セット数を取得
   React.useEffect(() => {

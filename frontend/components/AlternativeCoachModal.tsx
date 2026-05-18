@@ -17,7 +17,7 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
     setError("");
     setResult(null);
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
       const res = await fetch(`${apiUrl}/api/alternative`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

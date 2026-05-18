@@ -34,7 +34,7 @@ export default function WorkoutDetailPage() {
   const [workout, setWorkout] = React.useState<WorkoutDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
 
   React.useEffect(() => {
     const loadWorkout = async () => {

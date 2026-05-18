@@ -6,10 +6,11 @@ services:
       context: .
       dockerfile: docker/frontend.prod.Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+        BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:8080}
     container_name: myfitlog-frontend-prod
     env_file:
-      - docker/env/frontend.env
+      - docker/env/frontend.prod.env
     ports:
       - "${FRONTEND_HOST:-127.0.0.1}:${FRONTEND_PORT:-3000}:3000"
     depends_on:
@@ -22,7 +23,7 @@ services:
       dockerfile: docker/backend.prod.Dockerfile
     container_name: myfitlog-backend-prod
     env_file:
-      - docker/env/backend.env
+      - docker/env/backend.prod.env
     ports:
       - "${BACKEND_HOST:-127.0.0.1}:${BACKEND_PORT:-8080}:8080"
     depends_on:
@@ -34,7 +35,7 @@ services:
     image: postgres:16
     container_name: myfitlog-db-prod
     env_file:
-      - docker/env/db.env
+      - docker/env/db.prod.env
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./docker/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro

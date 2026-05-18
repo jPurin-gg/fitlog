@@ -73,7 +73,7 @@ export default function Home() {
   const [dashboardData, setDashboardData] = React.useState<any>(null);
   const [altModalData, setAltModalData] = React.useState<{dayIdx: number, exIdx: number, exName: string, exId?: string} | null>(null);
   const [today, setToday] = React.useState<Date | null>(null);
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
   const currentMonth = getCurrentPlanMonth();
 
   const saveMonthlyPlan = async (plan: any) => {
@@ -362,7 +362,7 @@ function TrainingPreferencesModal({ userId, initialPreferences, onClose, onSaved
     setSaving(true);
     setError("");
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
       const res = await fetch(`${apiUrl}/api/user-preferences`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -526,7 +526,7 @@ function MonthlyPlanModal({ userId, onClose, onPlanGenerated }: any) {
     setLoading(true);
     setError("");
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
       const res = await fetch(`${apiUrl}/api/monthly-plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

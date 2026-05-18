@@ -72,7 +72,7 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
   const [password, setPassword] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
 
   const login = async (event: React.FormEvent) => {
     event.preventDefault();

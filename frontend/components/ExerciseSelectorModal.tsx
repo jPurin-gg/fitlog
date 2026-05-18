@@ -58,7 +58,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
   const [customCategory, setCustomCategory] = useState("筋力トレーニング");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
 
   useEffect(() => {
     const fetch_ = async () => {
@@ -106,7 +106,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
     if (!customName.trim()) return;
     setIsSubmitting(true);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/exercises/custom`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/exercises/custom`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 

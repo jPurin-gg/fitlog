@@ -1,3 +1,4 @@
+# 実際の環境変数ファイルは機密情報を含むのでコミットしない
 docker/env/*
 !docker/env/
 !docker/env/*.env.example
@@ -5,6 +6,8 @@ frontend/node_modules/
 frontend/.next/
 backend/fitlog
 backend/tmp/
+
+# ルートの .env / .env.prod もコミットしない
 .env
 .env.*
 !.env.example
