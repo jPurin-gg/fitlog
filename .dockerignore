@@ -1,0 +1,10 @@
+.git
+.gitignore
+.env
+.env.*
+docker/env/*.env
+frontend/node_modules
+frontend/.next
+backend/tmp
+backend/fitlog
+other

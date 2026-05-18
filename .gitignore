@@ -1,4 +1,6 @@
-docker/env/
+docker/env/*
+!docker/env/
+!docker/env/*.env.example
 frontend/node_modules/
 frontend/.next/
 backend/fitlog
