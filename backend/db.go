@@ -73,6 +73,16 @@ func ensureSchema(db *sql.DB) error {
 			UNIQUE (user_id, plan_date, status)
 		);
 
+		CREATE TABLE IF NOT EXISTS user_preferences (
+			user_id INTEGER PRIMARY KEY REFERENCES users(id),
+			preferred_equipment JSONB NOT NULL DEFAULT '[]'::jsonb,
+			avoided_equipment JSONB NOT NULL DEFAULT '[]'::jsonb,
+			training_environment TEXT NOT NULL DEFAULT '',
+			notes TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);
+
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
 		ALTER TABLE workouts ADD COLUMN IF NOT EXISTS summary_comment TEXT;
 		ALTER TABLE monthly_plans ADD COLUMN IF NOT EXISTS rest_days JSONB NOT NULL DEFAULT '[]'::jsonb;

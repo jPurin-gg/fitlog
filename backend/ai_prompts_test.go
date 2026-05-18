@@ -39,11 +39,13 @@ func TestRenderPromptPair(t *testing.T) {
 			systemFile: "monthly_plan_system.txt",
 			userFile:   "monthly_plan_user.txt",
 			data: map[string]any{
-				"Motivation":     "筋肉を大きく",
-				"Frequency":      "週3-4回",
-				"RestDays":       "日曜",
-				"RestDaysJSON":   "[0]",
-				"CandidatesJSON": `[{"id":"Barbell_Bench_Press_-_Medium_Grip","name":"ベンチプレス","equipment":"バーベル","level":"初級","category":"筋力トレーニング","primary_muscles":["大胸筋"]}]`,
+				"Motivation":      "筋肉を大きく",
+				"Frequency":       "週3-4回",
+				"RestDays":        "日曜",
+				"RestDaysJSON":    "[0]",
+				"PreferencesText": "優先する器具: ダンベル",
+				"PreferencesJSON": `{"preferred_equipment":["ダンベル"],"avoided_equipment":[],"training_environment":"ジム","notes":""}`,
+				"CandidatesJSON":  `[{"id":"Barbell_Bench_Press_-_Medium_Grip","name":"ベンチプレス","equipment":"バーベル","level":"初級","category":"筋力トレーニング","primary_muscles":["大胸筋"]}]`,
 			},
 		},
 		{

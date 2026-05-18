@@ -146,6 +146,19 @@ fitlog/
 
 > `UNIQUE (user_id, plan_month)`。月間プランは削除せず、月ごとに履歴として保持する。既存DBではバックエンド起動時に `CREATE TABLE IF NOT EXISTS` で作成される。
 
+### `user_preferences`（ユーザーごとのAIコーチ設定）
+| カラム                | 型                        | 説明                         |
+|---------------------|--------------------------|-----------------------------|
+| user_id             | INTEGER PK/FK             | ユーザーID                   |
+| preferred_equipment | JSONB NOT NULL            | 優先する器具                 |
+| avoided_equipment   | JSONB NOT NULL            | 避けたい器具                 |
+| training_environment| TEXT NOT NULL             | ジム / 家 / どちらも         |
+| notes               | TEXT NOT NULL             | 器具や環境に関する自由メモ    |
+| created_at          | TIMESTAMPTZ DEFAULT NOW() |                             |
+| updated_at          | TIMESTAMPTZ DEFAULT NOW() |                             |
+
+> 月間プランAIはこの設定を参照し、優先器具を中心に候補を選び、避けたい器具を候補から外す。
+
 ### `workout_plans`（日次ワークアウト計画）
 | カラム                 | 型                        | 説明                           |
 |----------------------|--------------------------|-------------------------------|
@@ -168,6 +181,38 @@ fitlog/
 
 ### `POST /api/auth/login`
 ニックネームとパスワードでログインする。該当する組み合わせがない場合は新規ユーザーを作成する。
+
+### `GET /api/user-preferences`
+ユーザーのAIコーチ設定を取得する。未設定の場合は空の設定を返す。
+
+| クエリパラメータ | 説明                    |
+|-------------|------------------------|
+| user_id     | ユーザーID（省略時: `1`） |
+
+**レスポンス**
+```json
+{
+  "user_id": 1,
+  "preferred_equipment": ["ダンベル", "マシン"],
+  "avoided_equipment": ["バーベル"],
+  "training_environment": "ジム",
+  "notes": "脚の日はマシン多めがいい"
+}
+```
+
+### `PUT /api/user-preferences`
+ユーザーのAIコーチ設定を保存する。
+
+**リクエスト**
+```json
+{
+  "user_id": 1,
+  "preferred_equipment": ["ダンベル", "マシン"],
+  "avoided_equipment": ["バーベル"],
+  "training_environment": "ジム",
+  "notes": "脚の日はマシン多めがいい"
+}
+```
 
 **リクエスト**
 ```json
@@ -351,12 +396,13 @@ fitlog/
 ```
 
 **処理フロー**
-1. DBの種目辞書から月間プラン用の候補種目を取得
-2. `motivation`、`frequency`、`rest_days`、候補種目をAIに渡す
-3. AIは候補内の `id` と `name` のみを使って `weekly_routine` を生成
-4. `rest_days` を避けるように `recommended_days` を調整
-5. `monthly_plans` に UPSERT
-6. 保存後のプランを返す
+1. `user_preferences` から優先器具・避けたい器具・環境メモを取得
+2. DBの種目辞書から月間プラン用の候補種目を取得。避けたい器具は候補から外し、優先器具は候補に多めに入れる
+3. `motivation`、`frequency`、`rest_days`、ユーザー設定、候補種目をAIに渡す
+4. AIは候補内の `id` と `name` のみを使って `weekly_routine` を生成
+5. `rest_days` を避けるように `recommended_days` を調整
+6. `monthly_plans` に UPSERT
+7. 保存後のプランを返す
 
 > `weekly_routine[].example_exercises` は表示用の種目名、`weekly_routine[].exercise_ids` は辞書の種目ID。既存データとの互換のため、IDがない場合は種目名から辞書検索する。
 
@@ -622,6 +668,7 @@ AI 呼び出しが失敗した場合（APIキー未設定、レート制限等�
 - 初回アクセス時、ログイン情報がない場合はログイン画面を表示
 - ニックネームとパスワードでログインし、該当する組み合わせがなければ新規ユーザーを作成
 - ログイン後は `localStorage` のユーザー情報を使って各APIに `user_id` を渡す
+- ヘッダーの歯車ボタンからトレーニング設定を開き、優先器具・避けたい器具・環境メモを保存できる
 - 今日のワークアウト概要
 - 当月の月間プランを `/api/monthly-plan` から取得
 - 当月プランが未作成の場合、月間プラン生成モーダルを表示

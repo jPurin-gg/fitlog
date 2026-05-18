@@ -9,7 +9,7 @@ import {
   Dumbbell, 
   Plus,
   Calendar,
-  Bell,
+  Settings,
   Sparkles,
   Loader2,
   X,
@@ -35,6 +35,9 @@ const WEEKDAY_OPTIONS = [
   { value: 5, label: "金" },
   { value: 6, label: "土" },
 ];
+
+const EQUIPMENT_OPTIONS = ["ダンベル", "バーベル", "マシン", "ケーブル", "自重", "チューブ・バンド", "ケトルベル", "メディシンボール", "EZバー", "その他"];
+const ENVIRONMENT_OPTIONS = ["ジム", "家", "どちらも"];
 
 function weekdayLabels(days?: number[]) {
   if (!days || days.length === 0) return "";
@@ -64,7 +67,9 @@ function displayPlanText(text?: string) {
 export default function Home() {
   const { user } = useAuth();
   const [showMonthlyModal, setShowMonthlyModal] = React.useState(false);
+  const [showPreferencesModal, setShowPreferencesModal] = React.useState(false);
   const [monthlyPlan, setMonthlyPlan] = React.useState<any>(null);
+  const [preferences, setPreferences] = React.useState<any>(null);
   const [dashboardData, setDashboardData] = React.useState<any>(null);
   const [altModalData, setAltModalData] = React.useState<{dayIdx: number, exIdx: number, exName: string, exId?: string} | null>(null);
   const [today, setToday] = React.useState<Date | null>(null);
@@ -96,6 +101,11 @@ export default function Home() {
       .then(data => setDashboardData(data))
       .catch(console.error);
 
+    fetch(`${apiUrl}/api/user-preferences?user_id=${user.id}`)
+      .then(res => res.json())
+      .then(data => setPreferences(data))
+      .catch(console.error);
+
     fetch(`${apiUrl}/api/monthly-plan?user_id=${user.id}&month=${currentMonth}`)
       .then(async res => {
         if (res.status === 404) {
@@ -125,6 +135,17 @@ export default function Home() {
               setMonthlyPlan(plan);
               setShowMonthlyModal(false);
             }} 
+          />
+        )}
+        {showPreferencesModal && (
+          <TrainingPreferencesModal
+            userId={user.id}
+            initialPreferences={preferences}
+            onClose={() => setShowPreferencesModal(false)}
+            onSaved={(saved: any) => {
+              setPreferences(saved);
+              setShowPreferencesModal(false);
+            }}
           />
         )}
         {altModalData && (
@@ -166,8 +187,12 @@ export default function Home() {
             <Link href="/calendar" className="flex-none p-3 glass rounded-2xl hover:bg-white/10 transition-colors block">
               <Calendar className="w-5 h-5 text-white/70" />
             </Link>
-            <button className="flex-none p-3 glass rounded-2xl hover:bg-white/10 transition-colors">
-              <Bell className="w-5 h-5 text-white/70" />
+            <button
+              onClick={() => setShowPreferencesModal(true)}
+              className="flex-none p-3 glass rounded-2xl hover:bg-white/10 transition-colors"
+              aria-label="トレーニング設定"
+            >
+              <Settings className="w-5 h-5 text-white/70" />
             </button>
             <LogoutButton />
             <Link href="/workout" className="w-full sm:w-auto px-6 py-3 bg-primary text-black font-bold rounded-2xl glow-primary hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 justify-center">
@@ -302,6 +327,179 @@ export default function Home() {
           </div>
         </section>
       </main>
+    </div>
+  );
+}
+
+
+function TrainingPreferencesModal({ userId, initialPreferences, onClose, onSaved }: any) {
+  const [preferredEquipment, setPreferredEquipment] = React.useState<string[]>(initialPreferences?.preferred_equipment || []);
+  const [avoidedEquipment, setAvoidedEquipment] = React.useState<string[]>(initialPreferences?.avoided_equipment || []);
+  const [trainingEnvironment, setTrainingEnvironment] = React.useState(initialPreferences?.training_environment || "ジム");
+  const [notes, setNotes] = React.useState(initialPreferences?.notes || "");
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState("");
+
+  const togglePreferred = (equipment: string) => {
+    setPreferredEquipment(prev => (
+      prev.includes(equipment)
+        ? prev.filter(item => item !== equipment)
+        : [...prev, equipment]
+    ));
+    setAvoidedEquipment(prev => prev.filter(item => item !== equipment));
+  };
+
+  const toggleAvoided = (equipment: string) => {
+    setAvoidedEquipment(prev => (
+      prev.includes(equipment)
+        ? prev.filter(item => item !== equipment)
+        : [...prev, equipment]
+    ));
+    setPreferredEquipment(prev => prev.filter(item => item !== equipment));
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+      const res = await fetch(`${apiUrl}/api/user-preferences`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          preferred_equipment: preferredEquipment,
+          avoided_equipment: avoidedEquipment,
+          training_environment: trainingEnvironment,
+          notes,
+        })
+      });
+      if (!res.ok) {
+        setError(await res.text() || "設定の保存に失敗しました。");
+        return;
+      }
+      onSaved(await res.json());
+    } catch (e) {
+      console.error(e);
+      setError("エラーが発生しました。");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.9, y: 20 }}
+        className="glass border-secondary/20 w-full max-w-2xl rounded-[32px] overflow-hidden relative shadow-2xl shadow-secondary/10 max-h-[90vh] overflow-y-auto"
+      >
+        <button onClick={onClose} className="absolute top-6 right-6 p-2 bg-white/5 rounded-full hover:bg-white/10 transition z-10 text-white/60 hover:text-white">
+          <X className="w-5 h-5" />
+        </button>
+
+        <div className="p-8">
+          <div className="w-16 h-16 bg-secondary/20 rounded-2xl flex items-center justify-center mb-6">
+            <Settings className="w-8 h-8 text-secondary" />
+          </div>
+          <h2 className="text-2xl font-bold mb-2">トレーニング設定</h2>
+          <p className="text-white/60 text-sm mb-6 leading-relaxed">
+            AIが月間プランを作る時に参照します。よく使う器具や避けたい器具を入れておくと、現実にやりやすいメニューになります。
+          </p>
+
+          <div className="space-y-6 mb-8">
+            <div className="space-y-3">
+              <label className="text-xs font-black tracking-widest text-white/40 ml-1">トレーニング環境</label>
+              <div className="grid grid-cols-3 gap-2">
+                {ENVIRONMENT_OPTIONS.map(option => (
+                  <button
+                    key={option}
+                    onClick={() => setTrainingEnvironment(option)}
+                    className={`py-3 px-2 rounded-2xl border text-center font-bold text-sm transition-all ${
+                      trainingEnvironment === option
+                        ? 'bg-secondary/20 border-secondary text-secondary'
+                        : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'
+                    }`}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <EquipmentPicker
+              label="優先する器具"
+              selected={preferredEquipment}
+              onToggle={togglePreferred}
+              activeClassName="bg-primary/20 border-primary text-primary"
+            />
+
+            <EquipmentPicker
+              label="避けたい器具"
+              selected={avoidedEquipment}
+              onToggle={toggleAvoided}
+              activeClassName="bg-red-500/20 border-red-500/40 text-red-200"
+            />
+
+            <div className="space-y-2">
+              <label className="text-xs font-black tracking-widest text-white/40 ml-1">メモ</label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="w-full min-h-[110px] bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-secondary/50 text-sm"
+                placeholder="例: スミスマシンはよく空いてる、懸垂バーなし、脚の日はマシン多めがいい"
+              />
+            </div>
+          </div>
+
+          {error && (
+            <div className="mb-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200 whitespace-pre-line">
+              {error}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              onClick={onClose}
+              className="py-4 bg-white/10 text-white font-bold rounded-2xl hover:bg-white/15 transition-all"
+            >
+              キャンセル
+            </button>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="py-4 bg-secondary text-black font-black rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
+            >
+              {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Settings className="w-5 h-5" />}
+              保存する
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function EquipmentPicker({ label, selected, onToggle, activeClassName }: any) {
+  return (
+    <div className="space-y-3">
+      <label className="text-xs font-black tracking-widest text-white/40 ml-1">{label}</label>
+      <div className="flex flex-wrap gap-2">
+        {EQUIPMENT_OPTIONS.map(equipment => (
+          <button
+            key={equipment}
+            onClick={() => onToggle(equipment)}
+            className={`px-4 py-2 rounded-xl border text-sm font-bold transition-all ${
+              selected.includes(equipment)
+                ? activeClassName
+                : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'
+            }`}
+          >
+            {equipment}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

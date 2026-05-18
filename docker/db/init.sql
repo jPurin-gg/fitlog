@@ -87,6 +87,17 @@ CREATE TABLE workout_plans (
     UNIQUE (user_id, plan_date, status)
 );
 
+-- ユーザーごとのAIコーチ設定
+CREATE TABLE user_preferences (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id),
+    preferred_equipment JSONB NOT NULL DEFAULT '[]'::jsonb,
+    avoided_equipment JSONB NOT NULL DEFAULT '[]'::jsonb,
+    training_environment TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 初期ユーザー作成
 INSERT INTO users (username) VALUES ('Mitsuki');
 

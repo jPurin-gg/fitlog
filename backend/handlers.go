@@ -1057,7 +1057,7 @@ func (app *App) createMonthlyPlan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "休息日は6日までにしてください。少なくとも1日はトレーニング候補日が必要です。", http.StatusBadRequest)
 		return
 	}
-	resp, err := app.generateMonthlyPlanWithAI(motivation, frequency, restDays)
+	resp, err := app.generateMonthlyPlanWithAI(userID, motivation, frequency, restDays)
 	if err != nil {
 		log.Printf("Failed to generate monthly plan with AI: %v", err)
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
@@ -1162,8 +1162,12 @@ func generateMonthlyPlan(motivation, frequency string, restDays []int) MonthlyPl
 	return resp
 }
 
-func (app *App) generateMonthlyPlanWithAI(motivation, frequency string, restDays []int) (MonthlyPlanResponse, error) {
-	candidates, err := app.loadMonthlyPlanExerciseCandidates()
+func (app *App) generateMonthlyPlanWithAI(userID int, motivation, frequency string, restDays []int) (MonthlyPlanResponse, error) {
+	preferences, err := app.loadUserPreferences(userID)
+	if err != nil {
+		return MonthlyPlanResponse{}, fmt.Errorf("トレーニング設定の読み込みに失敗しました。")
+	}
+	candidates, err := app.loadMonthlyPlanExerciseCandidates(preferences)
 	if err != nil {
 		return MonthlyPlanResponse{}, fmt.Errorf("種目辞書の候補取得に失敗しました。")
 	}
@@ -1177,11 +1181,13 @@ func (app *App) generateMonthlyPlanWithAI(motivation, frequency string, restDays
 	}
 	restDays = normalizeWeekdays(restDays)
 	systemPrompt, userPrompt, err := renderPromptPair("monthly_plan_system.txt", "monthly_plan_user.txt", map[string]any{
-		"Motivation":     motivation,
-		"Frequency":      frequency,
-		"RestDays":       weekdayListText(restDays),
-		"RestDaysJSON":   mustMarshalString(restDays),
-		"CandidatesJSON": string(candidatesJSON),
+		"Motivation":      motivation,
+		"Frequency":       frequency,
+		"RestDays":        weekdayListText(restDays),
+		"RestDaysJSON":    mustMarshalString(restDays),
+		"PreferencesJSON": mustMarshalString(preferences),
+		"PreferencesText": userPreferencesPromptText(preferences),
+		"CandidatesJSON":  string(candidatesJSON),
 	})
 	if err != nil {
 		return MonthlyPlanResponse{}, fmt.Errorf("AIプロンプトの読み込みに失敗しました。")
@@ -1212,7 +1218,7 @@ func (app *App) generateMonthlyPlanWithAI(motivation, frequency string, restDays
 	return plan, nil
 }
 
-func (app *App) loadMonthlyPlanExerciseCandidates() ([]MonthlyPlanExerciseCandidate, error) {
+func (app *App) loadMonthlyPlanExerciseCandidates(preferences UserPreferences) ([]MonthlyPlanExerciseCandidate, error) {
 	rows, err := app.db.Query(`
 		SELECT id, name, COALESCE(equipment, ''), COALESCE(level, ''), COALESCE(category, ''), primary_muscles
 		FROM exercises
@@ -1237,6 +1243,8 @@ func (app *App) loadMonthlyPlanExerciseCandidates() ([]MonthlyPlanExerciseCandid
 
 	candidates := []MonthlyPlanExerciseCandidate{}
 	muscleCounts := map[string]int{}
+	preferredSet := stringSet(preferences.PreferredEquipment)
+	avoidedSet := stringSet(preferences.AvoidedEquipment)
 	for rows.Next() {
 		var candidate MonthlyPlanExerciseCandidate
 		var musclesJSON []byte
@@ -1246,8 +1254,18 @@ func (app *App) loadMonthlyPlanExerciseCandidates() ([]MonthlyPlanExerciseCandid
 		if err := json.Unmarshal(musclesJSON, &candidate.PrimaryMuscles); err != nil {
 			return nil, err
 		}
+		if avoidedSet[candidate.Equipment] {
+			continue
+		}
 		primary := candidate.PrimaryMuscles[0]
-		if muscleCounts[primary] >= 14 {
+		limit := 14
+		if len(preferredSet) > 0 && preferredSet[candidate.Equipment] {
+			limit = 22
+		}
+		if len(preferredSet) > 0 && !preferredSet[candidate.Equipment] {
+			limit = 8
+		}
+		if muscleCounts[primary] >= limit {
 			continue
 		}
 		if len(candidates) >= 180 {
@@ -1296,6 +1314,37 @@ func mustMarshalString(value any) string {
 		return "null"
 	}
 	return string(bytes)
+}
+
+func userPreferencesPromptText(preferences UserPreferences) string {
+	parts := []string{}
+	if preferences.TrainingEnvironment != "" {
+		parts = append(parts, "環境: "+preferences.TrainingEnvironment)
+	}
+	if len(preferences.PreferredEquipment) > 0 {
+		parts = append(parts, "優先する器具: "+strings.Join(preferences.PreferredEquipment, "、"))
+	}
+	if len(preferences.AvoidedEquipment) > 0 {
+		parts = append(parts, "避けたい器具: "+strings.Join(preferences.AvoidedEquipment, "、"))
+	}
+	if preferences.Notes != "" {
+		parts = append(parts, "メモ: "+preferences.Notes)
+	}
+	if len(parts) == 0 {
+		return "指定なし"
+	}
+	return strings.Join(parts, "\n")
+}
+
+func stringSet(values []string) map[string]bool {
+	set := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			set[value] = true
+		}
+	}
+	return set
 }
 
 func applyRestDayPreference(plan *MonthlyPlanResponse, restDays []int) {

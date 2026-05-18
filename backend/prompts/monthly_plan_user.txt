@@ -4,6 +4,12 @@
 - 休息曜日: {{if .RestDays}}{{.RestDays}}{{else}}指定なし{{end}}
 - 休息曜日JSON: {{.RestDaysJSON}}
 
+トレーニング設定:
+{{.PreferencesText}}
+
+トレーニング設定JSON:
+{{.PreferencesJSON}}
+
 種目辞書候補:
 {{.CandidatesJSON}}
 
