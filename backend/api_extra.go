@@ -134,9 +134,16 @@ type WorkedOutDay struct {
 	Type      string `json:"type"`
 }
 
+type PlannedWorkoutDay struct {
+	Date   int    `json:"date"`
+	PlanID int    `json:"plan_id"`
+	Target string `json:"target"`
+}
+
 type CalendarResponse struct {
-	WorkedOutDates []int          `json:"worked_out_dates"`
-	WorkedOutDays  []WorkedOutDay `json:"worked_out_days"`
+	WorkedOutDates []int               `json:"worked_out_dates"`
+	WorkedOutDays  []WorkedOutDay      `json:"worked_out_days"`
+	PlannedDays    []PlannedWorkoutDay `json:"planned_days"`
 }
 
 type CalendarWorkoutSet struct {
@@ -165,6 +172,16 @@ type SaveCalendarWorkoutRequest struct {
 	Sets   []CalendarWorkoutSet `json:"sets"`
 }
 
+type SaveCalendarPlanRequest struct {
+	UserID               int                   `json:"user_id"`
+	Date                 string                `json:"date"`
+	WorkoutTitle         string                `json:"workout_title"`
+	Target               string                `json:"target"`
+	EstimatedDurationMin int                   `json:"estimated_duration_min"`
+	CoachNote            string                `json:"coach_note"`
+	Exercises            []WorkoutPlanExercise `json:"exercises"`
+}
+
 func (app *App) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -189,6 +206,7 @@ func (app *App) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	var resp CalendarResponse
 	resp.WorkedOutDates = []int{}
 	resp.WorkedOutDays = []WorkedOutDay{}
+	resp.PlannedDays = []PlannedWorkoutDay{}
 
 	// get the latest completed workout for each day in that month
 	rows, err := app.db.Query(`
@@ -221,6 +239,196 @@ func (app *App) handleCalendar(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	planRows, err := app.db.Query(`
+		SELECT
+			EXTRACT(DAY FROM plan_date),
+			id,
+			COALESCE(NULLIF(plan->>'target', ''), title, '予定')
+		FROM workout_plans
+		WHERE user_id = $1
+			AND status = 'active'
+			AND EXTRACT(YEAR FROM plan_date) = $2
+			AND EXTRACT(MONTH FROM plan_date) = $3
+		ORDER BY plan_date, updated_at DESC, id DESC
+	`, userID, year, month)
+	if err == nil {
+		defer planRows.Close()
+		for planRows.Next() {
+			var d float64
+			var planID int
+			var target string
+			if err := planRows.Scan(&d, &planID, &target); err == nil {
+				resp.PlannedDays = append(resp.PlannedDays, PlannedWorkoutDay{
+					Date:   int(d),
+					PlanID: planID,
+					Target: displayWorkoutType(target),
+				})
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (app *App) handleCalendarPlan(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		app.getCalendarPlan(w, r)
+	case http.MethodPut:
+		app.saveCalendarPlan(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (app *App) getCalendarPlan(w http.ResponseWriter, r *http.Request) {
+	userID := parseUserID(r.URL.Query().Get("user_id"))
+	day, err := time.Parse("2006-01-02", strings.TrimSpace(r.URL.Query().Get("date")))
+	if err != nil {
+		http.Error(w, "日付の形式が正しくありません。", http.StatusBadRequest)
+		return
+	}
+
+	var resp WorkoutPlanSessionResponse
+	var planJSON []byte
+	var workoutID sql.NullInt64
+	err = app.db.QueryRow(`
+		SELECT id, workout_id, user_id, plan_date::text, status, plan
+		FROM workout_plans
+		WHERE user_id = $1 AND plan_date = $2 AND status = 'active'
+		ORDER BY updated_at DESC
+		LIMIT 1
+	`, userID, day).Scan(&resp.ID, &workoutID, &resp.UserID, &resp.PlanDate, &resp.Status, &planJSON)
+	if err == nil {
+		if workoutID.Valid {
+			resp.WorkoutID = int(workoutID.Int64)
+		}
+		if err := json.Unmarshal(planJSON, &resp.Plan); err != nil {
+			http.Error(w, "計画の読み込みに失敗しました。", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+	if err != sql.ErrNoRows {
+		http.Error(w, "計画の取得に失敗しました。", http.StatusInternalServerError)
+		return
+	}
+
+	payload, err := app.buildBaseWorkoutPlanForDate(userID, day)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	resp = WorkoutPlanSessionResponse{
+		UserID:   userID,
+		PlanDate: day.Format("2006-01-02"),
+		Status:   "draft",
+		Plan:     payload,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (app *App) saveCalendarPlan(w http.ResponseWriter, r *http.Request) {
+	var req SaveCalendarPlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request format", http.StatusBadRequest)
+		return
+	}
+	userID := req.UserID
+	if userID <= 0 {
+		userID = 1
+	}
+	day, err := time.Parse("2006-01-02", strings.TrimSpace(req.Date))
+	if err != nil {
+		http.Error(w, "日付の形式が正しくありません。", http.StatusBadRequest)
+		return
+	}
+	if len(req.Exercises) == 0 {
+		http.Error(w, "少なくとも1種目は選択してください。", http.StatusBadRequest)
+		return
+	}
+
+	exercises := make([]WorkoutPlanExercise, 0, len(req.Exercises))
+	for _, ex := range req.Exercises {
+		ex.ExerciseID = strings.TrimSpace(ex.ExerciseID)
+		ex.Name = strings.TrimSpace(ex.Name)
+		if ex.ExerciseID == "" {
+			http.Error(w, "種目を選択してください。", http.StatusBadRequest)
+			return
+		}
+		if ex.Name == "" {
+			ex.Name = app.loadExerciseName(ex.ExerciseID)
+		}
+		if ex.PlannedSets <= 0 {
+			ex.PlannedSets = 3
+		}
+		if ex.TargetReps <= 0 {
+			ex.TargetReps = 10
+		}
+		if ex.TargetWeight < 0 {
+			ex.TargetWeight = 0
+		}
+		stats := app.loadExercisePlanStats(userID, ex.ExerciseID)
+		ex.LastMaxWeight = stats.MaxWeight
+		exercises = append(exercises, ex)
+	}
+
+	title := strings.TrimSpace(req.WorkoutTitle)
+	if title == "" {
+		title = "筋トレ"
+	}
+	target := strings.TrimSpace(req.Target)
+	if target == "" {
+		target = title
+	}
+	estimated := req.EstimatedDurationMin
+	if estimated <= 0 {
+		estimated = len(exercises) * 12
+	}
+	if estimated < 15 {
+		estimated = 15
+	}
+	coachNote := strings.TrimSpace(req.CoachNote)
+	if coachNote == "" {
+		coachNote = "カレンダーで調整した予定です。当日の体調に合わせて無理なく進めます。"
+	}
+
+	payload := WorkoutPlanPayload{
+		WorkoutTitle:         title,
+		Target:               target,
+		EstimatedDurationMin: estimated,
+		CoachNote:            coachNote,
+		Exercises:            exercises,
+	}
+	planJSON, err := json.Marshal(payload)
+	if err != nil {
+		http.Error(w, "計画の保存に失敗しました。", http.StatusInternalServerError)
+		return
+	}
+
+	var resp WorkoutPlanSessionResponse
+	err = app.db.QueryRow(`
+		INSERT INTO workout_plans (workout_id, user_id, plan_date, title, estimated_duration_min, status, plan)
+		VALUES (NULL, $1, $2, $3, $4, 'active', $5::jsonb)
+		ON CONFLICT (user_id, plan_date, status) DO UPDATE SET
+			title = EXCLUDED.title,
+			estimated_duration_min = EXCLUDED.estimated_duration_min,
+			plan = EXCLUDED.plan,
+			updated_at = CURRENT_TIMESTAMP
+		RETURNING id, workout_id, user_id, plan_date::text, status, plan
+	`, userID, day, title, estimated, string(planJSON)).Scan(&resp.ID, new(sql.NullInt64), &resp.UserID, &resp.PlanDate, &resp.Status, &planJSON)
+	if err != nil {
+		http.Error(w, "計画の保存に失敗しました。", http.StatusInternalServerError)
+		return
+	}
+	if err := json.Unmarshal(planJSON, &resp.Plan); err != nil {
+		http.Error(w, "保存後の計画取得に失敗しました。", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }

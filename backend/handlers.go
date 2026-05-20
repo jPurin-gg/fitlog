@@ -379,12 +379,26 @@ func (app *App) handleStartWorkoutPlan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to load active workout plan", http.StatusInternalServerError)
 		return
 	} else if ok {
+		if plan.WorkoutID == 0 {
+			workoutID, err := app.getOrCreateTodayWorkout(userID)
+			if err != nil {
+				log.Printf("Failed to start workout from saved plan: %v", err)
+				http.Error(w, "Failed to start workout", http.StatusInternalServerError)
+				return
+			}
+			_, _ = app.db.Exec(`
+				UPDATE workout_plans
+				SET workout_id = $1, updated_at = CURRENT_TIMESTAMP
+				WHERE id = $2 AND user_id = $3
+			`, workoutID, plan.ID, userID)
+			plan.WorkoutID = workoutID
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(plan)
 		return
 	}
 
-	payload, err := app.buildTodayWorkoutPlan(userID)
+	payload, err := app.buildWorkoutPlanForDate(userID, time.Now())
 	if err != nil {
 		log.Printf("Failed to build workout plan: %v", err)
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
@@ -754,13 +768,14 @@ func (app *App) getOrCreateTodayWorkout(userID int) (int, error) {
 func (app *App) loadActiveWorkoutPlan(userID int) (WorkoutPlanSessionResponse, bool, error) {
 	var resp WorkoutPlanSessionResponse
 	var planJSON []byte
+	var workoutID sql.NullInt64
 	err := app.db.QueryRow(`
 		SELECT id, workout_id, user_id, plan_date::text, status, plan
 		FROM workout_plans
 		WHERE user_id = $1 AND plan_date = CURRENT_DATE AND status = 'active'
 		ORDER BY updated_at DESC
 		LIMIT 1
-	`, userID).Scan(&resp.ID, &resp.WorkoutID, &resp.UserID, &resp.PlanDate, &resp.Status, &planJSON)
+	`, userID).Scan(&resp.ID, &workoutID, &resp.UserID, &resp.PlanDate, &resp.Status, &planJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return WorkoutPlanSessionResponse{}, false, nil
@@ -770,12 +785,22 @@ func (app *App) loadActiveWorkoutPlan(userID int) (WorkoutPlanSessionResponse, b
 	if err := json.Unmarshal(planJSON, &resp.Plan); err != nil {
 		return WorkoutPlanSessionResponse{}, false, err
 	}
+	if workoutID.Valid {
+		resp.WorkoutID = int(workoutID.Int64)
+	}
 	return resp, true, nil
 }
 
-func (app *App) buildTodayWorkoutPlan(userID int) (WorkoutPlanPayload, error) {
-	today := time.Now()
-	monthly, ok, err := app.loadMonthlyPlan(userID, today.Format("2006-01"))
+func (app *App) buildWorkoutPlanForDate(userID int, planDate time.Time) (WorkoutPlanPayload, error) {
+	base, err := app.buildBaseWorkoutPlanForDate(userID, planDate)
+	if err != nil {
+		return WorkoutPlanPayload{}, err
+	}
+	return refineWorkoutPlanWithAI(base)
+}
+
+func (app *App) buildBaseWorkoutPlanForDate(userID int, planDate time.Time) (WorkoutPlanPayload, error) {
+	monthly, ok, err := app.loadMonthlyPlan(userID, planDate.Format("2006-01"))
 	if err != nil {
 		return WorkoutPlanPayload{}, err
 	}
@@ -783,7 +808,7 @@ func (app *App) buildTodayWorkoutPlan(userID int) (WorkoutPlanPayload, error) {
 		return WorkoutPlanPayload{}, fmt.Errorf("今月の月間プランがまだありません。先にホームで月間プランを作成してください。")
 	}
 
-	weekday := int(today.Weekday())
+	weekday := int(planDate.Weekday())
 	idx := -1
 	for i, d := range monthly.RecommendedDays {
 		if d == weekday {
@@ -838,7 +863,7 @@ func (app *App) buildTodayWorkoutPlan(userID int) (WorkoutPlanPayload, error) {
 		CoachNote:            coachNote,
 		Exercises:            exercises,
 	}
-	return refineWorkoutPlanWithAI(payload)
+	return payload, nil
 }
 
 func refineWorkoutPlanWithAI(base WorkoutPlanPayload) (WorkoutPlanPayload, error) {
