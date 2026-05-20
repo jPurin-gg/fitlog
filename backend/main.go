@@ -61,6 +61,7 @@ func main() {
 	http.HandleFunc("/api/user-preferences", cors(app.handleUserPreferences))
 	http.HandleFunc("/api/recommend", cors(app.handleRecommend))
 	http.HandleFunc("/api/dashboard", cors(app.handleDashboard))
+	http.HandleFunc("/api/calendar/workout", cors(app.handleCalendarWorkout))
 	http.HandleFunc("/api/calendar", cors(app.handleCalendar))
 	http.HandleFunc("/api/alternative", cors(app.handleAlternative))
 	http.HandleFunc("/api/workouts/finish", cors(app.handleFinishWorkout))

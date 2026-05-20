@@ -2,9 +2,19 @@
 
 ## 本番デプロイ
 
-サンプルから本番用の環境変数ファイルを作成します。
+ローカル開発では通常の env ファイルを使います。
 
 ```sh
+cp docker/env/backend.env.example docker/env/backend.env
+cp docker/env/frontend.env.example docker/env/frontend.env
+cp docker/env/db.env.example docker/env/db.env
+docker compose up -d
+```
+
+本番では `*.prod.env` と `.env.prod` を使います。これらは機密情報を含むため git には上げません。
+
+```sh
+# まだ作っていない場合だけ作成します。
 cp .env.example .env.prod
 cp docker/env/backend.env.example docker/env/backend.prod.env
 cp docker/env/frontend.env.example docker/env/frontend.prod.env
@@ -13,7 +23,7 @@ cp docker/env/db.env.example docker/env/db.prod.env
 
 特に次の値は本番環境に合わせて変更してください。
 
-- `NEXT_PUBLIC_API_URL`: 公開されるバックエンドAPIのURL。空欄にすると、ブラウザは同一オリジンの `/api` を呼び、Next.js が Docker 内部のバックエンドへ中継します。
+- `NEXT_PUBLIC_API_URL`: 公開されるバックエンドAPIのURL。別APIドメインを使うなら `https://api.example.com` のように設定します。空欄にすると、ブラウザは同一オリジンの `/api` を呼び、Next.js が Docker 内部のバックエンドへ中継します。
 - `BACKEND_INTERNAL_URL`: Next.js が `/api` を中継する Docker 内部のバックエンドURL。通常は `http://backend:8080` のままでOKです。
 - `FRONTEND_URL`: バックエンドのCORSで許可するフロントエンドURL。
 - `DB_PASSWORD`: `backend.prod.env` と `db.prod.env` で同じ値にします。

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -138,6 +139,32 @@ type CalendarResponse struct {
 	WorkedOutDays  []WorkedOutDay `json:"worked_out_days"`
 }
 
+type CalendarWorkoutSet struct {
+	ID           int     `json:"id,omitempty"`
+	ExerciseID   string  `json:"exercise_id"`
+	ExerciseName string  `json:"exercise_name,omitempty"`
+	Weight       float64 `json:"weight"`
+	Reps         int     `json:"reps"`
+	SetOrder     int     `json:"set_order"`
+	Feeling      string  `json:"feeling"`
+}
+
+type CalendarWorkoutResponse struct {
+	Exists    bool                 `json:"exists"`
+	WorkoutID int                  `json:"workout_id,omitempty"`
+	UserID    int                  `json:"user_id"`
+	Date      string               `json:"date"`
+	Title     string               `json:"title"`
+	Sets      []CalendarWorkoutSet `json:"sets"`
+}
+
+type SaveCalendarWorkoutRequest struct {
+	UserID int                  `json:"user_id"`
+	Date   string               `json:"date"`
+	Title  string               `json:"title"`
+	Sets   []CalendarWorkoutSet `json:"sets"`
+}
+
 func (app *App) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -196,6 +223,277 @@ func (app *App) handleCalendar(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (app *App) handleCalendarWorkout(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		app.getCalendarWorkout(w, r)
+	case http.MethodPut:
+		app.saveCalendarWorkout(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (app *App) getCalendarWorkout(w http.ResponseWriter, r *http.Request) {
+	userID := parseUserID(r.URL.Query().Get("user_id"))
+	dateText := strings.TrimSpace(r.URL.Query().Get("date"))
+	day, err := time.Parse("2006-01-02", dateText)
+	if err != nil {
+		http.Error(w, "日付の形式が正しくありません。", http.StatusBadRequest)
+		return
+	}
+
+	resp := CalendarWorkoutResponse{
+		Exists: false,
+		UserID: userID,
+		Date:   day.Format("2006-01-02"),
+		Title:  "筋トレ",
+		Sets:   []CalendarWorkoutSet{},
+	}
+
+	err = app.db.QueryRow(`
+		SELECT id, COALESCE(notes, '筋トレ')
+		FROM workouts
+		WHERE user_id = $1 AND DATE(started_at) = $2
+		ORDER BY started_at DESC, id DESC
+		LIMIT 1
+	`, userID, day).Scan(&resp.WorkoutID, &resp.Title)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+		http.Error(w, "記録の取得に失敗しました。", http.StatusInternalServerError)
+		return
+	}
+	resp.Exists = true
+	resp.Sets, err = app.loadCalendarWorkoutSets(userID, resp.WorkoutID)
+	if err != nil {
+		http.Error(w, "セットの取得に失敗しました。", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (app *App) saveCalendarWorkout(w http.ResponseWriter, r *http.Request) {
+	var req SaveCalendarWorkoutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request format", http.StatusBadRequest)
+		return
+	}
+	userID := req.UserID
+	if userID <= 0 {
+		userID = 1
+	}
+	day, err := time.Parse("2006-01-02", strings.TrimSpace(req.Date))
+	if err != nil {
+		http.Error(w, "日付の形式が正しくありません。", http.StatusBadRequest)
+		return
+	}
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		title = "筋トレ"
+	}
+	if len(req.Sets) == 0 {
+		http.Error(w, "少なくとも1セットは入力してください。", http.StatusBadRequest)
+		return
+	}
+
+	exerciseIDs := make([]string, 0, len(req.Sets))
+	for i := range req.Sets {
+		req.Sets[i].ExerciseID = strings.TrimSpace(req.Sets[i].ExerciseID)
+		req.Sets[i].Feeling = strings.TrimSpace(req.Sets[i].Feeling)
+		if req.Sets[i].ExerciseID == "" {
+			http.Error(w, "種目を選択してください。", http.StatusBadRequest)
+			return
+		}
+		if req.Sets[i].Reps <= 0 {
+			http.Error(w, "回数は1以上で入力してください。", http.StatusBadRequest)
+			return
+		}
+		if req.Sets[i].Weight < 0 {
+			http.Error(w, "重量は0以上で入力してください。", http.StatusBadRequest)
+			return
+		}
+		if req.Sets[i].SetOrder <= 0 {
+			req.Sets[i].SetOrder = i + 1
+		}
+		exerciseIDs = append(exerciseIDs, req.Sets[i].ExerciseID)
+	}
+
+	tx, err := app.db.Begin()
+	if err != nil {
+		http.Error(w, "保存に失敗しました。", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	var workoutID int
+	err = tx.QueryRow(`
+		SELECT id
+		FROM workouts
+		WHERE user_id = $1 AND DATE(started_at) = $2
+		ORDER BY started_at DESC, id DESC
+		LIMIT 1
+	`, userID, day).Scan(&workoutID)
+	startedAt := day.Add(12 * time.Hour)
+	endedAt := startedAt.Add(time.Duration(15+len(req.Sets)*3) * time.Minute)
+	if err == sql.ErrNoRows {
+		err = tx.QueryRow(`
+			INSERT INTO workouts (user_id, started_at, ended_at, notes, summary_comment)
+			VALUES ($1, $2, $3, $4, NULL)
+			RETURNING id
+		`, userID, startedAt, endedAt, title).Scan(&workoutID)
+	} else if err == nil {
+		_, err = tx.Exec(`
+			UPDATE workouts
+			SET started_at = $1, ended_at = $2, notes = $3, summary_comment = NULL
+			WHERE id = $4 AND user_id = $5
+		`, startedAt, endedAt, title, workoutID, userID)
+	}
+	if err != nil {
+		http.Error(w, "ワークアウトの保存に失敗しました。", http.StatusInternalServerError)
+		return
+	}
+
+	rows, err := tx.Query(`SELECT DISTINCT exercise_id FROM workout_sets WHERE workout_id = $1`, workoutID)
+	if err != nil {
+		http.Error(w, "既存セットの確認に失敗しました。", http.StatusInternalServerError)
+		return
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil && id != "" {
+			exerciseIDs = append(exerciseIDs, id)
+		}
+	}
+	rows.Close()
+
+	if _, err := tx.Exec(`DELETE FROM workout_sets WHERE workout_id = $1`, workoutID); err != nil {
+		http.Error(w, "既存セットの更新に失敗しました。", http.StatusInternalServerError)
+		return
+	}
+
+	for i, set := range req.Sets {
+		var maxWeight float64
+		_ = tx.QueryRow(`
+			SELECT COALESCE(MAX(ws.weight), 0)
+			FROM workout_sets ws
+			JOIN workouts w ON w.id = ws.workout_id
+			WHERE w.user_id = $1 AND ws.exercise_id = $2
+		`, userID, set.ExerciseID).Scan(&maxWeight)
+		isPR := set.Weight > maxWeight
+		createdAt := startedAt.Add(time.Duration(i) * time.Minute)
+		if _, err := tx.Exec(`
+			INSERT INTO workout_sets (workout_id, exercise_id, weight, reps, set_order, feeling, is_pr, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`, workoutID, set.ExerciseID, set.Weight, set.Reps, set.SetOrder, set.Feeling, isPR, createdAt); err != nil {
+			http.Error(w, "セットの保存に失敗しました。", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "保存に失敗しました。", http.StatusInternalServerError)
+		return
+	}
+
+	app.recalculateUserExerciseStats(userID, exerciseIDs)
+	sets, err := app.loadCalendarWorkoutSets(userID, workoutID)
+	if err != nil {
+		http.Error(w, "保存後の記録取得に失敗しました。", http.StatusInternalServerError)
+		return
+	}
+	resp := CalendarWorkoutResponse{
+		Exists:    true,
+		WorkoutID: workoutID,
+		UserID:    userID,
+		Date:      day.Format("2006-01-02"),
+		Title:     title,
+		Sets:      sets,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (app *App) loadCalendarWorkoutSets(userID, workoutID int) ([]CalendarWorkoutSet, error) {
+	rows, err := app.db.Query(`
+		SELECT
+			ws.id,
+			ws.exercise_id,
+			COALESCE(e.name, ws.exercise_id),
+			ws.weight,
+			ws.reps,
+			ws.set_order,
+			COALESCE(ws.feeling, '')
+		FROM workout_sets ws
+		JOIN workouts w ON w.id = ws.workout_id
+		LEFT JOIN exercises e ON e.id = ws.exercise_id
+		WHERE w.user_id = $1 AND ws.workout_id = $2
+		ORDER BY ws.created_at, ws.id
+	`, userID, workoutID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	sets := []CalendarWorkoutSet{}
+	for rows.Next() {
+		var set CalendarWorkoutSet
+		if err := rows.Scan(&set.ID, &set.ExerciseID, &set.ExerciseName, &set.Weight, &set.Reps, &set.SetOrder, &set.Feeling); err != nil {
+			return nil, err
+		}
+		sets = append(sets, set)
+	}
+	return sets, rows.Err()
+}
+
+func (app *App) recalculateUserExerciseStats(userID int, exerciseIDs []string) {
+	seen := map[string]bool{}
+	for _, exerciseID := range exerciseIDs {
+		exerciseID = strings.TrimSpace(exerciseID)
+		if exerciseID == "" || seen[exerciseID] {
+			continue
+		}
+		seen[exerciseID] = true
+
+		var latestWeight, maxWeight float64
+		err := app.db.QueryRow(`
+			SELECT latest.weight, stats.max_weight
+			FROM (
+				SELECT ws.weight
+				FROM workout_sets ws
+				JOIN workouts w ON w.id = ws.workout_id
+				WHERE w.user_id = $1 AND ws.exercise_id = $2
+				ORDER BY w.started_at DESC, ws.created_at DESC, ws.id DESC
+				LIMIT 1
+			) latest
+			CROSS JOIN (
+				SELECT COALESCE(MAX(ws.weight), 0) AS max_weight
+				FROM workout_sets ws
+				JOIN workouts w ON w.id = ws.workout_id
+				WHERE w.user_id = $1 AND ws.exercise_id = $2
+			) stats
+		`, userID, exerciseID).Scan(&latestWeight, &maxWeight)
+		if err == sql.ErrNoRows {
+			_, _ = app.db.Exec(`DELETE FROM user_exercise_stats WHERE user_id = $1 AND exercise_id = $2`, userID, exerciseID)
+			continue
+		}
+		if err != nil {
+			continue
+		}
+		_, _ = app.db.Exec(`
+			INSERT INTO user_exercise_stats (user_id, exercise_id, weight, max_weight)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (user_id, exercise_id)
+			DO UPDATE SET weight = EXCLUDED.weight, max_weight = EXCLUDED.max_weight, updated_at = CURRENT_TIMESTAMP
+		`, userID, exerciseID, latestWeight, maxWeight)
+	}
 }
 
 func displayWorkoutType(value string) string {
