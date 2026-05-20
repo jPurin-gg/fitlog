@@ -1009,6 +1009,7 @@ type MonthlyPlanExerciseCandidate struct {
 	Level          string   `json:"level"`
 	Category       string   `json:"category"`
 	PrimaryMuscles []string `json:"primary_muscles"`
+	IsFavorite     bool     `json:"is_favorite,omitempty"`
 }
 
 func (app *App) handleMonthlyPlan(w http.ResponseWriter, r *http.Request) {
@@ -1192,7 +1193,7 @@ func (app *App) generateMonthlyPlanWithAI(userID int, motivation, frequency stri
 	if err != nil {
 		return MonthlyPlanResponse{}, fmt.Errorf("トレーニング設定の読み込みに失敗しました。")
 	}
-	candidates, err := app.loadMonthlyPlanExerciseCandidates(preferences)
+	candidates, err := app.loadMonthlyPlanExerciseCandidates(userID, preferences)
 	if err != nil {
 		return MonthlyPlanResponse{}, fmt.Errorf("種目辞書の候補取得に失敗しました。")
 	}
@@ -1243,24 +1244,33 @@ func (app *App) generateMonthlyPlanWithAI(userID int, motivation, frequency stri
 	return plan, nil
 }
 
-func (app *App) loadMonthlyPlanExerciseCandidates(preferences UserPreferences) ([]MonthlyPlanExerciseCandidate, error) {
+func (app *App) loadMonthlyPlanExerciseCandidates(userID int, preferences UserPreferences) ([]MonthlyPlanExerciseCandidate, error) {
 	rows, err := app.db.Query(`
-		SELECT id, name, COALESCE(equipment, ''), COALESCE(level, ''), COALESCE(category, ''), primary_muscles
-		FROM exercises
-		WHERE COALESCE(category, '') IN ('筋力トレーニング', 'strength')
-			AND COALESCE(level, '') IN ('初級', '中級', 'beginner', 'intermediate', '')
-			AND jsonb_array_length(primary_muscles) > 0
+		SELECT
+			e.id,
+			e.name,
+			COALESCE(e.equipment, ''),
+			COALESCE(e.level, ''),
+			COALESCE(e.category, ''),
+			e.primary_muscles,
+			(f.exercise_id IS NOT NULL)
+		FROM exercises e
+		LEFT JOIN user_favorite_exercises f ON f.exercise_id = e.id AND f.user_id = $1
+		WHERE COALESCE(e.category, '') IN ('筋力トレーニング', 'strength')
+			AND COALESCE(e.level, '') IN ('初級', '中級', 'beginner', 'intermediate', '')
+			AND jsonb_array_length(e.primary_muscles) > 0
 		ORDER BY
-			CASE COALESCE(level, '')
+			CASE WHEN f.exercise_id IS NULL THEN 1 ELSE 0 END,
+			CASE COALESCE(e.level, '')
 				WHEN '初級' THEN 1
 				WHEN 'beginner' THEN 1
 				WHEN '中級' THEN 2
 				WHEN 'intermediate' THEN 2
 				ELSE 3
 			END,
-			name
+			e.name
 		LIMIT 1000
-	`)
+	`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -1273,7 +1283,7 @@ func (app *App) loadMonthlyPlanExerciseCandidates(preferences UserPreferences) (
 	for rows.Next() {
 		var candidate MonthlyPlanExerciseCandidate
 		var musclesJSON []byte
-		if err := rows.Scan(&candidate.ID, &candidate.Name, &candidate.Equipment, &candidate.Level, &candidate.Category, &musclesJSON); err != nil {
+		if err := rows.Scan(&candidate.ID, &candidate.Name, &candidate.Equipment, &candidate.Level, &candidate.Category, &musclesJSON, &candidate.IsFavorite); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(musclesJSON, &candidate.PrimaryMuscles); err != nil {
@@ -1284,8 +1294,14 @@ func (app *App) loadMonthlyPlanExerciseCandidates(preferences UserPreferences) (
 		}
 		primary := candidate.PrimaryMuscles[0]
 		limit := 14
+		if candidate.IsFavorite {
+			limit = 30
+		}
 		if len(preferredSet) > 0 && preferredSet[candidate.Equipment] {
 			limit = 22
+		}
+		if candidate.IsFavorite && len(preferredSet) > 0 && preferredSet[candidate.Equipment] {
+			limit = 36
 		}
 		if len(preferredSet) > 0 && !preferredSet[candidate.Equipment] {
 			limit = 8

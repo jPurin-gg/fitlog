@@ -98,6 +98,14 @@ CREATE TABLE user_preferences (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- ユーザーごとのお気に入り種目
+CREATE TABLE user_favorite_exercises (
+    user_id INTEGER REFERENCES users(id),
+    exercise_id TEXT REFERENCES exercises(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, exercise_id)
+);
+
 -- 初期ユーザー作成
 INSERT INTO users (username) VALUES ('Mitsuki');
 

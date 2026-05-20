@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 )
 
 func (app *App) handleExercises(w http.ResponseWriter, r *http.Request) {
@@ -116,6 +118,183 @@ func (app *App) handleExercises(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(exercises)
+}
+
+type FavoriteExerciseRequest struct {
+	UserID     int    `json:"user_id"`
+	ExerciseID string `json:"exercise_id"`
+}
+
+func (app *App) handleFavoriteExercises(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		userID := parseUserID(r.URL.Query().Get("user_id"))
+		rows, err := app.db.Query(`
+			SELECT e.id, e.name, e.force, e.level, e.mechanic, e.equipment, e.category,
+				e.instructions, e.primary_muscles, e.secondary_muscles, e.images
+			FROM user_favorite_exercises f
+			JOIN exercises e ON e.id = f.exercise_id
+			WHERE f.user_id = $1
+			ORDER BY f.created_at DESC, e.name ASC
+		`, userID)
+		if err != nil {
+			log.Printf("Error querying favorite exercises: %v\n", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		exercises, err := scanExerciseRows(rows)
+		if err != nil {
+			log.Printf("Error scanning favorite exercises: %v\n", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(exercises)
+
+	case http.MethodPost:
+		req, ok := decodeFavoriteExerciseRequest(w, r)
+		if !ok {
+			return
+		}
+		if !app.exerciseExists(req.ExerciseID) {
+			http.Error(w, "Exercise not found", http.StatusNotFound)
+			return
+		}
+		if _, err := app.db.Exec(`
+			INSERT INTO user_favorite_exercises (user_id, exercise_id)
+			VALUES ($1, $2)
+			ON CONFLICT (user_id, exercise_id) DO NOTHING
+		`, req.UserID, req.ExerciseID); err != nil {
+			log.Printf("Failed to add favorite exercise: %v", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "favorite": true})
+
+	case http.MethodDelete:
+		req, ok := decodeFavoriteExerciseRequest(w, r)
+		if !ok {
+			return
+		}
+		if _, err := app.db.Exec(`
+			DELETE FROM user_favorite_exercises
+			WHERE user_id = $1 AND exercise_id = $2
+		`, req.UserID, req.ExerciseID); err != nil {
+			log.Printf("Failed to remove favorite exercise: %v", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "favorite": false})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (app *App) handleRecentExercises(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID := parseUserID(r.URL.Query().Get("user_id"))
+	rows, err := app.db.Query(`
+		SELECT e.id, e.name, e.force, e.level, e.mechanic, e.equipment, e.category,
+			e.instructions, e.primary_muscles, e.secondary_muscles, e.images
+		FROM (
+			SELECT ws.exercise_id, MAX(ws.created_at) AS last_used_at
+			FROM workout_sets ws
+			JOIN workouts w ON w.id = ws.workout_id
+			WHERE w.user_id = $1
+			GROUP BY ws.exercise_id
+			ORDER BY last_used_at DESC
+			LIMIT 20
+		) recent
+		JOIN exercises e ON e.id = recent.exercise_id
+		ORDER BY recent.last_used_at DESC, e.name ASC
+	`, userID)
+	if err != nil {
+		log.Printf("Error querying recent exercises: %v\n", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	exercises, err := scanExerciseRows(rows)
+	if err != nil {
+		log.Printf("Error scanning recent exercises: %v\n", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(exercises)
+}
+
+func decodeFavoriteExerciseRequest(w http.ResponseWriter, r *http.Request) (FavoriteExerciseRequest, bool) {
+	var req FavoriteExerciseRequest
+	if r.Method == http.MethodDelete && r.Body == http.NoBody {
+		req.UserID, _ = strconv.Atoi(r.URL.Query().Get("user_id"))
+		req.ExerciseID = strings.TrimSpace(r.URL.Query().Get("exercise_id"))
+	} else if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req.UserID, _ = strconv.Atoi(r.URL.Query().Get("user_id"))
+		req.ExerciseID = strings.TrimSpace(r.URL.Query().Get("exercise_id"))
+	}
+	req.ExerciseID = strings.TrimSpace(req.ExerciseID)
+	if req.UserID <= 0 || req.ExerciseID == "" {
+		http.Error(w, "user_id and exercise_id are required", http.StatusBadRequest)
+		return req, false
+	}
+	return req, true
+}
+
+func (app *App) exerciseExists(exerciseID string) bool {
+	var exists bool
+	err := app.db.QueryRow("SELECT EXISTS (SELECT 1 FROM exercises WHERE id = $1)", exerciseID).Scan(&exists)
+	return err == nil && exists
+}
+
+type exerciseRows interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+}
+
+func scanExerciseRows(rows exerciseRows) ([]ExerciseData, error) {
+	exercises := []ExerciseData{}
+	for rows.Next() {
+		var ex ExerciseData
+		var instJSON, primJSON, secJSON, imgJSON []byte
+
+		err := rows.Scan(
+			&ex.ID, &ex.Name, &ex.Force, &ex.Level, &ex.Mechanic, &ex.Equipment, &ex.Category,
+			&instJSON, &primJSON, &secJSON, &imgJSON,
+		)
+		if err != nil {
+			return exercises, err
+		}
+
+		if instJSON != nil {
+			json.Unmarshal(instJSON, &ex.Instructions)
+		}
+		if primJSON != nil {
+			json.Unmarshal(primJSON, &ex.PrimaryMuscles)
+		}
+		if secJSON != nil {
+			json.Unmarshal(secJSON, &ex.SecondaryMuscles)
+		}
+		if imgJSON != nil {
+			json.Unmarshal(imgJSON, &ex.Images)
+		}
+
+		exercises = append(exercises, ex)
+	}
+	if err := rows.Err(); err != nil {
+		return exercises, err
+	}
+	return exercises, nil
 }
 
 // splitAndTrim はカンマ区切り文字列を分割してトリムする

@@ -83,6 +83,13 @@ func ensureSchema(db *sql.DB) error {
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);
 
+		CREATE TABLE IF NOT EXISTS user_favorite_exercises (
+			user_id INTEGER REFERENCES users(id),
+			exercise_id TEXT REFERENCES exercises(id),
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (user_id, exercise_id)
+		);
+
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
 		ALTER TABLE workouts ADD COLUMN IF NOT EXISTS summary_comment TEXT;
 		ALTER TABLE monthly_plans ADD COLUMN IF NOT EXISTS rest_days JSONB NOT NULL DEFAULT '[]'::jsonb;

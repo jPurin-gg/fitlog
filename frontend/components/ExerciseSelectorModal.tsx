@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Search, Plus, Dumbbell, X, Loader2, Activity } from "lucide-react";
+import { Search, Plus, Dumbbell, X, Loader2, Activity, Star } from "lucide-react";
+import { useAuth } from "@/components/AuthGate";
 
 interface Exercise {
   id: string;
@@ -46,12 +47,16 @@ interface Props {
 }
 
 export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
+  const { user } = useAuth();
   const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [favoriteExercises, setFavoriteExercises] = useState<Exercise[]>([]);
+  const [recentExercises, setRecentExercises] = useState<Exercise[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [broadMuscle, setBroadMuscle] = useState("");
   const [muscleFilter, setMuscleFilter] = useState("");
   const [equipFilter, setEquipFilter] = useState("");
   const [isCustomizing, setIsCustomizing] = useState(false);
+  const [activeTab, setActiveTab] = useState<"favorite" | "recent" | "search">("favorite");
   
   // カスタム種目用
   const [customName, setCustomName] = useState("");
@@ -59,6 +64,48 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const previousTouchAction = document.body.style.touchAction;
+    document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.touchAction = previousTouchAction;
+    };
+  }, []);
+
+  const fetchFavorites = React.useCallback(async () => {
+    try {
+      const res = await fetch(`${apiBase}/api/exercises/favorites?user_id=${user.id}`);
+      if (!res.ok) throw new Error("Failed to fetch favorites");
+      const data = await res.json();
+      setFavoriteExercises(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error("Failed to fetch favorite exercises:", e);
+      setFavoriteExercises([]);
+    }
+  }, [apiBase, user.id]);
+
+  useEffect(() => {
+    fetchFavorites();
+  }, [fetchFavorites]);
+
+  useEffect(() => {
+    const fetchRecent = async () => {
+      try {
+        const res = await fetch(`${apiBase}/api/exercises/recent?user_id=${user.id}`);
+        if (!res.ok) throw new Error("Failed to fetch recent exercises");
+        const data = await res.json();
+        setRecentExercises(Array.isArray(data) ? data : []);
+      } catch (e) {
+        console.error("Failed to fetch recent exercises:", e);
+        setRecentExercises([]);
+      }
+    };
+    fetchRecent();
+  }, [apiBase, user.id]);
 
   useEffect(() => {
     const fetch_ = async () => {
@@ -99,8 +146,28 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
     ? MUSCLE_CATEGORIES[broadMuscle] 
     : Object.values(MUSCLE_CATEGORIES).flat();
 
-  // サーバー側で検索済みのため、exercises をそのまま表示する
-  const filtered = exercises;
+  const favoriteIds = React.useMemo(() => new Set(favoriteExercises.map(ex => ex.id)), [favoriteExercises]);
+  const filtered = activeTab === "favorite" ? favoriteExercises : activeTab === "recent" ? recentExercises : exercises;
+
+  const toggleFavorite = async (exercise: Exercise) => {
+    const favorite = favoriteIds.has(exercise.id);
+    try {
+      const res = await fetch(`${apiBase}/api/exercises/favorites`, {
+        method: favorite ? "DELETE" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: user.id, exercise_id: exercise.id }),
+      });
+      if (!res.ok) throw new Error("Failed to update favorite");
+      if (favorite) {
+        setFavoriteExercises(prev => prev.filter(ex => ex.id !== exercise.id));
+      } else {
+        setFavoriteExercises(prev => [exercise, ...prev.filter(ex => ex.id !== exercise.id)]);
+      }
+    } catch (e) {
+      console.error(e);
+      alert("お気に入りの更新に失敗しました。");
+    }
+  };
 
   const handleCustomSubmit = async () => {
     if (!customName.trim()) return;
@@ -130,7 +197,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md overflow-hidden overscroll-none touch-none" onClick={onClose}>
       <div className="bg-[#111] border border-white/10 rounded-3xl shadow-2xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         
         <div className="p-5 border-b border-white/10 flex justify-between items-center bg-[#1a1a1a]">
@@ -194,13 +261,46 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
         ) : (
           <div className="flex flex-col flex-1 overflow-hidden">
             <div className="p-4 border-b border-white/5 space-y-3">
+              <div className="grid grid-cols-3 gap-2 rounded-2xl bg-black/30 p-1 border border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("favorite")}
+                  className={`py-2 rounded-xl text-sm font-bold transition-colors ${
+                    activeTab === "favorite" ? "bg-primary text-black" : "text-white/50 hover:text-white hover:bg-white/5"
+                  }`}
+                >
+                  お気に入り
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("recent")}
+                  className={`py-2 rounded-xl text-sm font-bold transition-colors ${
+                    activeTab === "recent" ? "bg-primary text-black" : "text-white/50 hover:text-white hover:bg-white/5"
+                  }`}
+                >
+                  最近
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("search")}
+                  className={`py-2 rounded-xl text-sm font-bold transition-colors ${
+                    activeTab === "search" ? "bg-primary text-black" : "text-white/50 hover:text-white hover:bg-white/5"
+                  }`}
+                >
+                  検索
+                </button>
+              </div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 w-4 h-4" />
                 <input 
                   type="text" 
                   placeholder="種目名で検索..." 
                   value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
+                  onFocus={() => setActiveTab("search")}
+                  onChange={e => {
+                    setSearchQuery(e.target.value);
+                    setActiveTab("search");
+                  }}
                   className="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:border-primary/50 text-white"
                 />
               </div>
@@ -235,32 +335,63 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
             </div>
 
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {filtered.slice(0, 50).map(ex => (
-                <button 
+              {filtered.length === 0 && activeTab === "favorite" ? (
+                <div className="min-h-52 flex flex-col items-center justify-center text-center text-white/40 px-8">
+                  <Star className="w-8 h-8 text-primary mb-3" />
+                  <p className="text-sm leading-relaxed">
+                    まだお気に入りがありません。検索タブでよく使う種目に星を付けると、ここからすぐ選べます。
+                  </p>
+                </div>
+              ) : filtered.length === 0 && activeTab === "recent" ? (
+                <div className="min-h-52 flex flex-col items-center justify-center text-center text-white/40 px-8">
+                  <Dumbbell className="w-8 h-8 text-primary mb-3" />
+                  <p className="text-sm leading-relaxed">
+                    まだ最近使った種目がありません。記録が増えると、ここからすぐ選べます。
+                  </p>
+                </div>
+              ) : filtered.slice(0, 50).map(ex => (
+                <div
                   key={ex.id}
-                  onClick={() => onSelect({ id: ex.id, name: ex.name })}
-                  className="w-full text-left px-4 py-3 hover:bg-white/5 rounded-xl transition-colors flex flex-col group"
+                  className="w-full px-3 py-3 hover:bg-white/5 rounded-xl transition-colors flex items-start gap-3 group"
                 >
-                  <div className="flex justify-between items-center w-full">
-                    <span className="text-white font-medium group-hover:text-primary transition-colors">{ex.name}</span>
-                    {ex.category && <span className="text-[10px] px-2 py-0.5 bg-white/5 rounded-full text-white/40">{displayExerciseLabel(ex.category)}</span>}
-                  </div>
-                  <div className="flex gap-2 mt-1">
-                    {ex.primaryMuscles && ex.primaryMuscles.length > 0 && (
-                      <span className="text-[10px] text-white/30 flex items-center gap-1">
-                        <Activity className="w-3 h-3" /> {ex.primaryMuscles[0]}
-                      </span>
-                    )}
-                    {ex.equipment && (
-                      <span className="text-[10px] text-white/30 flex items-center gap-1">
-                        <Dumbbell className="w-3 h-3" /> {ex.equipment}
-                      </span>
-                    )}
-                  </div>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleFavorite(ex)}
+                    className={`mt-0.5 p-2 rounded-xl transition-colors ${
+                      favoriteIds.has(ex.id)
+                        ? "text-primary bg-primary/10 hover:bg-primary/20"
+                        : "text-white/25 hover:text-primary hover:bg-white/10"
+                    }`}
+                    aria-label={favoriteIds.has(ex.id) ? "お気に入りから外す" : "お気に入りに追加"}
+                  >
+                    <Star className={`w-4 h-4 ${favoriteIds.has(ex.id) ? "fill-current" : ""}`} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelect({ id: ex.id, name: ex.name })}
+                    className="flex-1 min-w-0 text-left"
+                  >
+                    <div className="flex justify-between items-center gap-3 w-full">
+                      <span className="text-white font-medium group-hover:text-primary transition-colors">{ex.name}</span>
+                      {ex.category && <span className="shrink-0 text-[10px] px-2 py-0.5 bg-white/5 rounded-full text-white/40">{displayExerciseLabel(ex.category)}</span>}
+                    </div>
+                    <div className="flex gap-2 mt-1">
+                      {ex.primaryMuscles && ex.primaryMuscles.length > 0 && (
+                        <span className="text-[10px] text-white/30 flex items-center gap-1">
+                          <Activity className="w-3 h-3" /> {ex.primaryMuscles[0]}
+                        </span>
+                      )}
+                      {ex.equipment && (
+                        <span className="text-[10px] text-white/30 flex items-center gap-1">
+                          <Dumbbell className="w-3 h-3" /> {ex.equipment}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                </div>
               ))}
               
-              {filtered.length === 0 && (
+              {filtered.length === 0 && activeTab === "search" && (
                 <div className="text-center py-10 text-white/40">
                   <p>種目が見つかりません</p>
                 </div>

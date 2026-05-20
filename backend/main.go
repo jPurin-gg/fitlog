@@ -56,6 +56,8 @@ func main() {
 	// 注意: より具体的なパスを先に登録する（Go の http.ServeMux は最長マッチのため）
 	http.HandleFunc("/api/exercises/target_sets", cors(app.handleTargetSets))
 	http.HandleFunc("/api/exercises/custom", cors(app.handleAddCustomExercise))
+	http.HandleFunc("/api/exercises/favorites", cors(app.handleFavoriteExercises))
+	http.HandleFunc("/api/exercises/recent", cors(app.handleRecentExercises))
 	http.HandleFunc("/api/exercises", cors(app.handleExercises))
 	http.HandleFunc("/api/auth/login", cors(app.handleLogin))
 	http.HandleFunc("/api/user-preferences", cors(app.handleUserPreferences))

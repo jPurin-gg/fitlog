@@ -108,6 +108,19 @@ function isFutureDateKey(dateKey: string) {
   return target > todayStart;
 }
 
+function useBodyScrollLock() {
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const previousTouchAction = document.body.style.touchAction;
+    document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.touchAction = previousTouchAction;
+    };
+  }, []);
+}
+
 const WEEKDAY_OPTIONS = [
   { value: 0, label: "日曜" },
   { value: 1, label: "月曜" },
@@ -577,6 +590,7 @@ function CalendarWorkoutEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  useBodyScrollLock();
   const [workout, setWorkout] = useState<CalendarWorkout | null>(null);
   const [title, setTitle] = useState("筋トレ");
   const [sets, setSets] = useState<CalendarWorkoutSet[]>([]);
@@ -663,7 +677,7 @@ function CalendarWorkoutEditor({
   };
 
   return (
-    <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md p-4 flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md p-4 flex items-center justify-center overflow-hidden overscroll-none" onClick={onClose}>
       <div className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-[28px] border border-white/10 bg-[#111] shadow-2xl text-white" onClick={e => e.stopPropagation()}>
         <div className="p-5 border-b border-white/10 flex items-start justify-between gap-4 bg-[#171717]">
           <div>
@@ -830,6 +844,7 @@ function CalendarPlanEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  useBodyScrollLock();
   const [plan, setPlan] = useState<CalendarPlan | null>(null);
   const [title, setTitle] = useState("筋トレ");
   const [target, setTarget] = useState("筋トレ");
@@ -923,7 +938,7 @@ function CalendarPlanEditor({
   };
 
   return (
-    <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md p-4 flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md p-4 flex items-center justify-center overflow-hidden overscroll-none" onClick={onClose}>
       <div className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-[28px] border border-white/10 bg-[#111] shadow-2xl text-white" onClick={e => e.stopPropagation()}>
         <div className="p-5 border-b border-white/10 flex items-start justify-between gap-4 bg-[#171717]">
           <div>
