@@ -12,6 +12,17 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
   const [result, setResult] = React.useState<any>(null);
   const [error, setError] = React.useState("");
 
+  React.useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const previousTouchAction = document.body.style.touchAction;
+    document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.touchAction = previousTouchAction;
+    };
+  }, []);
+
   const fetchAlternatives = async () => {
     setLoading(true);
     setError("");
@@ -38,14 +49,14 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4">
+    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center p-4 overflow-hidden overscroll-none">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={onClose} />
       
       <motion.div 
         initial={{ opacity: 0, y: 20, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 10, scale: 0.95 }}
-        className="w-full max-w-lg bg-[#111] border border-white/10 rounded-[32px] p-6 lg:p-10 relative z-10 shadow-2xl max-h-[85vh] overflow-y-auto"
+        className="w-full max-w-lg bg-[#111] border border-white/10 rounded-[32px] p-6 pb-24 lg:p-10 lg:pb-10 relative z-10 shadow-2xl max-h-[85vh] overflow-y-auto overscroll-contain"
       >
         <button 
           onClick={onClose}

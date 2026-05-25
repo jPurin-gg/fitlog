@@ -64,6 +64,19 @@ function displayPlanText(text?: string) {
     .replace(/^Day 5$/, "5日目");
 }
 
+function useBodyScrollLock() {
+  React.useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const previousTouchAction = document.body.style.touchAction;
+    document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.touchAction = previousTouchAction;
+    };
+  }, []);
+}
+
 export default function Home() {
   const { user } = useAuth();
   const [showMonthlyModal, setShowMonthlyModal] = React.useState(false);
@@ -333,6 +346,8 @@ export default function Home() {
 
 
 function TrainingPreferencesModal({ userId, initialPreferences, onClose, onSaved }: any) {
+  useBodyScrollLock();
+
   const [preferredEquipment, setPreferredEquipment] = React.useState<string[]>(initialPreferences?.preferred_equipment || []);
   const [avoidedEquipment, setAvoidedEquipment] = React.useState<string[]>(initialPreferences?.avoided_equipment || []);
   const [trainingEnvironment, setTrainingEnvironment] = React.useState(initialPreferences?.training_environment || "ジム");
@@ -388,18 +403,18 @@ function TrainingPreferencesModal({ userId, initialPreferences, onClose, onSaved
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md overflow-hidden overscroll-none">
       <motion.div
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="glass border-secondary/20 w-full max-w-2xl rounded-[32px] overflow-hidden relative shadow-2xl shadow-secondary/10 max-h-[90vh] overflow-y-auto"
+        className="glass border-secondary/20 w-full max-w-2xl rounded-[32px] overflow-hidden relative shadow-2xl shadow-secondary/10 max-h-[90vh] overflow-y-auto overscroll-contain"
       >
         <button onClick={onClose} className="absolute top-6 right-6 p-2 bg-white/5 rounded-full hover:bg-white/10 transition z-10 text-white/60 hover:text-white">
           <X className="w-5 h-5" />
         </button>
 
-        <div className="p-8">
+        <div className="p-8 pb-28 sm:pb-8">
           <div className="w-16 h-16 bg-secondary/20 rounded-2xl flex items-center justify-center mb-6">
             <Settings className="w-8 h-8 text-secondary" />
           </div>
@@ -506,6 +521,8 @@ function EquipmentPicker({ label, selected, onToggle, activeClassName }: any) {
 
 
 function MonthlyPlanModal({ userId, onClose, onPlanGenerated }: any) {
+  useBodyScrollLock();
+
   const [motivation, setMotivation] = React.useState("健康維持");
   const [frequency, setFrequency] = React.useState("週3-4回");
   const [restDays, setRestDays] = React.useState<number[]>([]);
@@ -565,18 +582,18 @@ function MonthlyPlanModal({ userId, onClose, onPlanGenerated }: any) {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md overflow-hidden overscroll-none">
       <motion.div 
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="glass border-primary/20 w-full max-w-lg rounded-[32px] overflow-hidden relative shadow-2xl shadow-primary/10 max-h-[90vh] overflow-y-auto"
+        className="glass border-primary/20 w-full max-w-lg rounded-[32px] overflow-hidden relative shadow-2xl shadow-primary/10 max-h-[90vh] overflow-y-auto overscroll-contain"
       >
         <button onClick={onClose} className="absolute top-6 right-6 p-2 bg-white/5 rounded-full hover:bg-white/10 transition z-10 text-white/60 hover:text-white">
           <X className="w-5 h-5" />
         </button>
         
-        <div className="p-8">
+        <div className="p-8 pb-28 sm:pb-8">
           <div className="w-16 h-16 bg-primary/20 rounded-2xl flex items-center justify-center mb-6">
             <Calendar className="w-8 h-8 text-primary" />
           </div>
