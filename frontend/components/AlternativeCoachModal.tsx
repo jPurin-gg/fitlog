@@ -11,6 +11,7 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
   const [customName, setCustomName] = React.useState("");
   const [result, setResult] = React.useState<any>(null);
   const [error, setError] = React.useState("");
+  const inFlightRef = React.useRef(false);
 
   React.useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -24,6 +25,8 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
   }, []);
 
   const fetchAlternatives = async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setLoading(true);
     setError("");
     setResult(null);
@@ -44,6 +47,7 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
       console.error(e);
       setError("ネットワークエラーが発生しました。バックエンドに接続できません。");
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
   };

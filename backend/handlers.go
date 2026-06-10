@@ -226,7 +226,7 @@ func (app *App) handleRecommend(w http.ResponseWriter, r *http.Request) {
 	aiJSON, err := callAI(systemPrompt, userPrompt, true)
 	if err != nil {
 		log.Printf("AI API Error (Recommend): %v\n", err)
-		http.Error(w, "AIの呼び出しに失敗しました。しばらくしてからやり直してください。", http.StatusServiceUnavailable)
+		writeAIError(w, err)
 		return
 	}
 
@@ -401,7 +401,7 @@ func (app *App) handleStartWorkoutPlan(w http.ResponseWriter, r *http.Request) {
 	payload, err := app.buildWorkoutPlanForDate(userID, time.Now())
 	if err != nil {
 		log.Printf("Failed to build workout plan: %v", err)
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		writeAIError(w, err)
 		return
 	}
 
@@ -691,7 +691,7 @@ func (app *App) generateWorkoutSummaryComment(userID, workoutID int, summary Wor
 
 	aiJSON, err := callAI(systemPrompt, userPrompt, true)
 	if err != nil {
-		return "", fmt.Errorf("AIによる終了コメント作成に失敗しました。")
+		return "", fmt.Errorf("AIによる終了コメント作成に失敗しました: %w", err)
 	}
 
 	aiStr := strings.TrimSpace(aiJSON)
@@ -881,7 +881,7 @@ func refineWorkoutPlanWithAI(base WorkoutPlanPayload) (WorkoutPlanPayload, error
 
 	aiJSON, err := callAI(systemPrompt, userPrompt, true)
 	if err != nil {
-		return WorkoutPlanPayload{}, fmt.Errorf("AIによる今日の計画作成に失敗しました。APIキーや接続状況を確認してください。")
+		return WorkoutPlanPayload{}, fmt.Errorf("AIによる今日の計画作成に失敗しました: %w", err)
 	}
 
 	aiStr := strings.TrimSpace(aiJSON)
@@ -1086,7 +1086,7 @@ func (app *App) createMonthlyPlan(w http.ResponseWriter, r *http.Request) {
 	resp, err := app.generateMonthlyPlanWithAI(userID, motivation, frequency, restDays)
 	if err != nil {
 		log.Printf("Failed to generate monthly plan with AI: %v", err)
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		writeAIError(w, err)
 		return
 	}
 	resp.UserID = userID
@@ -1221,7 +1221,7 @@ func (app *App) generateMonthlyPlanWithAI(userID int, motivation, frequency stri
 
 	aiJSON, err := callAI(systemPrompt, userPrompt, true)
 	if err != nil {
-		return MonthlyPlanResponse{}, fmt.Errorf("AIによる月間プラン作成に失敗しました。APIキーや接続状況を確認してください。")
+		return MonthlyPlanResponse{}, fmt.Errorf("AIによる月間プラン作成に失敗しました: %w", err)
 	}
 
 	aiStr := strings.TrimSpace(aiJSON)

@@ -851,7 +851,7 @@ func (app *App) handleAlternative(w http.ResponseWriter, r *http.Request) {
 	aiJSON, err := callAI(systemPrompt, userPrompt, true)
 	if err != nil {
 		fmt.Printf("AI Alternative Error: %v\n", err)
-		http.Error(w, "AIによる代替種目の提案に失敗しました。しばらくしてからやり直してください。", http.StatusServiceUnavailable)
+		writeAIError(w, err)
 		return
 	}
 

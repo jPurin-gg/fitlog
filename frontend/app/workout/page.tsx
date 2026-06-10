@@ -81,6 +81,9 @@ export default function WorkoutPage() {
   const [editingTargetSets, setEditingTargetSets] = React.useState(false);
   const [tempTargetSets, setTempTargetSets] = React.useState(3);
   const [finishedSummary, setFinishedSummary] = React.useState<WorkoutSummary | null>(null);
+  const startInFlightRef = React.useRef(false);
+  const recommendationInFlightRef = React.useRef(false);
+  const finishInFlightRef = React.useRef(false);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
 
@@ -130,6 +133,8 @@ export default function WorkoutPage() {
   };
 
   const startWorkout = async () => {
+    if (startInFlightRef.current) return;
+    startInFlightRef.current = true;
     setLoading(true);
     setAiError(null);
     setFinishedSummary(null);
@@ -151,12 +156,15 @@ export default function WorkoutPage() {
       console.error(e);
       setAiError('バックエンドに接続できません。');
     } finally {
+      startInFlightRef.current = false;
       setLoading(false);
     }
   };
 
   const getRecommendation = async () => {
     if (!formData.weight || !formData.reps) return;
+    if (recommendationInFlightRef.current) return;
+    recommendationInFlightRef.current = true;
     setLoading(true);
     setAiError(null);
     try {
@@ -184,6 +192,7 @@ export default function WorkoutPage() {
       console.error(e);
       setAiError('ネットワークエラーが発生しました。バックエンドに接続できません。');
     } finally {
+      recommendationInFlightRef.current = false;
       setLoading(false);
     }
   };
@@ -214,6 +223,8 @@ export default function WorkoutPage() {
   };
 
   const finishWorkout = async () => {
+    if (finishInFlightRef.current) return;
+    finishInFlightRef.current = true;
     setFinishing(true);
     setAiError(null);
     try {
@@ -238,6 +249,7 @@ export default function WorkoutPage() {
       console.error(e);
       setAiError('バックエンドに接続できません。');
     } finally {
+      finishInFlightRef.current = false;
       setFinishing(false);
     }
   };
@@ -523,6 +535,7 @@ export default function WorkoutPage() {
                     <p className="text-red-300/70 text-xs mt-1">{aiError}</p>
                     <button
                       onClick={getRecommendation}
+                      disabled={loading}
                       className="mt-3 text-xs text-red-400 hover:text-red-300 underline transition-colors"
                     >
                       もう一度試す

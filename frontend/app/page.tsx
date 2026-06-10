@@ -528,6 +528,7 @@ function MonthlyPlanModal({ userId, onClose, onPlanGenerated }: any) {
   const [restDays, setRestDays] = React.useState<number[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
+  const generateInFlightRef = React.useRef(false);
   const canGenerate = restDays.length < 7;
 
   const toggleRestDay = (day: number) => {
@@ -540,6 +541,8 @@ function MonthlyPlanModal({ userId, onClose, onPlanGenerated }: any) {
 
   const generatePlan = async () => {
     if (!canGenerate) return;
+    if (generateInFlightRef.current) return;
+    generateInFlightRef.current = true;
     setLoading(true);
     setError("");
     try {
@@ -565,6 +568,7 @@ function MonthlyPlanModal({ userId, onClose, onPlanGenerated }: any) {
       console.error(e);
       setError("エラーが発生しました。");
     } finally {
+      generateInFlightRef.current = false;
       setLoading(false);
     }
   };
