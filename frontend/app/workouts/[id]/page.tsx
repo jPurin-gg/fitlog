@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { WorkoutSummaryView, type WorkoutSummary } from "@/components/WorkoutSummaryView";
-import { useAuth } from "@/components/AuthGate";
+import { apiErrorMessage, apiFetch } from "@/lib/api";
 
 interface WorkoutDetail {
   id: number;
@@ -29,33 +29,26 @@ function formatDateTime(value: string) {
 }
 
 export default function WorkoutDetailPage() {
-  const { user } = useAuth();
   const params = useParams<{ id: string }>();
   const [workout, setWorkout] = React.useState<WorkoutDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
 
   React.useEffect(() => {
     const loadWorkout = async () => {
       setLoading(true);
       setError("");
       try {
-        const res = await fetch(`${apiUrl}/api/workouts/${params.id}?user_id=${user.id}`);
-        if (!res.ok) {
-          setError(await res.text() || "ワークアウト履歴を読み込めませんでした。");
-          return;
-        }
-        setWorkout(await res.json());
+        setWorkout(await apiFetch<WorkoutDetail>(`/api/workouts/${encodeURIComponent(params.id)}`));
       } catch (e) {
         console.error(e);
-        setError("バックエンドに接続できません。");
+        setError(apiErrorMessage(e, "ワークアウト履歴を読み込めませんでした。"));
       } finally {
         setLoading(false);
       }
     };
     if (params.id) loadWorkout();
-  }, [apiUrl, params.id, user.id]);
+  }, [params.id]);
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white p-4 md:p-8 relative overflow-hidden">

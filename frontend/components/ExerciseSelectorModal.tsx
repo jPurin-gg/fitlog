@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import { Search, Plus, Dumbbell, X, Loader2, Activity, Star } from "lucide-react";
-import { useAuth } from "@/components/AuthGate";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { apiFetch } from "@/lib/api";
 
 interface Exercise {
   id: string;
@@ -47,7 +48,6 @@ interface Props {
 }
 
 export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
-  const { user } = useAuth();
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [favoriteExercises, setFavoriteExercises] = useState<Exercise[]>([]);
   const [recentExercises, setRecentExercises] = useState<Exercise[]>([]);
@@ -63,30 +63,17 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
   const [customCategory, setCustomCategory] = useState("筋力トレーニング");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
-
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    const previousTouchAction = document.body.style.touchAction;
-    document.body.style.overflow = "hidden";
-    document.body.style.touchAction = "none";
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.body.style.touchAction = previousTouchAction;
-    };
-  }, []);
+  useBodyScrollLock();
 
   const fetchFavorites = React.useCallback(async () => {
     try {
-      const res = await fetch(`${apiBase}/api/exercises/favorites?user_id=${user.id}`);
-      if (!res.ok) throw new Error("Failed to fetch favorites");
-      const data = await res.json();
+      const data = await apiFetch<Exercise[]>("/api/exercises/favorites");
       setFavoriteExercises(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error("Failed to fetch favorite exercises:", e);
       setFavoriteExercises([]);
     }
-  }, [apiBase, user.id]);
+  }, []);
 
   useEffect(() => {
     fetchFavorites();
@@ -95,9 +82,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
   useEffect(() => {
     const fetchRecent = async () => {
       try {
-        const res = await fetch(`${apiBase}/api/exercises/recent?user_id=${user.id}`);
-        if (!res.ok) throw new Error("Failed to fetch recent exercises");
-        const data = await res.json();
+        const data = await apiFetch<Exercise[]>("/api/exercises/recent");
         setRecentExercises(Array.isArray(data) ? data : []);
       } catch (e) {
         console.error("Failed to fetch recent exercises:", e);
@@ -105,7 +90,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
       }
     };
     fetchRecent();
-  }, [apiBase, user.id]);
+  }, []);
 
   useEffect(() => {
     const fetch_ = async () => {
@@ -116,13 +101,12 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
       if (effectiveMuscle) params.set('muscle', effectiveMuscle);
       if (equipFilter) params.set('equipment', equipFilter);
       const qs = params.toString();
-      const res = await fetch(`${apiBase}/api/exercises${qs ? '?' + qs : ''}`);
-      const data = await res.json();
+      const data = await apiFetch<Exercise[]>(`/api/exercises${qs ? '?' + qs : ''}`);
       setExercises(data || []);
     };
     const timer = setTimeout(fetch_, 300);
     return () => clearTimeout(timer);
-  }, [searchQuery, muscleFilter, broadMuscle, equipFilter, apiBase]);
+  }, [searchQuery, muscleFilter, broadMuscle, equipFilter]);
 
   const handleBroadMuscleChange = (broad: string) => {
     setBroadMuscle(broad);
@@ -152,12 +136,9 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
   const toggleFavorite = async (exercise: Exercise) => {
     const favorite = favoriteIds.has(exercise.id);
     try {
-      const res = await fetch(`${apiBase}/api/exercises/favorites`, {
-        method: favorite ? "DELETE" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: user.id, exercise_id: exercise.id }),
+      await apiFetch<void>(`/api/exercises/${encodeURIComponent(exercise.id)}/favorite`, {
+        method: favorite ? "DELETE" : "PUT",
       });
-      if (!res.ok) throw new Error("Failed to update favorite");
       if (favorite) {
         setFavoriteExercises(prev => prev.filter(ex => ex.id !== exercise.id));
       } else {
@@ -173,9 +154,8 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
     if (!customName.trim()) return;
     setIsSubmitting(true);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/exercises/custom`, {
+      const data = await apiFetch<Exercise>("/api/exercises", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           name: customName, 
           category: customCategory, 
@@ -183,12 +163,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
           primary_muscle: "" 
         })
       });
-      if (res.ok) {
-        const data = await res.json();
-        onSelect({ id: data.id, name: data.name });
-      } else {
-        alert("追加に失敗しました。");
-      }
+      onSelect({ id: data.id, name: data.name });
     } catch (e) {
       console.error(e);
       alert("通信エラーが発生しました。");

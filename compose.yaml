@@ -36,7 +36,8 @@ services:
       - ./backend:/app
     command: air
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   # 🗄️ データベース（PostgreSQL）
   db:
@@ -49,8 +50,12 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./docker/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
-# 永続ボリューム
 volumes:
   node_modules:
   db_data:

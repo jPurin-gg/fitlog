@@ -22,7 +22,8 @@ import Link from "next/link";
 import { AlternativeCoachModal } from "@/components/AlternativeCoachModal";
 import { ExerciseSelectorModal } from "@/components/ExerciseSelectorModal";
 import { WorkoutSummaryView, type WorkoutSummary } from "@/components/WorkoutSummaryView";
-import { useAuth } from "@/components/AuthGate";
+import { apiErrorMessage, apiFetch } from "@/lib/api";
+import { displayPlanText, formatLocalDate } from "@/lib/fitlog";
 
 interface WorkoutPlanExercise {
   exercise_id: string;
@@ -36,7 +37,6 @@ interface WorkoutPlanExercise {
 interface WorkoutPlanSession {
   id: number;
   workout_id: number;
-  user_id: number;
   plan_date: string;
   status: string;
   plan: {
@@ -48,20 +48,14 @@ interface WorkoutPlanSession {
   };
 }
 
-function displayPlanText(text?: string) {
-  if (!text) return "";
-  return text
-    .replace("PPL法 (Push/Pull/Legs)", "PPL法（押す・引く・脚）")
-    .replace("Full Body", "全身")
-    .replace("Push (胸・肩・三頭)", "押す日（胸・肩・三頭）")
-    .replace("Pull (背中・二頭)", "引く日（背中・二頭）")
-    .replace("Legs (脚・腹)", "脚の日（脚・腹）")
-    .replace("全身 A", "全身その1")
-    .replace("全身 B", "全身その2");
+function newIdempotencyKey() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `fitlog_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
 
 export default function WorkoutPage() {
-  const { user } = useAuth();
   const [loading, setLoading] = React.useState(false);
   const [finishing, setFinishing] = React.useState(false);
   const [recommendation, setRecommendation] = React.useState<any>(null);
@@ -81,36 +75,32 @@ export default function WorkoutPage() {
   const [editingTargetSets, setEditingTargetSets] = React.useState(false);
   const [tempTargetSets, setTempTargetSets] = React.useState(3);
   const [finishedSummary, setFinishedSummary] = React.useState<WorkoutSummary | null>(null);
+  const [recordedSetID, setRecordedSetID] = React.useState<number | null>(null);
   const startInFlightRef = React.useRef(false);
   const recommendationInFlightRef = React.useRef(false);
   const finishInFlightRef = React.useRef(false);
-
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+  const setRequestRef = React.useRef<{ signature: string; key: string; setID?: number } | null>(null);
 
   // 種目が変わったら目標セット数を取得
   React.useEffect(() => {
     const fetchTargetSets = async () => {
       if (workoutPlan) return;
       try {
-        const res = await fetch(`${apiUrl}/api/exercises/target_sets?user_id=${user.id}&exercise_id=${encodeURIComponent(currentExercise.id)}`);
-        if (res.ok) {
-          const data = await res.json();
-          setTargetSets(data.target_sets ?? 3);
-          setTempTargetSets(data.target_sets ?? 3);
-        }
+        const data = await apiFetch<{ target_sets: number }>(`/api/exercises/${encodeURIComponent(currentExercise.id)}/settings`);
+        setTargetSets(data.target_sets ?? 3);
+        setTempTargetSets(data.target_sets ?? 3);
       } catch { /* デフォルト3セットのまま */ }
     };
     fetchTargetSets();
-  }, [apiUrl, currentExercise.id, user.id, workoutPlan]);
+  }, [currentExercise.id, workoutPlan]);
 
   const saveTargetSets = async (value: number) => {
     setTargetSets(value);
     setEditingTargetSets(false);
     try {
-      await fetch(`${apiUrl}/api/exercises/target_sets`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, exercise_id: currentExercise.id, target_sets: value })
+      await apiFetch<{ target_sets: number }>(`/api/exercises/${encodeURIComponent(currentExercise.id)}/settings`, {
+        method: 'PUT',
+        body: JSON.stringify({ target_sets: value })
       });
     } catch { /* 無視 */ }
   };
@@ -125,6 +115,8 @@ export default function WorkoutPage() {
     setCurrentSet(1);
     setRecommendation(null);
     setAiError(null);
+    setRequestRef.current = null;
+    setRecordedSetID(null);
     setFormData({
       weight: ex.target_weight ? String(ex.target_weight) : '',
       reps: ex.target_reps ? String(ex.target_reps) : '',
@@ -139,22 +131,15 @@ export default function WorkoutPage() {
     setAiError(null);
     setFinishedSummary(null);
     try {
-      const res = await fetch(`${apiUrl}/api/workout-plan/start`, {
+      const data = await apiFetch<WorkoutPlanSession>(`/api/workout-plans/${formatLocalDate(new Date())}/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id })
       });
-      if (!res.ok) {
-        setAiError(await res.text() || '今日の計画作成に失敗しました。');
-        return;
-      }
-      const data = await res.json();
       setWorkoutPlan(data);
       setWorkoutStarted(true);
       activatePlanExercise(data, 0);
     } catch (e) {
       console.error(e);
-      setAiError('バックエンドに接続できません。');
+      setAiError(apiErrorMessage(e, '今日の計画作成に失敗しました。'));
     } finally {
       startInFlightRef.current = false;
       setLoading(false);
@@ -168,29 +153,43 @@ export default function WorkoutPage() {
     setLoading(true);
     setAiError(null);
     try {
-      const res = await fetch(`${apiUrl}/api/recommend`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          exercise_id: currentExercise.id, 
-          workout_id: workoutPlan?.workout_id || 0,
-          user_id: user.id,
-          set_order: currentSet,
-          weight: parseFloat(formData.weight),
-          reps: parseInt(formData.reps),
-          feeling: formData.feeling
-        })
-      });
-      if (!res.ok) {
-        const msg = await res.text();
-        setAiError(msg || 'AIの呼び出しに失敗しました。');
+      const workoutId = workoutPlan?.workout_id;
+      if (!workoutId) {
+        setAiError('進行中のワークアウトが見つかりません。');
         return;
       }
-      const data = await res.json();
+      const setInput = {
+        exercise_id: currentExercise.id,
+        set_order: currentSet,
+        weight: parseFloat(formData.weight),
+        reps: parseInt(formData.reps),
+        feeling: formData.feeling,
+      };
+      const signature = JSON.stringify(setInput);
+      if (setRequestRef.current?.setID && setRequestRef.current.signature !== signature) {
+        setAiError('このセットはすでに保存済みです。次のセットへ進んでください。');
+        return;
+      }
+      if (!setRequestRef.current || setRequestRef.current.signature !== signature) {
+        setRequestRef.current = { signature, key: newIdempotencyKey() };
+      }
+      let setID = setRequestRef.current.setID;
+      if (!setID) {
+        const recorded = await apiFetch<{ id: number }>(`/api/workouts/${workoutId}/sets`, {
+          method: 'POST',
+          headers: { 'Idempotency-Key': setRequestRef.current.key },
+          body: JSON.stringify(setInput),
+        });
+        setID = recorded.id;
+        setRequestRef.current.setID = setID;
+        setRecordedSetID(setID);
+      }
+      const data = await apiFetch<any>(`/api/workouts/${workoutId}/sets/${setID}/recommendation`, { method: 'POST' });
       setRecommendation(data);
     } catch (e) {
       console.error(e);
-      setAiError('ネットワークエラーが発生しました。バックエンドに接続できません。');
+      const message = apiErrorMessage(e, 'セットの保存またはAIの呼び出しに失敗しました。');
+      setAiError(setRequestRef.current?.setID ? `${message}\nセット自体は保存済みで、再試行しても二重登録されません。` : message);
     } finally {
       recommendationInFlightRef.current = false;
       setLoading(false);
@@ -210,6 +209,8 @@ export default function WorkoutPage() {
     }
     setRecommendation(null);
     setAiError(null);
+    setRequestRef.current = null;
+    setRecordedSetID(null);
   };
 
   const handleNextExercise = () => {
@@ -228,16 +229,13 @@ export default function WorkoutPage() {
     setFinishing(true);
     setAiError(null);
     try {
-      const res = await fetch(`${apiUrl}/api/workouts/finish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, workout_id: workoutPlan?.workout_id || 0 })
-      });
-      if (!res.ok) {
-        setAiError(await res.text() || 'ワークアウト終了に失敗しました。');
+      if (!workoutPlan?.workout_id) {
+        setAiError('進行中のワークアウトが見つかりません。');
         return;
       }
-      const data = await res.json();
+      const data = await apiFetch<{ summary: WorkoutSummary }>(`/api/workouts/${workoutPlan.workout_id}/finish`, {
+        method: 'POST',
+      });
       setFinishedSummary(data.summary || null);
       setWorkoutStarted(false);
       setWorkoutPlan(null);
@@ -245,9 +243,11 @@ export default function WorkoutPage() {
       setCurrentSet(1);
       setCurrentExerciseIndex(0);
       setFormData({ weight: '', reps: '', feeling: '' });
+      setRequestRef.current = null;
+      setRecordedSetID(null);
     } catch (e) {
       console.error(e);
-      setAiError('バックエンドに接続できません。');
+      setAiError(apiErrorMessage(e, 'ワークアウト終了に失敗しました。'));
     } finally {
       finishInFlightRef.current = false;
       setFinishing(false);
@@ -354,6 +354,8 @@ export default function WorkoutPage() {
               setCurrentExercise({ id: nextExercise.id, name: nextExercise.name });
               setCurrentSet(1);
               setRecommendation(null);
+              setRequestRef.current = null;
+              setRecordedSetID(null);
               setShowAltModal(false);
             }}
           />
@@ -367,6 +369,8 @@ export default function WorkoutPage() {
             setCurrentExercise(ex);
             setCurrentSet(1);
             setRecommendation(null);
+            setRequestRef.current = null;
+            setRecordedSetID(null);
             setShowExerciseSelector(false);
           }}
         />
@@ -491,6 +495,7 @@ export default function WorkoutPage() {
                     type="number" 
                     value={formData.weight}
                     onChange={(e) => setFormData({...formData, weight: e.target.value})}
+                    disabled={recordedSetID !== null}
                     className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-primary/50 text-2xl font-bold"
                     placeholder="80"
                   />
@@ -501,6 +506,7 @@ export default function WorkoutPage() {
                     type="number" 
                     value={formData.reps}
                     onChange={(e) => setFormData({...formData, reps: e.target.value})}
+                    disabled={recordedSetID !== null}
                     className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-secondary/50 text-2xl font-bold"
                     placeholder="10"
                   />
@@ -511,10 +517,17 @@ export default function WorkoutPage() {
                 <textarea 
                   value={formData.feeling}
                   onChange={(e) => setFormData({...formData, feeling: e.target.value})}
+                  disabled={recordedSetID !== null}
                   className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-accent/50 text-sm min-h-[100px]"
                   placeholder="例: きつかった、まだ余裕がある、肩に違和感..."
                 />
               </div>
+
+              {recordedSetID !== null && !recommendation && (
+                <div className="rounded-2xl border border-green-500/25 bg-green-500/10 px-4 py-3 text-xs font-bold text-green-300">
+                  セットは保存済みです。AI提案だけを再試行できます。
+                </div>
+              )}
 
               {!recommendation && (
                 <button 
@@ -522,7 +535,7 @@ export default function WorkoutPage() {
                   disabled={loading || !formData.weight || !formData.reps}
                   className="w-full py-5 mt-4 bg-primary text-black font-black rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-30 disabled:pointer-events-none tracking-widest flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(255,170,0,0.3)]"
                 >
-                  {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : "セット完了・AIに相談"}
+                  {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : recordedSetID !== null ? "AI提案を再試行" : "セット完了・AIに相談"}
                 </button>
               )}
 
@@ -531,8 +544,8 @@ export default function WorkoutPage() {
                 <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-start gap-3">
                   <Flame className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="text-red-400 font-bold text-sm">AIの呼び出しに失敗しました</p>
-                    <p className="text-red-300/70 text-xs mt-1">{aiError}</p>
+                    <p className="text-red-400 font-bold text-sm">処理に失敗しました</p>
+                    <p className="text-red-300/70 text-xs mt-1 whitespace-pre-line">{aiError}</p>
                     <button
                       onClick={getRecommendation}
                       disabled={loading}

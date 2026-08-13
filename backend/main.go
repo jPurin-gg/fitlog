@@ -1,80 +1,76 @@
 package main
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-	"github.com/joho/godotenv"
+	"github.com/jPurin-gg/myfitlog-backend/internal/app"
+	"github.com/jPurin-gg/myfitlog-backend/internal/config"
+	"github.com/jPurin-gg/myfitlog-backend/internal/database"
+	exercisepostgres "github.com/jPurin-gg/myfitlog-backend/internal/exercise/postgres"
 )
 
-type App struct {
-	db *sql.DB
+func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	if err := run(logger); err != nil {
+		logger.Error("application stopped", "error", err)
+		os.Exit(1)
+	}
 }
 
-func main() {
-	// docker/env/backend.env から環境変数を読み込む
-	if err := godotenv.Load("../docker/env/backend.env"); err != nil {
-		log.Println("No .env file found, using system environment variables")
+func run(logger *slog.Logger) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load configuration: %w", err)
+	}
+	startupContext, cancelStartup := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelStartup()
+	db, err := database.Open(startupContext, cfg.DB, logger)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if err := database.Migrate(startupContext, db); err != nil {
+		return err
+	}
+	if err := exercisepostgres.Seed(startupContext, db, cfg.SeedFilePath, logger); err != nil {
+		return err
 	}
 
-	// データベース初期化
-	db := initDB()
-
-	if err := ensureSchema(db); err != nil {
-		log.Fatalf("Failed to ensure schema: %v", err)
+	server := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           app.NewHandler(db, cfg, logger),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      2 * time.Minute,
+		IdleTimeout:       60 * time.Second,
 	}
+	serverErrors := make(chan error, 1)
+	go func() {
+		logger.Info("server started", "port", cfg.Port)
+		serverErrors <- server.ListenAndServe()
+	}()
 
-	// マスターデータの自動挿入（初回のみ）
-	if err := seedDatabase(db); err != nil {
-		log.Fatalf("Failed to seed database: %v", err)
-	}
-
-	app := &App{db: db}
-
-	// エンドポイント
-	// CORS Wrapper
-	cors := func(h http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			allowedOrigin := os.Getenv("FRONTEND_URL")
-			if allowedOrigin == "" {
-				allowedOrigin = "http://localhost:3000"
-			}
-			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			if r.Method == "OPTIONS" {
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-			h(w, r)
+	shutdownSignal, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	select {
+	case err := <-serverErrors:
+		if err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("serve HTTP: %w", err)
 		}
-	}
-
-	// 注意: より具体的なパスを先に登録する（Go の http.ServeMux は最長マッチのため）
-	http.HandleFunc("/api/exercises/target_sets", cors(app.handleTargetSets))
-	http.HandleFunc("/api/exercises/custom", cors(app.handleAddCustomExercise))
-	http.HandleFunc("/api/exercises/favorites", cors(app.handleFavoriteExercises))
-	http.HandleFunc("/api/exercises/recent", cors(app.handleRecentExercises))
-	http.HandleFunc("/api/exercises", cors(app.handleExercises))
-	http.HandleFunc("/api/auth/login", cors(app.handleLogin))
-	http.HandleFunc("/api/user-preferences", cors(app.handleUserPreferences))
-	http.HandleFunc("/api/recommend", cors(app.handleRecommend))
-	http.HandleFunc("/api/dashboard", cors(app.handleDashboard))
-	http.HandleFunc("/api/calendar/plan", cors(app.handleCalendarPlan))
-	http.HandleFunc("/api/calendar/workout", cors(app.handleCalendarWorkout))
-	http.HandleFunc("/api/calendar", cors(app.handleCalendar))
-	http.HandleFunc("/api/alternative", cors(app.handleAlternative))
-	http.HandleFunc("/api/workouts/finish", cors(app.handleFinishWorkout))
-	http.HandleFunc("/api/workouts/", cors(app.handleWorkoutDetail))
-	http.HandleFunc("/api/workout-plan/start", cors(app.handleStartWorkoutPlan))
-	http.HandleFunc("/api/monthly-plans", cors(app.handleMonthlyPlans))
-	http.HandleFunc("/api/monthly-plan", cors(app.handleMonthlyPlan))
-
-	fmt.Println("Server started on :8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
-		log.Fatal(err)
+		return nil
+	case <-shutdownSignal.Done():
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownContext); err != nil {
+			return fmt.Errorf("shutdown HTTP server: %w", err)
+		}
+		return nil
 	}
 }

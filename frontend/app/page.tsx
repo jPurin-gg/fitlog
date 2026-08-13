@@ -20,11 +20,9 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { AlternativeCoachModal } from "@/components/AlternativeCoachModal";
 import { LogoutButton, useAuth } from "@/components/AuthGate";
-
-function getCurrentPlanMonth() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-}
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
+import { displayPlanText, formatPlanMonth } from "@/lib/fitlog";
 
 const WEEKDAY_OPTIONS = [
   { value: 0, label: "日" },
@@ -47,36 +45,6 @@ function weekdayLabels(days?: number[]) {
     .join("・");
 }
 
-function displayPlanText(text?: string) {
-  if (!text) return "";
-  return text
-    .replace("PPL法 (Push/Pull/Legs)", "PPL法（押す・引く・脚）")
-    .replace("Full Body", "全身")
-    .replace("Push (胸・肩・三頭)", "押す日（胸・肩・三頭）")
-    .replace("Pull (背中・二頭)", "引く日（背中・二頭）")
-    .replace("Legs (脚・腹)", "脚の日（脚・腹）")
-    .replace("全身 A", "全身その1")
-    .replace("全身 B", "全身その2")
-    .replace(/^Day 1$/, "1日目")
-    .replace(/^Day 2$/, "2日目")
-    .replace(/^Day 3$/, "3日目")
-    .replace(/^Day 4$/, "4日目")
-    .replace(/^Day 5$/, "5日目");
-}
-
-function useBodyScrollLock() {
-  React.useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    const previousTouchAction = document.body.style.touchAction;
-    document.body.style.overflow = "hidden";
-    document.body.style.touchAction = "none";
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.body.style.touchAction = previousTouchAction;
-    };
-  }, []);
-}
-
 export default function Home() {
   const { user } = useAuth();
   const [showMonthlyModal, setShowMonthlyModal] = React.useState(false);
@@ -86,22 +54,26 @@ export default function Home() {
   const [dashboardData, setDashboardData] = React.useState<any>(null);
   const [altModalData, setAltModalData] = React.useState<{dayIdx: number, exIdx: number, exName: string, exId?: string} | null>(null);
   const [today, setToday] = React.useState<Date | null>(null);
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-  const currentMonth = getCurrentPlanMonth();
+  const currentMonth = formatPlanMonth(new Date());
 
   const saveMonthlyPlan = async (plan: any) => {
-    const planToSave = { ...plan, user_id: user.id, plan_month: plan.plan_month || currentMonth };
+    const planToSave = { ...plan, plan_month: plan.plan_month || currentMonth };
     setMonthlyPlan(planToSave);
     try {
-      const res = await fetch(`${apiUrl}/api/monthly-plan`, {
+      const input = {
+        plan_name: planToSave.plan_name,
+        frequency: planToSave.frequency,
+        description: planToSave.description,
+        rationale: planToSave.rationale,
+        rest_days: planToSave.rest_days || [],
+        recommended_days: planToSave.recommended_days || [],
+        weekly_routine: planToSave.weekly_routine || [],
+      };
+      const saved = await apiFetch<any>(`/api/monthly-plans/${currentMonth}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(planToSave)
+        body: JSON.stringify(input)
       });
-      if (res.ok) {
-        const saved = await res.json();
-        setMonthlyPlan(saved);
-      }
+      setMonthlyPlan(saved);
     } catch (e) {
       console.error("Failed to save monthly plan:", e);
     }
@@ -109,40 +81,30 @@ export default function Home() {
 
   React.useEffect(() => {
     setToday(new Date());
-    fetch(`${apiUrl}/api/dashboard?user_id=${user.id}`)
-      .then(res => res.json())
+    apiFetch<any>("/api/dashboard")
       .then(data => setDashboardData(data))
       .catch(console.error);
 
-    fetch(`${apiUrl}/api/user-preferences?user_id=${user.id}`)
-      .then(res => res.json())
+    apiFetch<any>("/api/preferences")
       .then(data => setPreferences(data))
       .catch(console.error);
 
-    fetch(`${apiUrl}/api/monthly-plan?user_id=${user.id}&month=${currentMonth}`)
-      .then(async res => {
-        if (res.status === 404) {
-          setTimeout(() => setShowMonthlyModal(true), 1000);
-          return null;
-        }
-        if (!res.ok) throw new Error(await res.text());
-        return res.json();
-      })
-      .then(data => {
-        if (data) setMonthlyPlan(data);
-      })
+    apiFetch<any>(`/api/monthly-plans/${currentMonth}`)
+      .then(data => setMonthlyPlan(data))
       .catch(err => {
+        if (err instanceof ApiError && err.status === 404) {
+          setTimeout(() => setShowMonthlyModal(true), 1000);
+          return;
+        }
         console.error("Failed to fetch monthly plan:", err);
-        setTimeout(() => setShowMonthlyModal(true), 1000);
       });
-  }, [apiUrl, currentMonth, user.id]);
+  }, [currentMonth]);
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white p-4 md:p-8 font-sans selection:bg-primary/30">
       <AnimatePresence>
         {showMonthlyModal && (
           <MonthlyPlanModal
-            userId={user.id}
             onClose={() => setShowMonthlyModal(false)} 
             onPlanGenerated={(plan: any) => {
               setMonthlyPlan(plan);
@@ -152,7 +114,6 @@ export default function Home() {
         )}
         {showPreferencesModal && (
           <TrainingPreferencesModal
-            userId={user.id}
             initialPreferences={preferences}
             onClose={() => setShowPreferencesModal(false)}
             onSaved={(saved: any) => {
@@ -345,7 +306,7 @@ export default function Home() {
 }
 
 
-function TrainingPreferencesModal({ userId, initialPreferences, onClose, onSaved }: any) {
+function TrainingPreferencesModal({ initialPreferences, onClose, onSaved }: any) {
   useBodyScrollLock();
 
   const [preferredEquipment, setPreferredEquipment] = React.useState<string[]>(initialPreferences?.preferred_equipment || []);
@@ -377,26 +338,19 @@ function TrainingPreferencesModal({ userId, initialPreferences, onClose, onSaved
     setSaving(true);
     setError("");
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-      const res = await fetch(`${apiUrl}/api/user-preferences`, {
+      const saved = await apiFetch<any>("/api/preferences", {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: userId,
           preferred_equipment: preferredEquipment,
           avoided_equipment: avoidedEquipment,
           training_environment: trainingEnvironment,
           notes,
         })
       });
-      if (!res.ok) {
-        setError(await res.text() || "設定の保存に失敗しました。");
-        return;
-      }
-      onSaved(await res.json());
+      onSaved(saved);
     } catch (e) {
       console.error(e);
-      setError("エラーが発生しました。");
+      setError(apiErrorMessage(e, "設定の保存に失敗しました。"));
     } finally {
       setSaving(false);
     }
@@ -520,7 +474,7 @@ function EquipmentPicker({ label, selected, onToggle, activeClassName }: any) {
 }
 
 
-function MonthlyPlanModal({ userId, onClose, onPlanGenerated }: any) {
+function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
   useBodyScrollLock();
 
   const [motivation, setMotivation] = React.useState("健康維持");
@@ -546,27 +500,18 @@ function MonthlyPlanModal({ userId, onClose, onPlanGenerated }: any) {
     setLoading(true);
     setError("");
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-      const res = await fetch(`${apiUrl}/api/monthly-plan`, {
+      const data = await apiFetch<any>(`/api/monthly-plans/${formatPlanMonth(new Date())}/generate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: userId,
-          plan_month: getCurrentPlanMonth(),
           motivation,
           frequency,
           rest_days: restDays
         })
       });
-      if (!res.ok) {
-        setError(await res.text() || "月間プランの作成に失敗しました。");
-        return;
-      }
-      const data = await res.json();
       onPlanGenerated(data);
     } catch (e) {
       console.error(e);
-      setError("エラーが発生しました。");
+      setError(apiErrorMessage(e, "月間プランの作成に失敗しました。"));
     } finally {
       generateInFlightRef.current = false;
       setLoading(false);

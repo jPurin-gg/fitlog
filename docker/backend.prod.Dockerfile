@@ -4,7 +4,7 @@ WORKDIR /src
 COPY ./backend/go.mod ./backend/go.sum ./
 RUN go mod download
 COPY ./backend ./
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/app .
+RUN CGO_ENABLED=0 go build -o /out/app .
 
 # 実行
 FROM gcr.io/distroless/static-debian12

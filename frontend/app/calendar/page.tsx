@@ -4,8 +4,10 @@ import React, { useEffect, useState } from "react";
 import { ArrowLeft, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Dumbbell, Sparkles, Check, Plus, Trash2, Save, Loader2, X, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { useAuth } from "@/components/AuthGate";
 import { ExerciseSelectorModal } from "@/components/ExerciseSelectorModal";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
+import { displayPlanText, formatLocalDate, formatPlanMonth } from "@/lib/fitlog";
 
 interface DayRoutine {
   day_name: string;
@@ -16,7 +18,6 @@ interface DayRoutine {
 
 interface MonthlyPlan {
   id?: number;
-  user_id?: number;
   plan_month?: string;
   plan_name: string;
   frequency: string;
@@ -50,9 +51,7 @@ interface CalendarWorkoutSet {
 }
 
 interface CalendarWorkout {
-  exists: boolean;
-  workout_id?: number;
-  user_id: number;
+  workout_id: number;
   date: string;
   title: string;
   sets: CalendarWorkoutSet[];
@@ -70,7 +69,6 @@ interface CalendarPlanExercise {
 interface CalendarPlan {
   id?: number;
   workout_id?: number;
-  user_id: number;
   plan_date: string;
   status: string;
   plan: {
@@ -82,22 +80,9 @@ interface CalendarPlan {
   };
 }
 
-function getCurrentPlanMonth() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function formatPlanMonth(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-}
-
 function dateFromPlanMonth(planMonth: string) {
   const [year, month] = planMonth.split("-").map(Number);
   return new Date(year, (month || 1) - 1, 1);
-}
-
-function formatDateKey(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function isFutureDateKey(dateKey: string) {
@@ -106,19 +91,6 @@ function isFutureDateKey(dateKey: string) {
   const today = new Date();
   const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   return target > todayStart;
-}
-
-function useBodyScrollLock() {
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    const previousTouchAction = document.body.style.touchAction;
-    document.body.style.overflow = "hidden";
-    document.body.style.touchAction = "none";
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.body.style.touchAction = previousTouchAction;
-    };
-  }, []);
 }
 
 const WEEKDAY_OPTIONS = [
@@ -139,30 +111,7 @@ function weekdayLabels(days?: number[]) {
     .join("・");
 }
 
-function displayPlanText(text?: string) {
-  if (!text) return "";
-  return text
-    .replace("PPL法 (Push/Pull/Legs)", "PPL法（押す・引く・脚）")
-    .replace("Full Body", "全身")
-    .replace("Push (胸・肩・三頭)", "押す日（胸・肩・三頭）")
-    .replace("Pull (背中・二頭)", "引く日（背中・二頭）")
-    .replace("Legs (脚・腹)", "脚の日（脚・腹）")
-    .replace("全身 A", "全身その1")
-    .replace("全身 B", "全身その2")
-    .replace(/^Day 1$/, "1日目")
-    .replace(/^Day 2$/, "2日目")
-    .replace(/^Day 3$/, "3日目")
-    .replace(/^Day 4$/, "4日目")
-    .replace(/^Day 5$/, "5日目")
-    .replace(/^Push$/, "押す日")
-    .replace(/^Pull$/, "引く日")
-    .replace(/^Legs$/, "脚の日")
-    .replace(/^Strength$/, "筋トレ")
-    .replace(/^Workout$/, "ワークアウト");
-}
-
 export default function CalendarPage() {
-  const { user } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [plan, setPlan] = useState<MonthlyPlan | null>(null);
   const [planHistory, setPlanHistory] = useState<MonthlyPlan[]>([]);
@@ -171,12 +120,10 @@ export default function CalendarPage() {
   const [workedOutDays, setWorkedOutDays] = useState<WorkedOutDay[]>([]);
   const [plannedDays, setPlannedDays] = useState<PlannedWorkoutDay[]>([]);
   const [editingDate, setEditingDate] = useState<string | null>(null);
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
   const selectedPlanMonth = formatPlanMonth(currentDate);
 
   const refreshCalendarData = React.useCallback(() => {
-    return fetch(`${apiUrl}/api/calendar?user_id=${user.id}&year=${currentDate.getFullYear()}&month=${currentDate.getMonth() + 1}`)
-      .then(res => res.json())
+    return apiFetch<{ worked_out_dates?: number[]; worked_out_days?: WorkedOutDay[]; planned_days?: PlannedWorkoutDay[] }>(`/api/calendar?year=${currentDate.getFullYear()}&month=${currentDate.getMonth() + 1}`)
       .then(data => {
         if (data && data.worked_out_dates) {
           setWorkedOutDates(data.worked_out_dates);
@@ -195,42 +142,35 @@ export default function CalendarPage() {
         }
       })
       .catch(err => console.error("Failed to fetch calendar data:", err));
-  }, [apiUrl, currentDate, user.id]);
+  }, [currentDate]);
 
   useEffect(() => {
-    fetch(`${apiUrl}/api/monthly-plans?user_id=${user.id}`)
-      .then(res => {
-        if (!res.ok) throw new Error("Failed to fetch monthly plan history");
-        return res.json();
-      })
+    apiFetch<MonthlyPlan[]>("/api/monthly-plans")
       .then(data => setPlanHistory(Array.isArray(data) ? data : []))
       .catch(err => console.error("Failed to fetch monthly plan history:", err));
-  }, [apiUrl, user.id]);
+  }, []);
 
   useEffect(() => {
-    fetch(`${apiUrl}/api/monthly-plan?user_id=${user.id}&month=${selectedPlanMonth}`)
-      .then(res => {
-        if (res.status === 404) return null;
-        if (!res.ok) throw new Error("Failed to fetch monthly plan");
-        return res.json();
-      })
+    apiFetch<MonthlyPlan>(`/api/monthly-plans/${selectedPlanMonth}`)
       .then(data => {
-        if (!data) {
+        setPlan(data);
+        setPlannedWeekDays(data.recommended_days || [1, 3, 5]);
+      })
+      .catch(err => {
+        if (err instanceof ApiError && err.status === 404) {
           setPlan(null);
           setPlannedWeekDays([]);
           return;
         }
-        setPlan(data);
-        setPlannedWeekDays(data.recommended_days || [1, 3, 5]);
-      })
-      .catch(err => console.error("Failed to fetch monthly plan:", err));
+        console.error("Failed to fetch monthly plan:", err);
+      });
 
     refreshCalendarData();
-  }, [apiUrl, currentDate, refreshCalendarData, selectedPlanMonth, user.id]);
+  }, [refreshCalendarData, selectedPlanMonth]);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
-  const isSelectedCurrentMonth = selectedPlanMonth === getCurrentPlanMonth();
+  const isSelectedCurrentMonth = selectedPlanMonth === formatPlanMonth(new Date());
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDayOfMonth = new Date(year, month, 1).getDay();
@@ -477,7 +417,7 @@ export default function CalendarPage() {
                             <div className="text-xs font-black text-primary mb-1">{historyPlan.plan_month}</div>
                             <div className="text-sm font-bold leading-tight">{displayPlanText(historyPlan.plan_name)}</div>
                           </div>
-                          {historyPlan.plan_month === getCurrentPlanMonth() && (
+                          {historyPlan.plan_month === formatPlanMonth(new Date()) && (
                             <span className="text-[9px] font-black text-black bg-primary px-2 py-0.5 rounded-full">今月</span>
                           )}
                         </div>
@@ -538,7 +478,7 @@ export default function CalendarPage() {
             <motion.div 
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              onClick={() => setEditingDate(formatDateKey(today))}
+              onClick={() => setEditingDate(formatLocalDate(today))}
               className="glass rounded-2xl p-6 bg-gradient-to-r from-green-500/10 to-transparent border-green-500/30 cursor-pointer flex justify-between items-center group"
             >
               <div>
@@ -554,17 +494,16 @@ export default function CalendarPage() {
       </main>
       {editingDate && isFutureDateKey(editingDate) && (
         <CalendarPlanEditor
-          apiUrl={apiUrl}
-          userId={user.id}
           date={editingDate}
           onClose={() => setEditingDate(null)}
-          onSaved={() => setEditingDate(null)}
+          onSaved={() => {
+            refreshCalendarData();
+            setEditingDate(null);
+          }}
         />
       )}
       {editingDate && !isFutureDateKey(editingDate) && (
         <CalendarWorkoutEditor
-          apiUrl={apiUrl}
-          userId={user.id}
           date={editingDate}
           onClose={() => setEditingDate(null)}
           onSaved={() => {
@@ -578,14 +517,10 @@ export default function CalendarPage() {
 }
 
 function CalendarWorkoutEditor({
-  apiUrl,
-  userId,
   date,
   onClose,
   onSaved,
 }: {
-  apiUrl: string;
-  userId: number;
   date: string;
   onClose: () => void;
   onSaved: () => void;
@@ -602,22 +537,24 @@ function CalendarWorkoutEditor({
   useEffect(() => {
     setLoading(true);
     setError("");
-    fetch(`${apiUrl}/api/calendar/workout?user_id=${userId}&date=${date}`)
-      .then(res => {
-        if (!res.ok) throw new Error("記録の取得に失敗しました。");
-        return res.json();
-      })
+    apiFetch<CalendarWorkout>(`/api/workouts/by-date/${date}`)
       .then((data: CalendarWorkout) => {
         setWorkout(data);
         setTitle(data.title || "筋トレ");
         setSets(Array.isArray(data.sets) ? data.sets : []);
       })
       .catch(err => {
+        if (err instanceof ApiError && err.status === 404) {
+          setWorkout({ workout_id: 0, date, title: "筋トレ", sets: [] });
+          setTitle("筋トレ");
+          setSets([]);
+          return;
+        }
         console.error(err);
-        setError("記録の取得に失敗しました。");
+        setError(apiErrorMessage(err, "記録の取得に失敗しました。"));
       })
       .finally(() => setLoading(false));
-  }, [apiUrl, date, userId]);
+  }, [date]);
 
   const addExercise = (exercise: { id: string; name: string }) => {
     setSets(prev => [
@@ -647,8 +584,6 @@ function CalendarWorkoutEditor({
     setError("");
     try {
       const payload = {
-        user_id: userId,
-        date,
         title,
         sets: sets.map((set, i) => ({
           exercise_id: set.exercise_id,
@@ -658,19 +593,14 @@ function CalendarWorkoutEditor({
           feeling: set.feeling || "",
         })),
       };
-      const res = await fetch(`${apiUrl}/api/calendar/workout`, {
+      await apiFetch<CalendarWorkout>(`/api/workouts/by-date/${date}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) {
-        setError(await res.text() || "保存に失敗しました。");
-        return;
-      }
       onSaved();
     } catch (err) {
       console.error(err);
-      setError("保存時に通信エラーが発生しました。");
+      setError(apiErrorMessage(err, "保存時に通信エラーが発生しました。"));
     } finally {
       setSaving(false);
     }
@@ -832,14 +762,10 @@ function CalendarWorkoutEditor({
 }
 
 function CalendarPlanEditor({
-  apiUrl,
-  userId,
   date,
   onClose,
   onSaved,
 }: {
-  apiUrl: string;
-  userId: number;
   date: string;
   onClose: () => void;
   onSaved: () => void;
@@ -859,11 +785,7 @@ function CalendarPlanEditor({
   useEffect(() => {
     setLoading(true);
     setError("");
-    fetch(`${apiUrl}/api/calendar/plan?user_id=${userId}&date=${date}`)
-      .then(res => {
-        if (!res.ok) throw new Error("予定の取得に失敗しました。");
-        return res.json();
-      })
+    apiFetch<CalendarPlan>(`/api/workout-plans/${date}`)
       .then((data: CalendarPlan) => {
         setPlan(data);
         setTitle(data.plan?.workout_title || "筋トレ");
@@ -874,10 +796,10 @@ function CalendarPlanEditor({
       })
       .catch(err => {
         console.error(err);
-        setError("予定の取得に失敗しました。月間プランがない月かもしれません。");
+        setError(apiErrorMessage(err, "予定の取得に失敗しました。月間プランがない月かもしれません。"));
       })
       .finally(() => setLoading(false));
-  }, [apiUrl, date, userId]);
+  }, [date]);
 
   const addExercise = (exercise: { id: string; name: string }) => {
     setExercises(prev => [
@@ -905,12 +827,9 @@ function CalendarPlanEditor({
     setSaving(true);
     setError("");
     try {
-      const res = await fetch(`${apiUrl}/api/calendar/plan`, {
+      await apiFetch<CalendarPlan>(`/api/workout-plans/${date}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: userId,
-          date,
           workout_title: title,
           target,
           estimated_duration_min: Number(duration) || 45,
@@ -924,14 +843,10 @@ function CalendarPlanEditor({
           })),
         }),
       });
-      if (!res.ok) {
-        setError(await res.text() || "保存に失敗しました。");
-        return;
-      }
       onSaved();
     } catch (err) {
       console.error(err);
-      setError("保存時に通信エラーが発生しました。");
+      setError(apiErrorMessage(err, "保存時に通信エラーが発生しました。"));
     } finally {
       setSaving(false);
     }

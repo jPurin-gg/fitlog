@@ -4,6 +4,8 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { Loader2, X, MessageSquare, BrainCircuit, ArrowRight, AlertCircle } from "lucide-react";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { apiErrorMessage, apiFetch } from "@/lib/api";
 
 export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onReplace }: any) {
   const [loading, setLoading] = React.useState(false);
@@ -11,18 +13,10 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
   const [customName, setCustomName] = React.useState("");
   const [result, setResult] = React.useState<any>(null);
   const [error, setError] = React.useState("");
+  const [customLoading, setCustomLoading] = React.useState(false);
   const inFlightRef = React.useRef(false);
 
-  React.useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    const previousTouchAction = document.body.style.touchAction;
-    document.body.style.overflow = "hidden";
-    document.body.style.touchAction = "none";
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.body.style.touchAction = previousTouchAction;
-    };
-  }, []);
+  useBodyScrollLock();
 
   const fetchAlternatives = async () => {
     if (inFlightRef.current) return;
@@ -31,24 +25,40 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
     setError("");
     setResult(null);
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-      const res = await fetch(`${apiUrl}/api/alternative`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ exercise_id: exerciseId, exercise: exerciseName, reason: reason })
-      });
-      if (!res.ok) {
-        setError(await res.text() || "AIによる代替種目の提案に失敗しました。");
+      if (!exerciseId) {
+        setError("種目IDがないため、AIに代替種目を相談できません。");
         return;
       }
-      const data = await res.json();
+      const data = await apiFetch<any>(`/api/exercises/${encodeURIComponent(exerciseId)}/alternatives`, {
+        method: 'POST',
+        body: JSON.stringify({ reason })
+      });
       setResult(data);
     } catch (e) {
       console.error(e);
-      setError("ネットワークエラーが発生しました。バックエンドに接続できません。");
+      setError(apiErrorMessage(e, "ネットワークエラーが発生しました。バックエンドに接続できません。"));
     } finally {
       inFlightRef.current = false;
       setLoading(false);
+    }
+  };
+
+  const saveCustomExercise = async () => {
+    const name = customName.trim();
+    if (!name || customLoading) return;
+    setCustomLoading(true);
+    setError("");
+    try {
+      const created = await apiFetch<{ id: string; name: string }>("/api/exercises", {
+        method: "POST",
+        body: JSON.stringify({ name, category: "strength", equipment: "その他" }),
+      });
+      onReplace(created);
+    } catch (e) {
+      console.error(e);
+      setError(apiErrorMessage(e, "種目の追加に失敗しました。"));
+    } finally {
+      setCustomLoading(false);
     }
   };
 
@@ -136,11 +146,11 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
                 placeholder="好きな種目名を入力"
               />
               <button 
-                onClick={() => customName && onReplace(customName)}
-                disabled={!customName}
+                onClick={saveCustomExercise}
+                disabled={!customName.trim() || customLoading}
                 className="px-6 bg-white/10 text-white font-bold rounded-xl hover:bg-white/20 transition-colors disabled:opacity-30"
               >
-                決定
+                {customLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "決定"}
               </button>
             </div>
           </div>
@@ -176,11 +186,11 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
                 placeholder="リストにない種目を手動で入力"
               />
               <button 
-                onClick={() => customName && onReplace({ id: `custom_${Date.now()}`, name: customName })}
-                disabled={!customName}
+                onClick={saveCustomExercise}
+                disabled={!customName.trim() || customLoading}
                 className="px-6 bg-white/10 text-white font-bold rounded-xl hover:bg-white/20 transition-colors disabled:opacity-30"
               >
-                決定
+                {customLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "決定"}
               </button>
             </div>
           </div>

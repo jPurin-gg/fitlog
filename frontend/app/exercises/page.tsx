@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { Search, Filter, Dumbbell, Activity, Shield, Plus, Loader2 } from 'lucide-react'
+import { apiErrorMessage, apiFetch } from '@/lib/api'
 
 // 今回のマスターデータ（tmpkin_jp.jsonベース）の構造
 interface Exercise {
@@ -66,7 +67,6 @@ function displayExerciseLabel(value?: string) {
 }
 
 export default function ExercisesPage() {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
   const [exercises, setExercises] = useState<Exercise[]>([])
   const [muscle, setMuscle] = useState('すべて')
   const [difficulty, setDifficulty] = useState('すべて')
@@ -106,11 +106,8 @@ export default function ExercisesPage() {
         if (searchQuery.trim()) params.set('name', searchQuery.trim())
         if (selectedEquipments.length > 0) params.set('equipment', selectedEquipments.join(','))
         const qs = params.toString()
-        const res = await fetch(`${apiUrl}/api/exercises${qs ? '?' + qs : ''}`)
-        if (res.ok) {
-          const data = await res.json()
-          setExercises(data || [])
-        }
+        const data = await apiFetch<Exercise[]>(`/api/exercises${qs ? '?' + qs : ''}`)
+        setExercises(data || [])
       } catch (e) {
         console.error("Failed to fetch exercises", e)
       }
@@ -119,7 +116,7 @@ export default function ExercisesPage() {
     // 入力中に毎回叩かないよう 300ms debounce
     const timer = setTimeout(fetchExercises, 300)
     return () => clearTimeout(timer)
-  }, [apiUrl, muscle, difficulty, searchQuery, selectedEquipments, reloadToken])
+  }, [muscle, difficulty, searchQuery, selectedEquipments, reloadToken])
 
   // モーダルが開いている間は背景のスクロールを無効化する（UX改善）
   useEffect(() => {
@@ -167,9 +164,8 @@ export default function ExercisesPage() {
         .split('\n')
         .map(v => v.trim())
         .filter(Boolean)
-      const res = await fetch(`${apiUrl}/api/exercises/custom`, {
+      const created = await apiFetch<Exercise>('/api/exercises', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: newExercise.name.trim(),
           category: newExercise.category,
@@ -180,18 +176,13 @@ export default function ExercisesPage() {
           instructions,
         })
       })
-      if (!res.ok) {
-        setAddError(await res.text() || '種目の追加に失敗しました。')
-        return
-      }
-      const created = await res.json()
       setExercises(prev => [created, ...prev])
       setSelectedExercise(created)
       setReloadToken(prev => prev + 1)
       closeAddModal()
     } catch (e) {
       console.error(e)
-      setAddError('通信エラーが発生しました。')
+      setAddError(apiErrorMessage(e, '通信エラーが発生しました。'))
     } finally {
       setIsAdding(false)
     }

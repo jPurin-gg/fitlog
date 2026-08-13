@@ -2,6 +2,7 @@
 
 import React from "react";
 import { Loader2, Lock, LogOut, Sparkles } from "lucide-react";
+import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
 
 export interface AuthUser {
   id: number;
@@ -10,11 +11,10 @@ export interface AuthUser {
 
 interface AuthContextValue {
   user: AuthUser;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
-const STORAGE_KEY = "fitlog_user";
 
 export function useAuth() {
   const value = React.useContext(AuthContext);
@@ -29,23 +29,36 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = React.useState(false);
 
   React.useEffect(() => {
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed?.id && parsed?.nickname) {
-          setUser({ id: parsed.id, nickname: parsed.nickname });
+    let active = true;
+    apiFetch<AuthUser>("/api/auth/me")
+      .then(currentUser => {
+        if (active) setUser(currentUser);
+      })
+      .catch(error => {
+        if (!(error instanceof ApiError && error.status === 401)) {
+          console.error("Failed to restore session", error);
         }
-      } catch {
-        window.localStorage.removeItem(STORAGE_KEY);
-      }
-    }
-    setReady(true);
+      })
+      .finally(() => {
+        if (active) setReady(true);
+      });
+
+    const resetSession = () => setUser(null);
+    window.addEventListener("fitlog:unauthorized", resetSession);
+    return () => {
+      active = false;
+      window.removeEventListener("fitlog:unauthorized", resetSession);
+    };
   }, []);
 
-  const logout = React.useCallback(() => {
-    window.localStorage.removeItem(STORAGE_KEY);
-    setUser(null);
+  const logout = React.useCallback(async () => {
+    try {
+      await apiFetch<void>("/api/auth/session", { method: "DELETE" });
+    } catch (error) {
+      console.error("Failed to invalidate session", error);
+    } finally {
+      setUser(null);
+    }
   }, []);
 
   if (!ready) {
@@ -72,29 +85,20 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
   const [password, setPassword] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
-
   const login = async (event: React.FormEvent) => {
     event.preventDefault();
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`${apiUrl}/api/auth/login`, {
+      const data = await apiFetch<AuthUser & { created: boolean }>("/api/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nickname, password }),
       });
-      if (!res.ok) {
-        setError(await res.text() || "ログインに失敗しました。");
-        return;
-      }
-      const data = await res.json();
-      const nextUser = { id: data.user_id, nickname: data.nickname };
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
+      const nextUser = { id: data.id, nickname: data.nickname };
       onLogin(nextUser);
     } catch (e) {
       console.error(e);
-      setError("バックエンドに接続できません。");
+      setError(apiErrorMessage(e, "バックエンドに接続できません。"));
     } finally {
       setLoading(false);
     }
@@ -161,7 +165,7 @@ export function LogoutButton() {
   const { logout } = useAuth();
   return (
     <button
-      onClick={logout}
+      onClick={() => void logout()}
       className="flex-none p-3 glass rounded-2xl hover:bg-white/10 transition-colors"
       aria-label="ログアウト"
     >
