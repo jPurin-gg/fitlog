@@ -41,6 +41,8 @@ Next.js、Go、PostgreSQLで構成され、開発環境はDocker Composeで起�
 .
 ├── backend/
 │   ├── main.go                         # 設定、DB、HTTPサーバーの起動
+│   ├── seed.go                         # 種目seedデータの埋め込み
+│   ├── tmpkin_jp.json                  # 組み込み種目カタログ
 │   ├── internal/
 │   │   ├── app/                        # 依存の組み立てとルーティング
 │   │   ├── auth/                       # 認証と署名Cookie
@@ -58,7 +60,7 @@ Next.js、Go、PostgreSQLで構成され、開発環境はDocker Composeで起�
 │   ├── app/                            # Next.js App Routerの画面
 │   ├── components/                     # 共通UI
 │   └── lib/                            # APIクライアントと共通処理
-├── docker/                             # Dockerfile、env例、DB初期化
+├── docker/                             # Dockerfileと環境変数の例
 ├── compose.yaml                        # 開発環境
 ├── compose.prod.yml                    # 本番向け構成
 └── docs.md                             # API・バックエンド技術仕様
@@ -161,9 +163,11 @@ docker compose stop
 2. アドバイザリロックを取得する
 3. 未適用のマイグレーションをファイル単位のトランザクションで適用する
 4. 適用したファイル名を `schema_migrations` に記録する
-5. 種目マスターデータを投入・更新する
+5. 種目テーブルが空の場合、組み込みの種目カタログを投入する
 
-`docker/db/init.sql` はアプリケーションテーブルを作成しません。新規DBと既存DBのどちらも、バックエンド起動時の同じマイグレーション経路で更新されます。
+マイグレーションとseedはバックエンドが管理します。DockerのPostgreSQLコンテナはデータベースを起動・永続化するだけで、独自の初期化SQLは実行しません。新規DBと既存DBのどちらも、バックエンド起動時の同じマイグレーション経路で更新されます。
+
+種目カタログはGoバイナリに埋め込まれているため、実行環境でseedファイルのパスを設定する必要はありません。既存の種目が1件以上ある場合、seed処理は既存データを変更せずスキップします。
 
 ## 検証
 

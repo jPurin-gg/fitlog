@@ -11,7 +11,6 @@ FROM gcr.io/distroless/static-debian12
 WORKDIR /app
 COPY --from=builder /out/app /app/app
 COPY --from=builder /src/prompts /app/prompts
-COPY --from=builder /src/tmpkin_jp.json /app/tmpkin_jp.json
 EXPOSE 8080
 USER nonroot:nonroot
 ENTRYPOINT ["/app/app"]

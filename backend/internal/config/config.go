@@ -21,7 +21,6 @@ type Config struct {
 	SessionCookieSecure bool
 	SessionTTL          time.Duration
 	PromptDir           string
-	SeedFilePath        string
 }
 
 type DBConfig struct {
@@ -70,7 +69,6 @@ func Load() (Config, error) {
 		SessionCookieSecure: envBool("SESSION_COOKIE_SECURE", false),
 		SessionTTL:          time.Duration(envInt("SESSION_TTL_HOURS", 24*30)) * time.Hour,
 		PromptDir:           envString("PROMPT_DIR", "prompts"),
-		SeedFilePath:        envString("SEED_FILE_PATH", "tmpkin_jp.json"),
 		DB: DBConfig{
 			Host:     envString("DB_HOST", "db"),
 			Port:     envString("DB_PORT", "5432"),

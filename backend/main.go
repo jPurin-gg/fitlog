@@ -39,7 +39,7 @@ func run(logger *slog.Logger) error {
 	if err := database.Migrate(startupContext, db); err != nil {
 		return err
 	}
-	if err := exercisepostgres.Seed(startupContext, db, cfg.SeedFilePath, logger); err != nil {
+	if err := exercisepostgres.Seed(startupContext, db, exerciseSeed, logger); err != nil {
 		return err
 	}
 

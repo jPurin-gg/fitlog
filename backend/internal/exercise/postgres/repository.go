@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"strings"
 
 	"github.com/lib/pq"
 
@@ -202,7 +200,7 @@ func scanExercises(rows scanner) ([]exercise.Exercise, error) {
 	return result, rows.Err()
 }
 
-func Seed(ctx context.Context, db *sql.DB, path string, logger *slog.Logger) error {
+func Seed(ctx context.Context, db *sql.DB, fileData []byte, logger *slog.Logger) error {
 	var count int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM exercises`).Scan(&count); err != nil {
 		return err
@@ -210,10 +208,6 @@ func Seed(ctx context.Context, db *sql.DB, path string, logger *slog.Logger) err
 	if count > 0 {
 		logger.Info("exercise seed skipped", "reason", "already populated", "count", count)
 		return nil
-	}
-	fileData, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read exercise seed: %w", err)
 	}
 	var exercises []exercise.Exercise
 	if err := json.Unmarshal(fileData, &exercises); err != nil {
@@ -244,6 +238,6 @@ func Seed(ctx context.Context, db *sql.DB, path string, logger *slog.Logger) err
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	logger.Info("exercise seed completed", "count", len(exercises), "path", strings.TrimSpace(path))
+	logger.Info("exercise seed completed", "count", len(exercises))
 	return nil
 }
