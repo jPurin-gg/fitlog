@@ -1,64 +1,173 @@
 # Fitlog
 
-筋トレの月間計画、当日のセット記録、AIコーチングをまとめるローカルファーストなWebアプリです。Next.js、Go、PostgreSQLをDocker Composeで起動します。
+Fitlogは、筋力トレーニングの計画と記録を管理するWebアプリです。月間プランの作成、当日のセット記録、カレンダーでの振り返りに加え、OpenAI互換APIを使ったメニュー作成やコーチングを利用できます。
 
-## ローカル起動
+Next.js、Go、PostgreSQLで構成され、開発環境はDocker Composeで起動します。
+
+## 公開環境
+
+<https://fitlog.purin.blog>
+
+このインスタンスは、自宅サーバー上にセルフホストして運用しています。
+
+## 主な機能
+
+- ニックネームとパスワードによるログイン・ユーザー登録
+- トレーニング環境や使用器具などのコーチ設定
+- AIによる月間トレーニングプランの生成
+- 月間プランを基にした当日のメニュー作成
+- 重量、回数、感触、自己ベストのセット記録
+- 保存したセットを基にした次セットのAI提案
+- ワークアウト終了時の集計とAIコメント
+- 種目の検索、追加、お気に入り、最近使用した種目の表示
+- AIによる代替種目の提案
+- カレンダーからの過去記録・未来予定の確認と編集
+
+## 技術構成
+
+| 領域 | 使用技術 |
+|---|---|
+| フロントエンド | Next.js 15、React 19、TypeScript、Tailwind CSS 4 |
+| バックエンド | Go 1.24、`net/http` |
+| データベース | PostgreSQL 16 |
+| AI | OpenAI互換Chat Completions API |
+| 開発環境 | Docker Compose |
+
+ブラウザは通常、フロントエンドと同一オリジンの `/api` を呼びます。Next.jsがそのリクエストをDockerネットワーク内のGoバックエンドへ中継します。
+
+## ディレクトリ構成
+
+```text
+.
+├── backend/
+│   ├── main.go                         # 設定、DB、HTTPサーバーの起動
+│   ├── internal/
+│   │   ├── app/                        # 依存の組み立てとルーティング
+│   │   ├── auth/                       # 認証と署名Cookie
+│   │   ├── exercise/                   # 種目、お気に入り、種目設定
+│   │   ├── planning/                   # 月間・日次プラン
+│   │   ├── workout/                    # セット記録、提案、集計
+│   │   ├── profile/                    # AIコーチ設定
+│   │   ├── reporting/                  # ダッシュボードとカレンダー
+│   │   ├── ai/openaicompat/            # OpenAI互換APIアダプター
+│   │   ├── database/                   # DB接続とマイグレーション
+│   │   ├── httpx/                      # JSON、エラー、ミドルウェア
+│   │   └── prompt/                     # プロンプトテンプレートの描画
+│   └── prompts/                        # AIプロンプト
+├── frontend/
+│   ├── app/                            # Next.js App Routerの画面
+│   ├── components/                     # 共通UI
+│   └── lib/                            # APIクライアントと共通処理
+├── docker/                             # Dockerfile、env例、DB初期化
+├── compose.yaml                        # 開発環境
+├── compose.prod.yml                    # 本番向け構成
+└── docs.md                             # API・バックエンド技術仕様
+```
+
+バックエンドは機能単位のモジュラーモノリスです。各機能の中心パッケージがユースケースとインターフェースを定義し、`httpapi` と `postgres` がそれぞれHTTP・PostgreSQLアダプターとして中心パッケージに依存します。具体実装の組み立ては主に `internal/app` が担当します。
+
+## ローカル開発
+
+### 必要なもの
+
+- Docker
+- Docker Compose
+- AI機能を使う場合は、OpenAI互換APIのAPIキー
+
+### 1. 環境変数ファイルを作成する
 
 ```sh
 cp docker/env/backend.env.example docker/env/backend.env
 cp docker/env/frontend.env.example docker/env/frontend.env
 cp docker/env/db.env.example docker/env/db.env
+```
+
+作成したファイルはGit管理対象外です。
+
+### 2. DB設定をそろえる
+
+`docker/env/backend.env` と `docker/env/db.env` に、同じデータベース接続情報を設定します。
+
+| `backend.env` | `db.env` |
+|---|---|
+| `DB_USER` | `POSTGRES_USER` |
+| `DB_PASSWORD` | `POSTGRES_PASSWORD` |
+| `DB_NAME` | `POSTGRES_DB` |
+
+`DB_HOST=db` と `DB_PORT=5432` は、Docker Composeで起動する場合は変更不要です。
+
+### 3. バックエンド設定を確認する
+
+`docker/env/backend.env` で、少なくとも次を確認してください。
+
+- `SESSION_SECRET`: 32 bytes以上のランダムな値に変更する
+- `OPENAI_API_KEY`: AI機能を利用する場合に設定する
+- `OPENAI_API_URL`: 利用するOpenAI互換APIのChat Completionsエンドポイント
+- `OPENAI_MODEL`: 利用するモデル名
+
+`SESSION_SECRET` は、例えば次のコマンドで生成できます。
+
+```sh
+openssl rand -base64 48
+```
+
+APIキーが未設定でもサーバーは起動しますが、月間プラン生成、セット提案、代替種目提案などのAI機能はエラーになります。
+
+### 4. 起動する
+
+```sh
 docker compose up -d --build
 ```
 
-起動前に `docker/env/backend.env` の次の値を設定してください。
+起動後のURL:
 
-- `SESSION_SECRET`: 32 bytes以上のランダム値。例: `openssl rand -base64 48`
-- `OPENAI_API_KEY`: 使用するOpenAI互換AIプロバイダーのAPIキー
-- DB設定: `docker/env/db.env` と同じユーザー、パスワード、DB名
+- Webアプリ: <http://localhost:3000>
+- バックエンドAPI: <http://localhost:8080>
+- PostgreSQL: `localhost:5432`
 
-ブラウザは <http://localhost:3000>、バックエンドAPIは <http://localhost:8080> です。通常、ブラウザは同一オリジンの `/api` を呼び、Next.jsがバックエンドへ中継します。
+ログを確認する場合:
 
-## 構成
-
-バックエンドはモジュラーモノリスです。機能ごとに `auth`、`exercise`、`planning`、`workout`、`profile`、`reporting` を分け、各機能内でユースケースとHTTP/PostgreSQLアダプターを分離しています。
-
-```text
-backend/
-  main.go                    # composition root / server lifecycle
-  internal/
-    app/                     # route wiring
-    auth/                    # signed-cookie authentication
-    exercise/                # exercise catalog, favorites, settings
-    planning/                # monthly and daily plans
-    workout/                 # set records, recommendations, summaries
-    profile/                 # AI coaching preferences
-    reporting/               # dashboard and calendar read models
-    ai/openaicompat/         # single OpenAI-compatible adapter
-    database/                # connection and embedded migrations
-    httpx/                   # JSON, Problem Details, middleware
-    prompt/                  # prompt template renderer
+```sh
+docker compose logs -f frontend backend
 ```
 
-依存方向は原則として `HTTP/DB adapter -> feature service -> feature interface` です。`main.go` と `internal/app` だけが具体実装を組み立てます。
+停止する場合:
 
-## APIと認証
+```sh
+docker compose stop
+```
 
-- ログイン成功時にHMAC署名済みの `HttpOnly` Cookieを発行します。
-- 保護APIのユーザーはCookieから確定し、リクエストの `user_id` は受け付けません。
-- 成功時はリソースJSONを直接返します。
-- 失敗時は `application/problem+json` を返します。
-- セット保存とAI提案は別APIです。セット保存には `Idempotency-Key` が必須です。
+`db_data` ボリュームにデータが保存されます。ボリュームを削除する操作は、保存済みデータの消失につながります。
 
-API一覧は [docs.md](./docs.md) を参照してください。
+## 認証とAPI
+
+- 初回ログイン時、未登録のニックネームは新しいユーザーとして登録されます。
+- ログイン成功時にHMAC-SHA256署名済みの `HttpOnly` Cookieを発行します。
+- 保護APIのユーザーはCookieから確定し、リクエストで `user_id` は受け付けません。
+- APIの成功レスポンスはリソースJSONを直接返します。
+- エラーは `application/problem+json` 形式で返します。
+- セット保存には `Idempotency-Key` ヘッダーが必要です。
+- セット保存とAI提案は別APIのため、AI提案に失敗しても保存済みセットは失われません。
+
+エンドポイントやリクエスト形式の詳細は [docs.md](./docs.md) を参照してください。
 
 ## DBマイグレーション
 
-スキーマの正本は `backend/internal/database/migrations/*.sql` です。バックエンド起動時に未適用分だけトランザクション内で適用し、`schema_migrations` に記録します。複数プロセスの同時起動はPostgreSQLのアドバイザリロックで直列化します。
+スキーマの正本は `backend/internal/database/migrations/*.sql` です。
 
-`docker/db/init.sql` はアプリケーションテーブルを作りません。既存の永続ボリュームも、バックエンド起動時に同じマイグレーション経路で更新されます。
+バックエンドの起動時に次の処理を行います。
+
+1. PostgreSQLへ接続する
+2. アドバイザリロックを取得する
+3. 未適用のマイグレーションをファイル単位のトランザクションで適用する
+4. 適用したファイル名を `schema_migrations` に記録する
+5. 種目マスターデータを投入・更新する
+
+`docker/db/init.sql` はアプリケーションテーブルを作成しません。新規DBと既存DBのどちらも、バックエンド起動時の同じマイグレーション経路で更新されます。
 
 ## 検証
+
+コンテナの起動後、次のコマンドでバックエンドとフロントエンドを検証できます。
 
 ```sh
 docker compose exec -T backend go test ./...
@@ -67,26 +176,36 @@ docker compose exec -T backend go vet ./...
 docker compose exec -T frontend npm run lint
 docker compose exec -T frontend npx tsc --noEmit
 docker compose exec -T frontend npm run build
-docker compose exec -T frontend npm audit
+docker compose exec -T frontend npm audit --omit=dev
 ```
 
-## 本番デプロイ
+## 本番環境
+
+本番用ファイルのひな形を作成します。
 
 ```sh
 cp .env.example .env.prod
 cp docker/env/backend.env.example docker/env/backend.prod.env
 cp docker/env/frontend.env.example docker/env/frontend.prod.env
 cp docker/env/db.env.example docker/env/db.prod.env
+```
+
+起動前に、コピーしたすべてのファイルを本番環境に合わせて編集してください。特に次の項目は、そのまま使用しないでください。
+
+- `.env.prod` の `NEXT_PUBLIC_API_URL`
+- `backend.prod.env` の `SESSION_SECRET`
+- `backend.prod.env` と `db.prod.env` のDBユーザー・パスワード・DB名
+- `backend.prod.env` の `OPENAI_API_KEY`、`OPENAI_API_URL`、`OPENAI_MODEL`
+- `backend.prod.env` の `FRONTEND_URL`
+
+同一オリジンでNext.jsからバックエンドへ中継する場合、`NEXT_PUBLIC_API_URL` は空欄にします。APIを別オリジンで公開する場合は、ブラウザから到達可能なAPI URLを設定してください。
+
+HTTPSで運用する場合は、`SESSION_COOKIE_SECURE=true` に設定します。
+
+設定後に起動します。
+
+```sh
 docker compose -f compose.prod.yml --env-file .env.prod up -d --build
 ```
 
-本番では少なくとも次を変更してください。
-
-- `SESSION_SECRET`: 開発環境と別のランダム値
-- `SESSION_COOKIE_SECURE=true`: HTTPS運用時に必須
-- `FRONTEND_URL`: 実際のフロントエンドOrigin
-- `DB_PASSWORD`: バックエンドとPostgreSQLで同じ強い値
-- `OPENAI_API_KEY` / `OPENAI_API_URL` / `OPENAI_MODEL`: 採用するプロバイダー設定
-- `NEXT_PUBLIC_API_URL`: 別API Originを公開する場合のみ指定。同一Origin中継なら空欄
-
-本番Composeはデフォルトでフロントエンドとバックエンドを `127.0.0.1` にだけ公開します。外部公開はリバースプロキシまたはトンネルを前段に置く想定です。
+本番Composeは、デフォルトではフロントエンドとバックエンドを `127.0.0.1` にのみ公開し、PostgreSQLはホストへ公開しません。外部公開にはリバースプロキシやトンネルを前段に配置してください。
