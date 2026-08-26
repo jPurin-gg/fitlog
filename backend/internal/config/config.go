@@ -36,15 +36,16 @@ func (c DBConfig) DSN() string {
 }
 
 type AIConfig struct {
-	APIKey       string
-	URL          string
-	Model        string
-	RPM          int
-	MaxWait      time.Duration
-	MaxAttempts  int
-	Timeout      time.Duration
-	RetryBase    time.Duration
-	RetryMaximum time.Duration
+	APIKey          string
+	URL             string
+	Model           string
+	RPM             int
+	MaxWait         time.Duration
+	MaxAttempts     int
+	Timeout         time.Duration
+	OptionalTimeout time.Duration
+	RetryBase       time.Duration
+	RetryMaximum    time.Duration
 }
 
 func Load() (Config, error) {
@@ -77,15 +78,16 @@ func Load() (Config, error) {
 			Name:     os.Getenv("DB_NAME"),
 		},
 		AI: AIConfig{
-			APIKey:       os.Getenv("OPENAI_API_KEY"),
-			URL:          envString("OPENAI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"),
-			Model:        envString("OPENAI_MODEL", "gemini-2.5-flash"),
-			RPM:          envInt("AI_RATE_LIMIT_RPM", 5),
-			MaxWait:      time.Duration(envInt("AI_RATE_LIMIT_MAX_WAIT_MS", 15000)) * time.Millisecond,
-			MaxAttempts:  clamp(envInt("AI_MAX_ATTEMPTS", 3), 1, 3),
-			Timeout:      time.Duration(envInt("AI_HTTP_TIMEOUT_SECONDS", 30)) * time.Second,
-			RetryBase:    time.Duration(envInt("AI_RETRY_BASE_MS", 500)) * time.Millisecond,
-			RetryMaximum: time.Duration(envInt("AI_RETRY_MAX_MS", 5000)) * time.Millisecond,
+			APIKey:          os.Getenv("OPENAI_API_KEY"),
+			URL:             envString("OPENAI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"),
+			Model:           envString("OPENAI_MODEL", "gemini-2.5-flash"),
+			RPM:             envInt("AI_RATE_LIMIT_RPM", 5),
+			MaxWait:         time.Duration(envInt("AI_RATE_LIMIT_MAX_WAIT_MS", 15000)) * time.Millisecond,
+			MaxAttempts:     clamp(envInt("AI_MAX_ATTEMPTS", 3), 1, 3),
+			Timeout:         time.Duration(envInt("AI_HTTP_TIMEOUT_SECONDS", 30)) * time.Second,
+			OptionalTimeout: time.Duration(envInt("AI_OPTIONAL_TIMEOUT_SECONDS", 15)) * time.Second,
+			RetryBase:       time.Duration(envInt("AI_RETRY_BASE_MS", 500)) * time.Millisecond,
+			RetryMaximum:    time.Duration(envInt("AI_RETRY_MAX_MS", 5000)) * time.Millisecond,
 		},
 	}
 

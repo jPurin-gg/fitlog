@@ -10,15 +10,11 @@ import (
 	"time"
 
 	"github.com/jPurin-gg/myfitlog-backend/internal/apperr"
+	"github.com/jPurin-gg/myfitlog-backend/internal/requestctx"
 )
 
-type contextKey string
-
-const requestIDKey contextKey = "request_id"
-
 func RequestID(ctx context.Context) string {
-	value, _ := ctx.Value(requestIDKey).(string)
-	return value
+	return requestctx.RequestID(ctx)
 }
 
 func WithRequestID(next http.Handler) http.Handler {
@@ -27,7 +23,7 @@ func WithRequestID(next http.Handler) http.Handler {
 		_, _ = rand.Read(bytes)
 		requestID := hex.EncodeToString(bytes)
 		w.Header().Set("X-Request-ID", requestID)
-		ctx := context.WithValue(r.Context(), requestIDKey, requestID)
+		ctx := requestctx.WithRequestID(r.Context(), requestID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -35,9 +31,73 @@ func WithRequestID(next http.Handler) http.Handler {
 func LogRequests(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
-		next.ServeHTTP(w, r)
-		logger.Info("http request", "request_id", RequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "duration_ms", time.Since(started).Milliseconds())
+		writer := &accessLogWriter{ResponseWriter: w}
+		defer func() {
+			status := writer.status
+			if recovered := recover(); recovered != nil {
+				status = http.StatusInternalServerError
+				logRequest(logger, r, status, writer.bytes, started)
+				panic(recovered)
+			}
+			if status == 0 {
+				status = http.StatusOK
+			}
+			logRequest(logger, r, status, writer.bytes, started)
+		}()
+		next.ServeHTTP(writer, r)
 	})
+}
+
+type accessLogWriter struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (w *accessLogWriter) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *accessLogWriter) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	written, err := w.ResponseWriter.Write(body)
+	w.bytes += written
+	return written, err
+}
+
+// Unwrap lets http.ResponseController reach optional interfaces implemented by
+// the original writer without making this wrapper claim unsupported features.
+func (w *accessLogWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+func logRequest(logger *slog.Logger, r *http.Request, status, responseBytes int, started time.Time) {
+	logger.Info(
+		"http request",
+		"request_id", RequestID(r.Context()),
+		"method", r.Method,
+		"route", routePattern(r.Pattern),
+		"status", status,
+		"response_bytes", responseBytes,
+		"duration_ms", time.Since(started).Milliseconds(),
+	)
+}
+
+func routePattern(pattern string) string {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return "unmatched"
+	}
+	if _, route, found := strings.Cut(pattern, " "); found {
+		return route
+	}
+	return pattern
 }
 
 func CORS(frontendURL string, next http.Handler) http.Handler {

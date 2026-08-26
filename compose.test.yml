@@ -1,0 +1,33 @@
+name: fitlog-test
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: fitlog_test
+      POSTGRES_PASSWORD: fitlog_test
+      POSTGRES_DB: fitlog_test
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fitlog_test -d fitlog_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  backend-test:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    environment:
+      FITLOG_TEST_DATABASE_DSN: host=db port=5432 user=fitlog_test password=fitlog_test dbname=fitlog_test sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+    command: go test -race -tags=integration -count=1 ./internal/workout/postgres

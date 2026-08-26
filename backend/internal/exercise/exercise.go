@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jPurin-gg/myfitlog-backend/internal/ai"
 	"github.com/jPurin-gg/myfitlog-backend/internal/apperr"
@@ -94,10 +96,16 @@ type Service struct {
 	repository Repository
 	aiClient   ai.Client
 	prompts    PromptRenderer
+	logger     *slog.Logger
 }
 
 func NewService(repository Repository, aiClient ai.Client, prompts PromptRenderer) *Service {
 	return &Service{repository: repository, aiClient: aiClient, prompts: prompts}
+}
+
+func (s *Service) WithLogger(logger *slog.Logger) *Service {
+	s.logger = logger
+	return s
 }
 
 func (s *Service) Search(ctx context.Context, filters Filters) ([]Exercise, error) {
@@ -216,17 +224,22 @@ func (s *Service) Alternatives(ctx context.Context, exerciseID, reason string) (
 	if err != nil {
 		return AlternativeResponse{}, apperr.Internal(err)
 	}
+	aiStarted := time.Now()
 	result, err := s.aiClient.Complete(ctx, ai.Request{Task: ai.TaskAlternative, SystemPrompt: systemPrompt, UserPrompt: userPrompt, JSONMode: true})
 	if err != nil {
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskAlternative, "provider_error", aiStarted)
 		return AlternativeResponse{}, ai.ToAppError(err)
 	}
 	response := AlternativeResponse{Alternatives: []Alternative{}}
 	if err := json.Unmarshal([]byte(prompt.JSONText(result)), &response); err != nil || len(response.Alternatives) == 0 {
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskAlternative, "invalid_output", aiStarted)
 		return AlternativeResponse{}, apperr.Wrap(err, 502, apperr.CodeAIUnavailable, "AIの返答を解析できません。")
 	}
 	if err := validateAlternatives(&response, allowed); err != nil {
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskAlternative, "invalid_output", aiStarted)
 		return AlternativeResponse{}, err
 	}
+	ai.LogFeatureOutcome(ctx, s.logger, ai.TaskAlternative, "applied", aiStarted)
 	return response, nil
 }
 

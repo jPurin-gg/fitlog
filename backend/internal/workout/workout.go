@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -106,6 +107,11 @@ type FinishResult struct {
 	Summary   Summary `json:"summary"`
 }
 
+type SummaryCommentResult struct {
+	Comment  string `json:"comment"`
+	Replayed bool   `json:"replayed"`
+}
+
 type CalendarSet struct {
 	ID           int     `json:"id,omitempty"`
 	ExerciseID   string  `json:"exercise_id"`
@@ -133,7 +139,7 @@ type Repository interface {
 	RecommendationContext(ctx context.Context, userID, workoutID, setID int) (RecommendationContext, error)
 	Finish(ctx context.Context, userID, workoutID int) (Detail, error)
 	Detail(ctx context.Context, userID, workoutID int) (Detail, error)
-	SaveSummaryComment(ctx context.Context, userID, workoutID int, comment string) error
+	SaveSummaryComment(ctx context.Context, userID, workoutID int, comment string) (string, bool, error)
 	CalendarWorkout(ctx context.Context, userID int, date time.Time) (CalendarWorkout, error)
 	SaveCalendarWorkout(ctx context.Context, userID int, date time.Time, input CalendarWorkoutInput) (CalendarWorkout, error)
 }
@@ -147,10 +153,17 @@ type Service struct {
 	aiClient   ai.Client
 	prompts    PromptRenderer
 	clock      clock.Clock
+	aiTimeout  time.Duration
+	logger     *slog.Logger
 }
 
-func NewService(repository Repository, aiClient ai.Client, prompts PromptRenderer, appClock clock.Clock) *Service {
-	return &Service{repository: repository, aiClient: aiClient, prompts: prompts, clock: appClock}
+func NewService(repository Repository, aiClient ai.Client, prompts PromptRenderer, appClock clock.Clock, aiTimeout time.Duration) *Service {
+	return &Service{repository: repository, aiClient: aiClient, prompts: prompts, clock: appClock, aiTimeout: aiTimeout}
+}
+
+func (s *Service) WithLogger(logger *slog.Logger) *Service {
+	s.logger = logger
+	return s
 }
 
 func (s *Service) RecordSet(ctx context.Context, userID, workoutID int, key string, input SetInput) (Set, bool, error) {
@@ -208,18 +221,25 @@ func (s *Service) Recommend(ctx context.Context, userID, workoutID, setID int) (
 	if err != nil {
 		return Recommendation{}, apperr.Internal(err)
 	}
-	result, err := s.aiClient.Complete(ctx, ai.Request{Task: ai.TaskRecommendation, SystemPrompt: systemPrompt, UserPrompt: userPrompt, JSONMode: true})
+	aiContext, cancel := s.optionalAIContext(ctx)
+	defer cancel()
+	aiStarted := time.Now()
+	result, err := s.aiClient.Complete(aiContext, ai.Request{Task: ai.TaskRecommendation, SystemPrompt: systemPrompt, UserPrompt: userPrompt, JSONMode: true})
 	if err != nil {
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskRecommendation, "unavailable", aiStarted)
 		return Recommendation{}, ai.ToAppError(err)
 	}
 	var response Recommendation
 	if err := json.Unmarshal([]byte(prompt.JSONText(result)), &response); err != nil {
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskRecommendation, "invalid_output", aiStarted)
 		return Recommendation{}, apperr.Wrap(err, 502, apperr.CodeAIUnavailable, "AIの提案を解析できません。")
 	}
 	if err := validateRecommendation(&response); err != nil {
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskRecommendation, "invalid_output", aiStarted)
 		return Recommendation{}, err
 	}
 	response.MaxWeight = data.MaxWeight
+	ai.LogFeatureOutcome(ctx, s.logger, ai.TaskRecommendation, "applied", aiStarted)
 	return response, nil
 }
 
@@ -247,7 +267,6 @@ func (s *Service) Finish(ctx context.Context, userID, workoutID int) (FinishResu
 	if err != nil {
 		return FinishResult{}, apperr.Internal(err)
 	}
-	detail.Summary = s.ensureSummaryComment(ctx, userID, workoutID, detail.Summary)
 	return FinishResult{WorkoutID: detail.ID, StartedAt: detail.StartedAt, EndedAt: detail.EndedAt, Status: "completed", Summary: detail.Summary}, nil
 }
 
@@ -259,11 +278,108 @@ func (s *Service) Detail(ctx context.Context, userID, workoutID int) (Detail, er
 	if err != nil {
 		return Detail{}, apperr.Internal(err)
 	}
-	if detail.Status == "completed" {
-		detail.Summary = s.ensureSummaryComment(ctx, userID, workoutID, detail.Summary)
-	}
 	detail.Title = displayTitle(detail.Title)
 	return detail, nil
+}
+
+func (s *Service) SummaryComment(ctx context.Context, userID, workoutID int) (SummaryCommentResult, error) {
+	detail, err := s.repository.Detail(ctx, userID, workoutID)
+	if errors.Is(err, ErrNotFound) {
+		return SummaryCommentResult{}, apperr.NotFound("ワークアウトが見つかりません。")
+	}
+	if err != nil {
+		return SummaryCommentResult{}, apperr.Internal(err)
+	}
+	if detail.Status != "completed" {
+		return SummaryCommentResult{}, apperr.Conflict("ワークアウト完了後にAI総評を生成できます。")
+	}
+	if comment := strings.TrimSpace(detail.Summary.AIComment); comment != "" {
+		return SummaryCommentResult{Comment: comment, Replayed: true}, nil
+	}
+
+	encoded, err := json.Marshal(detail.Summary)
+	if err != nil {
+		return SummaryCommentResult{}, apperr.Internal(err)
+	}
+	data, err := s.repository.RecommendationContext(ctx, userID, workoutID, 0)
+	if errors.Is(err, ErrNotFound) {
+		return SummaryCommentResult{}, apperr.NotFound("ワークアウトが見つかりません。")
+	}
+	if err != nil {
+		return SummaryCommentResult{}, apperr.Internal(err)
+	}
+	systemPrompt, userPrompt, err := s.prompts.Pair("workout_summary_system.txt", "workout_summary_user.txt", map[string]any{
+		"SummaryJSON":       string(encoded),
+		"WorkoutSetContext": formatWorkout(data.WorkoutSets),
+	})
+	if err != nil {
+		return SummaryCommentResult{}, apperr.Internal(err)
+	}
+	aiContext, cancel := s.optionalAIContext(ctx)
+	defer cancel()
+	aiStarted := time.Now()
+	result, err := s.aiClient.Complete(aiContext, ai.Request{Task: ai.TaskWorkoutSummary, SystemPrompt: systemPrompt, UserPrompt: userPrompt, JSONMode: true})
+	if err != nil {
+		if existing, found := s.storedSummaryComment(ctx, userID, workoutID); found {
+			ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutSummary, "replayed", aiStarted)
+			return existing, nil
+		}
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutSummary, "unavailable", aiStarted)
+		return SummaryCommentResult{}, ai.ToAppError(err)
+	}
+	var response struct {
+		Comment string `json:"comment"`
+	}
+	if err := json.Unmarshal([]byte(prompt.JSONText(result)), &response); err != nil {
+		if existing, found := s.storedSummaryComment(ctx, userID, workoutID); found {
+			ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutSummary, "replayed", aiStarted)
+			return existing, nil
+		}
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutSummary, "invalid_output", aiStarted)
+		return SummaryCommentResult{}, apperr.Wrap(err, 502, apperr.CodeAIUnavailable, "AI総評を解析できません。")
+	}
+	response.Comment = strings.TrimSpace(response.Comment)
+	if response.Comment == "" {
+		if existing, found := s.storedSummaryComment(ctx, userID, workoutID); found {
+			ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutSummary, "replayed", aiStarted)
+			return existing, nil
+		}
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutSummary, "invalid_output", aiStarted)
+		return SummaryCommentResult{}, apperr.New(502, apperr.CodeAIUnavailable, "AI総評が不完全です。")
+	}
+	comment, replayed, err := s.repository.SaveSummaryComment(ctx, userID, workoutID, response.Comment)
+	if errors.Is(err, ErrNotFound) {
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutSummary, "storage_error", aiStarted)
+		return SummaryCommentResult{}, apperr.NotFound("ワークアウトが見つかりません。")
+	}
+	if errors.Is(err, ErrConflict) {
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutSummary, "storage_error", aiStarted)
+		return SummaryCommentResult{}, apperr.Conflict("ワークアウト完了後にAI総評を生成できます。")
+	}
+	if err != nil {
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutSummary, "storage_error", aiStarted)
+		return SummaryCommentResult{}, apperr.Internal(err)
+	}
+	outcome := "applied"
+	if replayed {
+		outcome = "replayed"
+	}
+	ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutSummary, outcome, aiStarted)
+	return SummaryCommentResult{Comment: comment, Replayed: replayed}, nil
+}
+
+// storedSummaryComment handles a concurrent request that completed while this
+// request was waiting for, or validating, the optional AI response.
+func (s *Service) storedSummaryComment(ctx context.Context, userID, workoutID int) (SummaryCommentResult, bool) {
+	detail, err := s.repository.Detail(ctx, userID, workoutID)
+	if err != nil {
+		return SummaryCommentResult{}, false
+	}
+	comment := strings.TrimSpace(detail.Summary.AIComment)
+	if comment == "" {
+		return SummaryCommentResult{}, false
+	}
+	return SummaryCommentResult{Comment: comment, Replayed: true}, true
 }
 
 func (s *Service) CalendarWorkout(ctx context.Context, userID int, dateText string) (CalendarWorkout, error) {
@@ -314,36 +430,12 @@ func (s *Service) SaveCalendarWorkout(ctx context.Context, userID int, dateText 
 	return result, nil
 }
 
-func (s *Service) ensureSummaryComment(ctx context.Context, userID, workoutID int, summary Summary) Summary {
-	if strings.TrimSpace(summary.AIComment) != "" {
-		return summary
+func (s *Service) optionalAIContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := s.aiTimeout
+	if timeout <= 0 {
+		timeout = 15 * time.Second
 	}
-	encoded, _ := json.Marshal(summary)
-	data, err := s.repository.RecommendationContext(ctx, userID, workoutID, 0)
-	if err != nil {
-		summary.AIComment = "AIコメントを生成できませんでした。"
-		return summary
-	}
-	systemPrompt, userPrompt, err := s.prompts.Pair("workout_summary_system.txt", "workout_summary_user.txt", map[string]any{"SummaryJSON": string(encoded), "WorkoutSetContext": formatWorkout(data.WorkoutSets)})
-	if err != nil {
-		summary.AIComment = "AIコメントを生成できませんでした。"
-		return summary
-	}
-	result, err := s.aiClient.Complete(ctx, ai.Request{Task: ai.TaskWorkoutSummary, SystemPrompt: systemPrompt, UserPrompt: userPrompt, JSONMode: true})
-	if err != nil {
-		summary.AIComment = "AIコメントを生成できませんでした。"
-		return summary
-	}
-	var response struct {
-		Comment string `json:"comment"`
-	}
-	if json.Unmarshal([]byte(prompt.JSONText(result)), &response) != nil || strings.TrimSpace(response.Comment) == "" {
-		summary.AIComment = "AIコメントを生成できませんでした。"
-		return summary
-	}
-	summary.AIComment = strings.TrimSpace(response.Comment)
-	_ = s.repository.SaveSummaryComment(ctx, userID, workoutID, summary.AIComment)
-	return summary
+	return context.WithTimeout(ctx, timeout)
 }
 
 func (s *Service) parseDate(value string) (time.Time, error) {

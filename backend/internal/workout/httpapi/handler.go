@@ -72,6 +72,16 @@ func (h *Handler) Detail(w http.ResponseWriter, r *http.Request) {
 	httpx.Respond(w, r, http.StatusOK, result, err)
 }
 
+func (h *Handler) SummaryComment(w http.ResponseWriter, r *http.Request) {
+	workoutID, err := positivePathID(r, "workoutID")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	result, err := h.service.SummaryComment(r.Context(), authhttp.UserID(r.Context()), workoutID)
+	httpx.Respond(w, r, http.StatusOK, result, err)
+}
+
 func (h *Handler) CalendarWorkout(w http.ResponseWriter, r *http.Request) {
 	result, err := h.service.CalendarWorkout(r.Context(), authhttp.UserID(r.Context()), r.PathValue("date"))
 	httpx.Respond(w, r, http.StatusOK, result, err)

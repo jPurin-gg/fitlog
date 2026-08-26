@@ -19,6 +19,7 @@ import (
 
 	"github.com/jPurin-gg/myfitlog-backend/internal/ai"
 	"github.com/jPurin-gg/myfitlog-backend/internal/config"
+	"github.com/jPurin-gg/myfitlog-backend/internal/requestctx"
 )
 
 type Client struct {
@@ -69,9 +70,18 @@ func New(cfg config.AIConfig, logger *slog.Logger) *Client {
 	return &Client{config: cfg, httpClient: &http.Client{Timeout: cfg.Timeout}, logger: logger}
 }
 
-func (c *Client) Complete(ctx context.Context, request ai.Request) (string, error) {
+func (c *Client) Complete(ctx context.Context, request ai.Request) (completion string, completionErr error) {
+	started := time.Now()
+	requestID := newRequestID()
+	attempts := 0
+	providerStatus := 0
+	providerCode := ""
+	defer func() {
+		c.logCompletion(ctx, request.Task, requestID, attempts, providerStatus, providerCode, started, completionErr)
+	}()
+
 	if strings.TrimSpace(c.config.APIKey) == "" {
-		return "", &ai.Error{RequestID: newRequestID(), Code: "MISSING_API_KEY", Model: c.config.Model, Err: errors.New("OPENAI_API_KEY is not set")}
+		return "", &ai.Error{RequestID: requestID, Code: "MISSING_API_KEY", Model: c.config.Model, Err: errors.New("OPENAI_API_KEY is not set")}
 	}
 	body := requestBody{
 		Model: c.config.Model,
@@ -89,7 +99,6 @@ func (c *Client) Complete(ctx context.Context, request ai.Request) (string, erro
 		return "", err
 	}
 
-	requestID := newRequestID()
 	var lastErr error
 	for attempt := 1; attempt <= c.config.MaxAttempts; attempt++ {
 		if err := c.wait(ctx, requestID); err != nil {
@@ -103,11 +112,12 @@ func (c *Client) Complete(ctx context.Context, request ai.Request) (string, erro
 		httpRequest.Header.Set("Authorization", "Bearer "+c.config.APIKey)
 		httpRequest.Header.Set("X-Request-ID", requestID)
 
-		started := time.Now()
+		attempts++
 		response, err := c.httpClient.Do(httpRequest)
 		if err != nil {
 			aiErr := &ai.Error{RequestID: requestID, Code: "REQUEST_FAILED", Model: c.config.Model, Attempt: attempt, Err: err}
-			c.logFailure(request.Task, aiErr, started)
+			providerStatus = 0
+			providerCode = aiErr.Code
 			lastErr = aiErr
 			if attempt == c.config.MaxAttempts {
 				return "", aiErr
@@ -120,12 +130,14 @@ func (c *Client) Complete(ctx context.Context, request ai.Request) (string, erro
 
 		responseBytes, readErr := io.ReadAll(io.LimitReader(response.Body, 2<<20))
 		response.Body.Close()
+		providerStatus = response.StatusCode
 		if readErr != nil {
+			providerCode = "READ_FAILED"
 			return "", &ai.Error{RequestID: requestID, Status: response.StatusCode, Code: "READ_FAILED", Model: c.config.Model, Attempt: attempt, Err: readErr}
 		}
 		if response.StatusCode != http.StatusOK {
 			aiErr := buildError(requestID, c.config.Model, attempt, response.StatusCode, responseBytes)
-			c.logFailure(request.Task, aiErr, started)
+			providerCode = aiErr.Code
 			lastErr = aiErr
 			if !retryable(response.StatusCode) || attempt == c.config.MaxAttempts {
 				return "", aiErr
@@ -138,12 +150,14 @@ func (c *Client) Complete(ctx context.Context, request ai.Request) (string, erro
 
 		var decoded responseBody
 		if err := json.Unmarshal(responseBytes, &decoded); err != nil {
+			providerCode = "INVALID_RESPONSE"
 			return "", &ai.Error{RequestID: requestID, Status: response.StatusCode, Code: "INVALID_RESPONSE", Model: c.config.Model, Attempt: attempt, Err: err}
 		}
 		if len(decoded.Choices) == 0 {
+			providerCode = "EMPTY_RESPONSE"
 			return "", &ai.Error{RequestID: requestID, Status: response.StatusCode, Code: "EMPTY_RESPONSE", Model: c.config.Model, Attempt: attempt}
 		}
-		c.logger.Info("ai request completed", "ai_request_id", requestID, "task", request.Task, "model", c.config.Model, "attempt", attempt, "duration_ms", time.Since(started).Milliseconds())
+		providerCode = ""
 		return decoded.Choices[0].Message.Content, nil
 	}
 	return "", lastErr
@@ -225,8 +239,64 @@ func buildError(requestID, model string, attempt, status int, body []byte) *ai.E
 	return &ai.Error{RequestID: requestID, Status: status, Code: code, Model: model, Attempt: attempt}
 }
 
-func (c *Client) logFailure(task ai.Task, err *ai.Error, started time.Time) {
-	c.logger.Warn("ai request failed", "ai_request_id", err.RequestID, "task", task, "model", err.Model, "attempt", err.Attempt, "status", err.Status, "code", err.Code, "duration_ms", time.Since(started).Milliseconds())
+func (c *Client) logCompletion(ctx context.Context, task ai.Task, aiRequestID string, attempts, providerStatus int, providerCode string, started time.Time, err error) {
+	if providerCode == "" {
+		var aiErr *ai.Error
+		if errors.As(err, &aiErr) {
+			providerStatus = aiErr.Status
+			providerCode = aiErr.Code
+		}
+	}
+	level := slog.LevelInfo
+	if err != nil {
+		level = slog.LevelWarn
+	}
+	c.logger.Log(
+		ctx,
+		level,
+		"ai request finished",
+		"stage", "provider",
+		"request_id", requestctx.RequestID(ctx),
+		"ai_request_id", aiRequestID,
+		"task", task,
+		"model", c.config.Model,
+		"outcome", aiOutcome(err),
+		"attempts", attempts,
+		"total_duration_ms", time.Since(started).Milliseconds(),
+		"provider_status", providerStatus,
+		"provider_code", providerCode,
+	)
+}
+
+func aiOutcome(err error) string {
+	if err == nil {
+		return "success"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var aiErr *ai.Error
+	if !errors.As(err, &aiErr) {
+		return "internal_error"
+	}
+	switch aiErr.Code {
+	case "MISSING_API_KEY":
+		return "configuration_error"
+	case "LOCAL_RATE_LIMIT":
+		return "local_rate_limited"
+	case "REQUEST_FAILED":
+		return "transport_error"
+	case "READ_FAILED", "INVALID_RESPONSE", "EMPTY_RESPONSE":
+		return "invalid_response"
+	default:
+		if aiErr.Status > 0 {
+			return "provider_error"
+		}
+		return "failed"
+	}
 }
 
 func newRequestID() string {

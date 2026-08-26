@@ -15,10 +15,11 @@ Next.js、Go、PostgreSQLで構成され、開発環境はDocker Composeで起�
 - ニックネームとパスワードによるログイン・ユーザー登録
 - トレーニング環境や使用器具などのコーチ設定
 - AIによる月間トレーニングプランの生成
-- 月間プランを基にした当日のメニュー作成
+- 月間プランを基にした当日のメニュー作成（AI障害時は基礎プランで開始）
+- 月間プランがない場合のフリーワークアウト
 - 重量、回数、感触、自己ベストのセット記録
 - 保存したセットを基にした次セットのAI提案
-- ワークアウト終了時の集計とAIコメント
+- ワークアウト終了時の即時集計と、分離されたAIコメント
 - 種目の検索、追加、お気に入り、最近使用した種目の表示
 - AIによる代替種目の提案
 - カレンダーからの過去記録・未来予定の確認と編集
@@ -63,6 +64,7 @@ Next.js、Go、PostgreSQLで構成され、開発環境はDocker Composeで起�
 ├── docker/                             # Dockerfileと環境変数の例
 ├── compose.yaml                        # 開発環境
 ├── compose.prod.yml                    # 本番向け構成
+├── compose.test.yml                    # 並行性を確認する一時PostgreSQL環境
 └── docs.md                             # API・バックエンド技術仕様
 ```
 
@@ -74,6 +76,7 @@ Next.js、Go、PostgreSQLで構成され、開発環境はDocker Composeで起�
 
 - Docker
 - Docker Compose
+- Node.js 22.14以上（または24以上）とnpm（ブラウザE2Eをホスト上で実行する場合）
 - AI機能を使う場合は、OpenAI互換APIのAPIキー
 
 ### 1. 環境変数ファイルを作成する
@@ -106,6 +109,7 @@ cp docker/env/db.env.example docker/env/db.env
 - `OPENAI_API_KEY`: AI機能を利用する場合に設定する
 - `OPENAI_API_URL`: 利用するOpenAI互換APIのChat Completionsエンドポイント
 - `OPENAI_MODEL`: 利用するモデル名
+- `AI_OPTIONAL_TIMEOUT_SECONDS`: 日次調整・次セット提案・AI総評を待つ上限秒数（既定15秒）
 
 `SESSION_SECRET` は、例えば次のコマンドで生成できます。
 
@@ -113,7 +117,7 @@ cp docker/env/db.env.example docker/env/db.env
 openssl rand -base64 48
 ```
 
-APIキーが未設定でもサーバーは起動しますが、月間プラン生成、セット提案、代替種目提案などのAI機能はエラーになります。
+APIキーが未設定でもサーバーは起動します。月間プラン生成や代替種目提案は利用できませんが、日次メニューは基礎プランで開始でき、セット記録と終了集計はAIと無関係に保存できます。
 
 ### 4. 起動する
 
@@ -149,7 +153,9 @@ docker compose stop
 - APIの成功レスポンスはリソースJSONを直接返します。
 - エラーは `application/problem+json` 形式で返します。
 - セット保存には `Idempotency-Key` ヘッダーが必要です。
-- セット保存とAI提案は別APIのため、AI提案に失敗しても保存済みセットは失われません。
+- セットはDB保存完了を画面に返した後、別APIでAI提案を取得します。AIの待機中や失敗時でも、同じ重量・回数で次へ進めます。
+- ワークアウト終了APIはDB集計を即時に返し、AI総評は専用APIで後から取得・再試行します。
+- 当日開始レスポンスの `ai_status` は `applied`、`fallback`、`not_requested` のいずれかです。
 
 エンドポイントやリクエスト形式の詳細は [docs.md](./docs.md) を参照してください。
 
@@ -179,8 +185,26 @@ docker compose exec -T backend go test -race ./...
 docker compose exec -T backend go vet ./...
 docker compose exec -T frontend npm run lint
 docker compose exec -T frontend npx tsc --noEmit
+docker compose exec -T frontend npm test
 docker compose exec -T frontend npm run build
 docker compose exec -T frontend npm audit --omit=dev
+```
+
+PostgreSQLの行ロックと冪等性を実DBで確認する統合テストは、開発DBと分離した一時DBで実行します。
+
+```sh
+docker compose -f compose.test.yml run --rm --build backend-test
+docker compose -f compose.test.yml down
+```
+
+ブラウザE2EはバックエンドAPIをモックし、「保存成功 → AI失敗 → 継続 → 終了集計 → AI総評再試行」を確認します。初回だけChromiumを準備してください。既にインストール済みのChromeを使う場合は `PLAYWRIGHT_CHANNEL=chrome` を指定できます。
+
+```sh
+cd frontend
+npm ci
+npx playwright install chromium
+npm run test:e2e
+# または: PLAYWRIGHT_CHANNEL=chrome npm run test:e2e
 ```
 
 ## 本番環境

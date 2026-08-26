@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/jPurin-gg/myfitlog-backend/internal/apperr"
+	"github.com/jPurin-gg/myfitlog-backend/internal/requestctx"
 )
 
 type Task string
@@ -28,6 +31,23 @@ type Request struct {
 
 type Client interface {
 	Complete(ctx context.Context, request Request) (string, error)
+}
+
+// LogFeatureOutcome records whether a provider response was usable by the
+// product feature. Provider transport attempts are logged by the adapter.
+func LogFeatureOutcome(ctx context.Context, logger *slog.Logger, task Task, outcome string, started time.Time) {
+	if logger == nil {
+		return
+	}
+	logger.InfoContext(
+		ctx,
+		"ai feature finished",
+		"stage", "feature",
+		"request_id", requestctx.RequestID(ctx),
+		"task", task,
+		"outcome", outcome,
+		"total_duration_ms", time.Since(started).Milliseconds(),
+	)
 }
 
 type Error struct {

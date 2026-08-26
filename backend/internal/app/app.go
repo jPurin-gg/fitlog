@@ -41,11 +41,11 @@ func NewHandler(db *sql.DB, cfg config.Config, logger *slog.Logger) http.Handler
 
 	profileService := profilecore.NewService(profilepostgres.New(db))
 	profileHandler := profilehttp.NewHandler(profileService)
-	exerciseService := exercisecore.NewService(exercisepostgres.New(db), aiClient, promptRenderer)
+	exerciseService := exercisecore.NewService(exercisepostgres.New(db), aiClient, promptRenderer).WithLogger(logger)
 	exerciseHandler := exercisehttp.NewHandler(exerciseService)
-	planningService := planningcore.NewService(planningpostgres.New(db), profileService, aiClient, promptRenderer, appClock)
+	planningService := planningcore.NewService(planningpostgres.New(db), profileService, aiClient, promptRenderer, appClock, cfg.AI.OptionalTimeout).WithLogger(logger)
 	planningHandler := planninghttp.NewHandler(planningService)
-	workoutService := workoutcore.NewService(workoutpostgres.New(db), aiClient, promptRenderer, appClock)
+	workoutService := workoutcore.NewService(workoutpostgres.New(db), aiClient, promptRenderer, appClock, cfg.AI.OptionalTimeout).WithLogger(logger)
 	workoutHandler := workouthttp.NewHandler(workoutService)
 	reportingService := reportingcore.NewService(reportingpostgres.New(db), appClock)
 	reportingHandler := reportinghttp.NewHandler(reportingService)
@@ -85,11 +85,12 @@ func NewHandler(db *sql.DB, cfg config.Config, logger *slog.Logger) http.Handler
 	mux.Handle("POST /api/workouts/{workoutID}/sets", protected(workoutHandler.RecordSet))
 	mux.Handle("POST /api/workouts/{workoutID}/sets/{setID}/recommendation", protected(workoutHandler.Recommendation))
 	mux.Handle("POST /api/workouts/{workoutID}/finish", protected(workoutHandler.Finish))
+	mux.Handle("POST /api/workouts/{workoutID}/summary-comment", protected(workoutHandler.SummaryComment))
 
 	var handler http.Handler = httpx.NormalizeRoutingErrors(mux)
 	handler = httpx.CORS(cfg.FrontendURL, handler)
-	handler = httpx.LogRequests(logger, handler)
 	handler = httpx.Recover(logger, handler)
+	handler = httpx.LogRequests(logger, handler)
 	handler = httpx.WithRequestID(handler)
 	return handler
 }

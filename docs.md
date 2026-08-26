@@ -110,9 +110,9 @@ JSON入力は1 MiBまでで、未知フィールドと複数JSON値を拒否し�
 | POST | `/api/monthly-plans/{YYYY-MM}/generate` | AIで生成して保存 |
 | GET | `/api/workout-plans/{YYYY-MM-DD}` | 保存済み予定、なければ月間プランからdraftを構築 |
 | PUT | `/api/workout-plans/{YYYY-MM-DD}` | 日次予定を保存 |
-| POST | `/api/workout-plans/{YYYY-MM-DD}/start` | 日次予定を確定してワークアウト開始 |
+| POST | `/api/workout-plans/{YYYY-MM-DD}/start` | 日次予定を確定してワークアウト開始。AI調整失敗時は基礎プランを保存 |
 
-開始APIはアプリ設定のタイムゾーンにおける当日だけ受け付けます。過去・未来の記録編集は `/api/workouts/by-date/{YYYY-MM-DD}` を使います。
+開始APIはアプリ設定のタイムゾーンにおける当日だけ受け付けます。過去・未来の記録編集は `/api/workouts/by-date/{YYYY-MM-DD}` を使います。`PlanSession.ai_status` は `applied`（AI調整を反映）、`fallback`（AIを使えず基礎プランを反映）、`not_requested`（保存済み予定を利用）のいずれかです。月間プランがない場合は、クライアントが `PUT` で1種目以上の日次予定を保存してから開始できます。
 
 ### ワークアウト
 
@@ -123,9 +123,15 @@ JSON入力は1 MiBまでで、未知フィールドと複数JSON値を拒否し�
 | GET | `/api/workouts/{workoutID}` | 記録詳細と集計 |
 | POST | `/api/workouts/{workoutID}/sets` | 1セット保存 |
 | POST | `/api/workouts/{workoutID}/sets/{setID}/recommendation` | 保存済みセットを基にAI提案 |
-| POST | `/api/workouts/{workoutID}/finish` | 終了・集計・AI総評 |
+| POST | `/api/workouts/{workoutID}/finish` | 終了とDB集計（AIは呼び出さない） |
+| POST | `/api/workouts/{workoutID}/summary-comment` | 完了済み記録のAI総評を生成。保存済みなら再利用 |
 
-セット保存には8〜128文字のURL-safeな `Idempotency-Key` ヘッダーが必須です。同じキーと同じ本文の再送は既存セットを返し、異なる本文で同じキーを使うと `409 Conflict` です。これによりAI呼び出し失敗後の再試行でもセットが二重登録されません。
+セット保存には8〜128文字のURL-safeな `Idempotency-Key` ヘッダーが必須です。同じキーと同じ本文の再送は、ワークアウト終了後でも既存セットを返します。異なる本文で同じキーを使うと `409 Conflict` です。
+クライアントは保存成否を判定できない通信失敗時に入力と画面遷移を固定し、同じキーと本文で再送します。
+
+セットの新規保存と終了は同じworkout行をロックして直列化します。保存が先なら終了集計に必ず含まれ、終了が先なら新規保存を拒否します。
+
+AI総評は `{ "comment": "...", "replayed": false }` を返します。同じワークアウトの保存済み総評がある場合は `replayed: true` です。未完了のワークアウトは `409 Conflict` です。AI障害でこのAPIが失敗しても、先に完了した記録とDB集計は変更しません。
 
 ## AI境界
 
@@ -136,8 +142,11 @@ JSON入力は1 MiBまでで、未知フィールドと複数JSON値を拒否し�
 - 429、408、5xxのみ最大3回まで再試行
 - `Retry-After` と指数バックオフを尊重
 - ローカルRPM制限あり
+- 記録に付随するAI処理は `AI_OPTIONAL_TIMEOUT_SECONDS`（既定15秒）で上限時間を持つ
 - プロンプト、APIキー、ユーザーデータをログへ出さない
 - AI失敗時はProblem Detailsへ変換し、セット保存結果は失わない
+
+HTTPログは `request_id`、method、生のIDを含まないroute pattern、status、response bytes、所要時間を記録します。AIログは同じ `request_id` で相関でき、provider段階の最終outcome・試行回数・総時間と、feature段階の `applied`、`fallback`、`invalid_output`、`unavailable`、`replayed` などを分けて記録します。
 
 プロバイダーを追加する場合も、機能Serviceではなく `internal/ai` 配下へ新しいアダプターを追加します。現時点では自動ルーティングや複数キー管理は行いません。
 
@@ -160,5 +169,8 @@ JSON入力は1 MiBまでで、未知フィールドと複数JSON値を拒否し�
 - `profile`: 設定正規化
 - `prompt`: 全テンプレートの描画
 - `workout`: 冪等キー入力契約
+- 専用の一時PostgreSQLで、同一セットの同時再送、終了と保存の競合、終了後リプレイを検証
+- React Testing LibraryとMSWでrecord-first状態遷移、AI提案だけの再試行、終了集計の先行表示を検証
+- Playwrightで「保存 → AI障害中も継続 → 終了 → AI総評再試行」をブラウザ検証
 - Docker上で `go test`、race detector、`go vet`、ESLint、TypeScript検査、Next.js本番ビルド
 - npm本番依存は `npm audit --omit=dev` で監査

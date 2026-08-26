@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -17,6 +18,12 @@ import (
 var (
 	ErrNotFound         = errors.New("plan not found")
 	ErrExerciseNotFound = errors.New("exercise not found")
+)
+
+const (
+	AIStatusApplied      = "applied"
+	AIStatusFallback     = "fallback"
+	AIStatusNotRequested = "not_requested"
 )
 
 type DayRoutine struct {
@@ -86,6 +93,7 @@ type PlanSession struct {
 	WorkoutID int         `json:"workout_id,omitempty"`
 	PlanDate  string      `json:"plan_date"`
 	Status    string      `json:"status"`
+	AIStatus  string      `json:"ai_status"`
 	Plan      WorkoutPlan `json:"plan"`
 }
 
@@ -122,10 +130,17 @@ type Service struct {
 	aiClient    ai.Client
 	prompts     PromptRenderer
 	clock       clock.Clock
+	aiTimeout   time.Duration
+	logger      *slog.Logger
 }
 
-func NewService(repository Repository, preferences PreferencesReader, aiClient ai.Client, prompts PromptRenderer, appClock clock.Clock) *Service {
-	return &Service{repository: repository, preferences: preferences, aiClient: aiClient, prompts: prompts, clock: appClock}
+func NewService(repository Repository, preferences PreferencesReader, aiClient ai.Client, prompts PromptRenderer, appClock clock.Clock, aiTimeout time.Duration) *Service {
+	return &Service{repository: repository, preferences: preferences, aiClient: aiClient, prompts: prompts, clock: appClock, aiTimeout: aiTimeout}
+}
+
+func (s *Service) WithLogger(logger *slog.Logger) *Service {
+	s.logger = logger
+	return s
 }
 
 func (s *Service) Monthly(ctx context.Context, userID int, month string) (MonthlyPlan, error) {
@@ -201,15 +216,19 @@ func (s *Service) GenerateMonthly(ctx context.Context, userID int, month string,
 	if err != nil {
 		return MonthlyPlan{}, apperr.Internal(err)
 	}
+	aiStarted := time.Now()
 	result, err := s.aiClient.Complete(ctx, ai.Request{Task: ai.TaskMonthlyPlan, SystemPrompt: systemPrompt, UserPrompt: userPrompt, JSONMode: true})
 	if err != nil {
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskMonthlyPlan, "provider_error", aiStarted)
 		return MonthlyPlan{}, ai.ToAppError(err)
 	}
 	var plan MonthlyPlan
 	if err := json.Unmarshal([]byte(prompt.JSONText(result)), &plan); err != nil {
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskMonthlyPlan, "invalid_output", aiStarted)
 		return MonthlyPlan{}, apperr.Wrap(err, 502, apperr.CodeAIUnavailable, "AIの月間プランを解析できません。")
 	}
 	if err := validateAIPlan(&plan, candidates); err != nil {
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskMonthlyPlan, "invalid_output", aiStarted)
 		return MonthlyPlan{}, err
 	}
 	if plan.Frequency == "" {
@@ -218,12 +237,15 @@ func (s *Service) GenerateMonthly(ctx context.Context, userID int, month string,
 	plan.PlanMonth = month
 	applyRestDays(&plan, restDays)
 	if err := validateSavedPlan(plan); err != nil {
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskMonthlyPlan, "invalid_output", aiStarted)
 		return MonthlyPlan{}, apperr.New(502, apperr.CodeAIUnavailable, "AIの月間プランが不完全です。")
 	}
 	saved, err := s.repository.SaveMonthly(ctx, userID, month, plan)
 	if err != nil {
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskMonthlyPlan, "storage_error", aiStarted)
 		return MonthlyPlan{}, apperr.Internal(err)
 	}
+	ai.LogFeatureOutcome(ctx, s.logger, ai.TaskMonthlyPlan, "applied", aiStarted)
 	return saved, nil
 }
 
@@ -234,6 +256,7 @@ func (s *Service) Daily(ctx context.Context, userID int, dateText string) (PlanS
 	}
 	session, err := s.repository.Daily(ctx, userID, date)
 	if err == nil {
+		session.AIStatus = AIStatusNotRequested
 		return session, nil
 	}
 	if !errors.Is(err, ErrNotFound) {
@@ -243,7 +266,7 @@ func (s *Service) Daily(ctx context.Context, userID int, dateText string) (PlanS
 	if err != nil {
 		return PlanSession{}, err
 	}
-	return PlanSession{PlanDate: dateText, Status: "draft", Plan: base}, nil
+	return PlanSession{PlanDate: dateText, Status: "draft", AIStatus: AIStatusNotRequested, Plan: base}, nil
 }
 
 func (s *Service) SaveDaily(ctx context.Context, userID int, dateText string, plan WorkoutPlan) (PlanSession, error) {
@@ -258,6 +281,7 @@ func (s *Service) SaveDaily(ctx context.Context, userID int, dateText string, pl
 	if err != nil {
 		return PlanSession{}, apperr.Internal(err)
 	}
+	saved.AIStatus = AIStatusNotRequested
 	return saved, nil
 }
 
@@ -269,18 +293,27 @@ func (s *Service) StartDaily(ctx context.Context, userID int, dateText string) (
 	if !sameDate(date, s.clock.Now()) {
 		return PlanSession{}, apperr.Validation("ワークアウトを開始できるのは今日のプランだけです。", map[string]string{"date": "must be today"})
 	}
+	aiStatus := AIStatusNotRequested
 	if _, err := s.repository.Daily(ctx, userID, date); errors.Is(err, ErrNotFound) {
 		base, buildErr := s.basePlan(ctx, userID, date)
 		if buildErr != nil {
 			return PlanSession{}, buildErr
 		}
-		refined, refineErr := s.refineDaily(ctx, base)
+		aiStarted := time.Now()
+		aiContext, cancel := s.optionalAIContext(ctx)
+		refined, refineErr := s.refineDaily(aiContext, base)
+		cancel()
 		if refineErr != nil {
-			return PlanSession{}, refineErr
+			refined = base
+			aiStatus = AIStatusFallback
+		} else {
+			aiStatus = AIStatusApplied
 		}
 		if _, saveErr := s.repository.SaveDaily(ctx, userID, date, refined); saveErr != nil {
+			ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutPlan, "storage_error", aiStarted)
 			return PlanSession{}, apperr.Internal(saveErr)
 		}
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutPlan, aiStatus, aiStarted)
 	} else if err != nil {
 		return PlanSession{}, apperr.Internal(err)
 	}
@@ -288,6 +321,7 @@ func (s *Service) StartDaily(ctx context.Context, userID int, dateText string) (
 	if err != nil {
 		return PlanSession{}, apperr.Internal(err)
 	}
+	session.AIStatus = aiStatus
 	return session, nil
 }
 
@@ -430,6 +464,14 @@ func (s *Service) parseDate(value string) (time.Time, error) {
 		return time.Time{}, apperr.Validation("日付はYYYY-MM-DD形式で指定してください。", nil)
 	}
 	return date, nil
+}
+
+func (s *Service) optionalAIContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := s.aiTimeout
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	return context.WithTimeout(ctx, timeout)
 }
 
 func ValidateMonth(value string) error {

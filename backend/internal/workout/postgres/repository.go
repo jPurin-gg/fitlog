@@ -23,6 +23,19 @@ func (r *Repository) RecordSet(ctx context.Context, userID, workoutID int, key s
 	}
 	defer tx.Rollback()
 
+	var endedAt sql.NullTime
+	err = tx.QueryRowContext(ctx, `
+		SELECT ended_at FROM workouts
+		WHERE id=$1 AND user_id=$2
+		FOR UPDATE
+	`, workoutID, userID).Scan(&endedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return workout.Set{}, false, workout.ErrNotFound
+	}
+	if err != nil {
+		return workout.Set{}, false, err
+	}
+
 	if existing, found, err := findSetByKey(ctx, tx, userID, workoutID, key); err != nil {
 		return workout.Set{}, false, err
 	} else if found {
@@ -31,17 +44,15 @@ func (r *Repository) RecordSet(ctx context.Context, userID, workoutID int, key s
 		}
 		return existing, true, nil
 	}
+	if endedAt.Valid {
+		return workout.Set{}, false, workout.ErrNotFound
+	}
 
-	var valid bool
-	if err := tx.QueryRowContext(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM workouts w JOIN exercises e ON e.id=$3
-			WHERE w.id=$1 AND w.user_id=$2 AND w.ended_at IS NULL
-		)
-	`, workoutID, userID, input.ExerciseID).Scan(&valid); err != nil {
+	var exerciseExists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM exercises WHERE id=$1)`, input.ExerciseID).Scan(&exerciseExists); err != nil {
 		return workout.Set{}, false, err
 	}
-	if !valid {
+	if !exerciseExists {
 		return workout.Set{}, false, workout.ErrNotFound
 	}
 	var previousMax float64
@@ -154,6 +165,18 @@ func (r *Repository) Finish(ctx context.Context, userID, workoutID int) (workout
 		return workout.Detail{}, err
 	}
 	defer tx.Rollback()
+	var endedAt sql.NullTime
+	err = tx.QueryRowContext(ctx, `
+		SELECT ended_at FROM workouts
+		WHERE id=$1 AND user_id=$2
+		FOR UPDATE
+	`, workoutID, userID).Scan(&endedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return workout.Detail{}, workout.ErrNotFound
+	}
+	if err != nil {
+		return workout.Detail{}, err
+	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE workouts SET ended_at=COALESCE(ended_at,(SELECT MAX(created_at) FROM workout_sets WHERE workout_id=workouts.id),CURRENT_TIMESTAMP)
 		WHERE id=$1 AND user_id=$2
@@ -199,9 +222,40 @@ func (r *Repository) Detail(ctx context.Context, userID, workoutID int) (workout
 	return detail, err
 }
 
-func (r *Repository) SaveSummaryComment(ctx context.Context, userID, workoutID int, comment string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE workouts SET summary_comment=$1 WHERE id=$2 AND user_id=$3`, comment, workoutID, userID)
-	return err
+func (r *Repository) SaveSummaryComment(ctx context.Context, userID, workoutID int, comment string) (string, bool, error) {
+	var saved string
+	err := r.db.QueryRowContext(ctx, `
+		UPDATE workouts SET summary_comment=$1
+		WHERE id=$2 AND user_id=$3 AND ended_at IS NOT NULL
+		  AND COALESCE(BTRIM(summary_comment),'')=''
+		RETURNING summary_comment
+	`, comment, workoutID, userID).Scan(&saved)
+	if err == nil {
+		return saved, false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", false, err
+	}
+
+	var existing string
+	var completed bool
+	err = r.db.QueryRowContext(ctx, `
+		SELECT COALESCE(summary_comment,''), ended_at IS NOT NULL
+		FROM workouts WHERE id=$1 AND user_id=$2
+	`, workoutID, userID).Scan(&existing, &completed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, workout.ErrNotFound
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if !completed {
+		return "", false, workout.ErrConflict
+	}
+	if existing != "" {
+		return existing, true, nil
+	}
+	return "", false, errors.New("summary comment was not saved")
 }
 
 func (r *Repository) CalendarWorkout(ctx context.Context, userID int, date time.Time) (workout.CalendarWorkout, error) {

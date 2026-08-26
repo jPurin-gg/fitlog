@@ -4,6 +4,9 @@ docker/env/*
 !docker/env/*.env.example
 frontend/node_modules/
 frontend/.next/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
 backend/fitlog
 backend/tmp/
 
