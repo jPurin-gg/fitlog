@@ -137,7 +137,7 @@ AI総評は `{ "comment": "...", "replayed": false }` を返します。同じ�
 
 機能Serviceは `ai.Client` だけを参照し、HTTP APIのURLや認証方式を知りません。現在の具体実装はOpenAI互換Chat Completionsアダプター1つです。
 
-- 設定名は `OPENAI_API_KEY`、`OPENAI_API_URL`、`OPENAI_MODEL`
+- xAI向け設定名は `XAI_API_KEY`、`XAI_API_URL`、`XAI_MODEL`
 - JSONが必要なタスクでは `response_format: json_object`
 - 429、408、5xxのみ最大3回まで再試行
 - `Retry-After` と指数バックオフを尊重

@@ -78,9 +78,9 @@ func Load() (Config, error) {
 			Name:     os.Getenv("DB_NAME"),
 		},
 		AI: AIConfig{
-			APIKey:          os.Getenv("OPENAI_API_KEY"),
-			URL:             envString("OPENAI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"),
-			Model:           envString("OPENAI_MODEL", "gemini-2.5-flash"),
+			APIKey:          os.Getenv("XAI_API_KEY"),
+			URL:             envString("XAI_API_URL", "https://api.x.ai/v1/chat/completions"),
+			Model:           envString("XAI_MODEL", "grok-4.3"),
 			RPM:             envInt("AI_RATE_LIMIT_RPM", 5),
 			MaxWait:         time.Duration(envInt("AI_RATE_LIMIT_MAX_WAIT_MS", 15000)) * time.Millisecond,
 			MaxAttempts:     clamp(envInt("AI_MAX_ATTEMPTS", 3), 1, 3),

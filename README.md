@@ -1,6 +1,6 @@
 # Fitlog
 
-Fitlogは、筋力トレーニングの計画と記録を管理するWebアプリです。月間プランの作成、当日のセット記録、カレンダーでの振り返りに加え、OpenAI互換APIを使ったメニュー作成やコーチングを利用できます。
+Fitlogは、筋力トレーニングの計画と記録を管理するWebアプリです。月間プランの作成、当日のセット記録、カレンダーでの振り返りに加え、xAIのGrok APIを使ったメニュー作成やコーチングを利用できます。
 
 Next.js、Go、PostgreSQLで構成され、開発環境はDocker Composeで起動します。
 
@@ -31,7 +31,7 @@ Next.js、Go、PostgreSQLで構成され、開発環境はDocker Composeで起�
 | フロントエンド | Next.js 15、React 19、TypeScript、Tailwind CSS 4 |
 | バックエンド | Go 1.24、`net/http` |
 | データベース | PostgreSQL 16 |
-| AI | OpenAI互換Chat Completions API |
+| AI | xAI Grok Chat Completions API |
 | 開発環境 | Docker Compose |
 
 ブラウザは通常、フロントエンドと同一オリジンの `/api` を呼びます。Next.jsがそのリクエストをDockerネットワーク内のGoバックエンドへ中継します。
@@ -77,7 +77,7 @@ Next.js、Go、PostgreSQLで構成され、開発環境はDocker Composeで起�
 - Docker
 - Docker Compose
 - Node.js 22.14以上（または24以上）とnpm（ブラウザE2Eをホスト上で実行する場合）
-- AI機能を使う場合は、OpenAI互換APIのAPIキー
+- AI機能を使う場合は、xAI APIキー
 
 ### 1. 環境変数ファイルを作成する
 
@@ -106,9 +106,9 @@ cp docker/env/db.env.example docker/env/db.env
 `docker/env/backend.env` で、少なくとも次を確認してください。
 
 - `SESSION_SECRET`: 32 bytes以上のランダムな値に変更する
-- `OPENAI_API_KEY`: AI機能を利用する場合に設定する
-- `OPENAI_API_URL`: 利用するOpenAI互換APIのChat Completionsエンドポイント
-- `OPENAI_MODEL`: 利用するモデル名
+- `XAI_API_KEY`: xAI Consoleで発行したAPIキー
+- `XAI_API_URL`: xAI Chat Completionsエンドポイント（既定 `https://api.x.ai/v1/chat/completions`）
+- `XAI_MODEL`: 利用するGrokモデル（既定 `grok-4.3`）
 - `AI_OPTIONAL_TIMEOUT_SECONDS`: 日次調整・次セット提案・AI総評を待つ上限秒数（既定15秒）
 
 `SESSION_SECRET` は、例えば次のコマンドで生成できます。
@@ -223,7 +223,7 @@ cp docker/env/db.env.example docker/env/db.prod.env
 - `.env.prod` の `NEXT_PUBLIC_API_URL`
 - `backend.prod.env` の `SESSION_SECRET`
 - `backend.prod.env` と `db.prod.env` のDBユーザー・パスワード・DB名
-- `backend.prod.env` の `OPENAI_API_KEY`、`OPENAI_API_URL`、`OPENAI_MODEL`
+- `backend.prod.env` の `XAI_API_KEY`、`XAI_API_URL`、`XAI_MODEL`
 - `backend.prod.env` の `FRONTEND_URL`
 
 同一オリジンでNext.jsからバックエンドへ中継する場合、`NEXT_PUBLIC_API_URL` は空欄にします。APIを別オリジンで公開する場合は、ブラウザから到達可能なAPI URLを設定してください。

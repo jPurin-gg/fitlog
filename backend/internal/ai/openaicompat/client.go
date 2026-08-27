@@ -81,7 +81,7 @@ func (c *Client) Complete(ctx context.Context, request ai.Request) (completion s
 	}()
 
 	if strings.TrimSpace(c.config.APIKey) == "" {
-		return "", &ai.Error{RequestID: requestID, Code: "MISSING_API_KEY", Model: c.config.Model, Err: errors.New("OPENAI_API_KEY is not set")}
+		return "", &ai.Error{RequestID: requestID, Code: "MISSING_API_KEY", Model: c.config.Model, Err: errors.New("XAI_API_KEY is not set")}
 	}
 	body := requestBody{
 		Model: c.config.Model,
