@@ -221,6 +221,42 @@ func TestSaveSummaryCommentConcurrentReplay(t *testing.T) {
 	}
 }
 
+func TestWorkoutRepositoryDoesNotExposeAnotherUsersWorkout(t *testing.T) {
+	fixture := newIntegrationFixture(t)
+	workoutID := fixture.createWorkout(t)
+	input := workout.SetInput{ExerciseID: fixture.exerciseID, SetOrder: 1, Weight: 40, Reps: 8}
+	created, _, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "owner_set_key", input)
+	if err != nil {
+		t.Fatalf("owner RecordSet() error = %v", err)
+	}
+
+	var otherUserID int
+	if err := fixture.db.QueryRow(`INSERT INTO users (username,password_hash) VALUES ('other_user','test') RETURNING id`).Scan(&otherUserID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := fixture.repository.Detail(context.Background(), otherUserID, workoutID); !errors.Is(err, workout.ErrNotFound) {
+		t.Fatalf("other user Detail() error = %v, want ErrNotFound", err)
+	}
+	if _, _, err := fixture.repository.RecordSet(context.Background(), otherUserID, workoutID, "other_user_key", input); !errors.Is(err, workout.ErrNotFound) {
+		t.Fatalf("other user RecordSet() error = %v, want ErrNotFound", err)
+	}
+	if _, err := fixture.repository.RecommendationContext(context.Background(), otherUserID, workoutID, created.ID); !errors.Is(err, workout.ErrNotFound) {
+		t.Fatalf("other user RecommendationContext() error = %v, want ErrNotFound", err)
+	}
+	if _, err := fixture.repository.Finish(context.Background(), otherUserID, workoutID); !errors.Is(err, workout.ErrNotFound) {
+		t.Fatalf("other user Finish() error = %v, want ErrNotFound", err)
+	}
+	if _, _, err := fixture.repository.SaveSummaryComment(context.Background(), otherUserID, workoutID, "見えてはいけない総評"); !errors.Is(err, workout.ErrNotFound) {
+		t.Fatalf("other user SaveSummaryComment() error = %v, want ErrNotFound", err)
+	}
+
+	detail, err := fixture.repository.Detail(context.Background(), fixture.userID, workoutID)
+	if err != nil || detail.Summary.TotalSets != 1 {
+		t.Fatalf("owner Detail() = (%+v, %v), want one unchanged set", detail, err)
+	}
+}
+
 func newIntegrationFixture(t *testing.T) integrationFixture {
 	t.Helper()
 	dsn := os.Getenv("FITLOG_TEST_DATABASE_DSN")

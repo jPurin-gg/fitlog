@@ -446,7 +446,7 @@ export default function CalendarPage() {
   );
 }
 
-function CalendarWorkoutEditor({
+export function CalendarWorkoutEditor({
   date,
   onClose,
   onSaved,
@@ -691,7 +691,7 @@ function CalendarWorkoutEditor({
   );
 }
 
-function CalendarPlanEditor({
+export function CalendarPlanEditor({
   date,
   onClose,
   onSaved,

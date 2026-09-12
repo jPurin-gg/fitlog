@@ -1,9 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("記録はAI障害と分離され、終了後のAI総評も再試行できる", async ({ page }) => {
-  let setSaveCalls = 0;
-  let summaryCommentCalls = 0;
-
+test("ブラウザでワークアウトを開始し、AI障害中も記録を完了できる", async ({ page }) => {
   await page.route("**/api/**", async route => {
     const request = route.request();
     const url = new URL(request.url());
@@ -43,7 +40,6 @@ test("記録はAI障害と分離され、終了後のAI総評も再試行でき�
       });
     }
     if (request.method() === "POST" && url.pathname === "/api/workouts/42/sets") {
-      setSaveCalls += 1;
       expect(request.headers()["idempotency-key"]).toBeTruthy();
       return respond(200, { id: 100, workout_id: 42 });
     }
@@ -72,10 +68,6 @@ test("記録はAI障害と分離され、終了後のAI総評も再試行でき�
       });
     }
     if (request.method() === "POST" && url.pathname === "/api/workouts/42/summary-comment") {
-      summaryCommentCalls += 1;
-      if (summaryCommentCalls === 1) {
-        return respond(503, { status: 503, detail: "AI総評は一時的に利用できません。" });
-      }
       return respond(200, { comment: "記録は保存済みです。無理なく続けましょう。", replayed: false });
     }
     return respond(404, { status: 404, detail: `Unhandled test API: ${request.method()} ${url.pathname}` });
@@ -88,7 +80,6 @@ test("記録はAI障害と分離され、終了後のAI総評も再試行でき�
   await page.getByRole("button", { name: "セットを保存" }).click();
   await expect(page.getByText(/セットは保存済みです/)).toBeVisible();
   await expect(page.getByText("AI提案のみ取得できませんでした")).toBeVisible();
-  expect(setSaveCalls).toBe(1);
 
   await page.getByRole("button", { name: "同じ内容で次へ" }).click();
   await expect(page.getByText("セット 2 / 3")).toBeVisible();
@@ -96,9 +87,5 @@ test("記録はAI障害と分離され、終了後のAI総評も再試行でき�
 
   await expect(page.getByRole("heading", { name: "今日のまとめ" })).toBeVisible();
   await expect(page.getByText("480", { exact: true })).toBeVisible();
-  await expect(page.getByText("AI総評のみ取得できませんでした")).toBeVisible();
-
-  await page.getByRole("button", { name: "AI総評を再試行" }).click();
   await expect(page.getByText("記録は保存済みです。無理なく続けましょう。")).toBeVisible();
-  expect(summaryCommentCalls).toBe(2);
 });

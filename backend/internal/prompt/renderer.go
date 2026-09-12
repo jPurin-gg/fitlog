@@ -30,7 +30,7 @@ func (r *Renderer) Pair(systemFilename, userFilename string, data any) (string, 
 
 func (r *Renderer) render(filename string, data any) (string, error) {
 	path := filepath.Join(r.directory, filepath.Base(filename))
-	tmpl, err := template.ParseFiles(path)
+	tmpl, err := template.New(filepath.Base(path)).Option("missingkey=error").ParseFiles(path)
 	if err != nil {
 		return "", fmt.Errorf("parse prompt %s: %w", filename, err)
 	}

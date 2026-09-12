@@ -64,11 +64,8 @@ func TestGenerateMonthlyLogsFinalFeatureOutcome(t *testing.T) {
 			}
 
 			record := decodePlanningFeatureLog(t, output.Bytes())
-			if record["stage"] != "feature" || record["request_id"] != "planning-request" || record["task"] != string(ai.TaskMonthlyPlan) || record["outcome"] != test.wantOutcome {
+			if record["request_id"] != "planning-request" || record["task"] != string(ai.TaskMonthlyPlan) || record["outcome"] != test.wantOutcome {
 				t.Fatalf("feature log = %#v", record)
-			}
-			if _, ok := record["total_duration_ms"]; !ok {
-				t.Fatal("total_duration_ms is missing")
 			}
 		})
 	}

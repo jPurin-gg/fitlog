@@ -29,6 +29,13 @@ func TestRendererRendersEveryPromptPair(t *testing.T) {
 	}
 }
 
+func TestRendererRejectsMissingTemplateData(t *testing.T) {
+	renderer := NewRenderer(filepath.Join("..", "..", "prompts"))
+	if _, _, err := renderer.Pair("recommend_system.txt", "recommend_user.txt", map[string]any{}); err == nil {
+		t.Fatal("Pair() error = nil; want missing template data error")
+	}
+}
+
 func TestJSONTextRemovesJSONFence(t *testing.T) {
 	if got := JSONText("```json\n{\"ok\":true}\n```"); got != `{"ok":true}` {
 		t.Fatalf("JSONText() = %q", got)

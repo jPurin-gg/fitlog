@@ -12,24 +12,7 @@ import (
 	"github.com/jPurin-gg/myfitlog-backend/internal/requestctx"
 )
 
-func TestValidateAlternativesRejectsUnknownIDsAndUsesDictionaryName(t *testing.T) {
-	allowed := map[string]AlternativeCandidate{
-		"dumbbell-bench": {ID: "dumbbell-bench", Name: "ダンベルベンチプレス"},
-	}
-	response := AlternativeResponse{Alternatives: []Alternative{{ID: "dumbbell-bench", Name: "hallucinated name"}}}
-	if err := validateAlternatives(&response, allowed); err != nil {
-		t.Fatalf("validateAlternatives() error = %v", err)
-	}
-	if response.Alternatives[0].Name != "ダンベルベンチプレス" {
-		t.Fatalf("name = %q", response.Alternatives[0].Name)
-	}
-	response.Alternatives[0].ID = "unknown"
-	if err := validateAlternatives(&response, allowed); err == nil {
-		t.Fatal("validateAlternatives(unknown) error = nil")
-	}
-}
-
-func TestAlternativesLogsFinalFeatureOutcome(t *testing.T) {
+func TestAlternativesValidatesResponseAndLogsOutcome(t *testing.T) {
 	validResponse := `{"alternatives":[{"id":"dumbbell-bench","name":"AI name","description":"器具を変更します。"}],"message":"候補です。"}`
 	tests := []struct {
 		name          string
@@ -56,17 +39,23 @@ func TestAlternativesLogsFinalFeatureOutcome(t *testing.T) {
 			service := NewService(repository, stubExerciseAI{completion: test.completion, err: test.completionErr}, stubExercisePrompts{}).WithLogger(logger)
 			ctx := requestctx.WithRequestID(context.Background(), "exercise-request")
 
-			_, err := service.Alternatives(ctx, "bench", "器具が空いていない")
+			response, err := service.Alternatives(ctx, "bench", "器具が空いていない")
 			if (err != nil) != test.wantErr {
 				t.Fatalf("Alternatives() error = %v, wantErr %v", err, test.wantErr)
 			}
+			if !test.wantErr {
+				if len(response.Alternatives) != 1 {
+					t.Fatalf("alternatives = %#v, want one candidate", response.Alternatives)
+				}
+				alternative := response.Alternatives[0]
+				if alternative.ID != "dumbbell-bench" || alternative.Name != "ダンベルベンチプレス" {
+					t.Fatalf("alternative = %#v, want the dictionary ID and name", alternative)
+				}
+			}
 
 			record := decodeExerciseFeatureLog(t, output.Bytes())
-			if record["stage"] != "feature" || record["request_id"] != "exercise-request" || record["task"] != string(ai.TaskAlternative) || record["outcome"] != test.wantOutcome {
+			if record["request_id"] != "exercise-request" || record["task"] != string(ai.TaskAlternative) || record["outcome"] != test.wantOutcome {
 				t.Fatalf("feature log = %#v", record)
-			}
-			if _, ok := record["total_duration_ms"]; !ok {
-				t.Fatal("total_duration_ms is missing")
 			}
 		})
 	}

@@ -36,37 +36,6 @@ func TestCompleteSendsOpenAICompatibleRequest(t *testing.T) {
 	}
 }
 
-func TestCompleteRetriesRetryableResponses(t *testing.T) {
-	var calls atomic.Int32
-	client := testClient(func(_ *http.Request) *http.Response {
-		if calls.Add(1) == 1 {
-			response := jsonResponse(http.StatusTooManyRequests, `{"error":{"status":"RESOURCE_EXHAUSTED"}}`)
-			response.Header.Set("Retry-After", "0")
-			return response
-		}
-		return jsonResponse(http.StatusOK, `{"choices":[{"message":{"content":"done"}}]}`)
-	})
-
-	result, err := client.Complete(context.Background(), ai.Request{})
-	if err != nil || result != "done" || calls.Load() != 2 {
-		t.Fatalf("Complete() = %q, %v; calls = %d", result, err, calls.Load())
-	}
-}
-
-func TestCompleteDoesNotRetryForbidden(t *testing.T) {
-	var calls atomic.Int32
-	client := testClient(func(_ *http.Request) *http.Response {
-		calls.Add(1)
-		return jsonResponse(http.StatusForbidden, `{"error":{"status":"PERMISSION_DENIED"}}`)
-	})
-
-	_, err := client.Complete(context.Background(), ai.Request{})
-	var aiErr *ai.Error
-	if !errors.As(err, &aiErr) || aiErr.Status != http.StatusForbidden || aiErr.Code != "PERMISSION_DENIED" || calls.Load() != 1 {
-		t.Fatalf("Complete() error = %#v; calls = %d", err, calls.Load())
-	}
-}
-
 func TestCompleteRejectsInvalidResponse(t *testing.T) {
 	client := testClient(func(_ *http.Request) *http.Response { return jsonResponse(http.StatusOK, `not json`) })
 	_, err := client.Complete(context.Background(), ai.Request{})
@@ -102,7 +71,7 @@ func TestCompleteRequiresServerSideAPIKey(t *testing.T) {
 	}
 }
 
-func TestCompleteLogsOneCorrelatedLogicalOutcome(t *testing.T) {
+func TestCompleteRetriesAndLogsFinalSuccess(t *testing.T) {
 	var output bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&output, nil))
 	var calls atomic.Int32
@@ -125,8 +94,8 @@ func TestCompleteLogsOneCorrelatedLogicalOutcome(t *testing.T) {
 		SystemPrompt: "private-system-prompt",
 		UserPrompt:   "private-user-input",
 	})
-	if err != nil || result != "done" {
-		t.Fatalf("Complete() = %q, %v", result, err)
+	if err != nil || result != "done" || calls.Load() != 2 {
+		t.Fatalf("Complete() = %q, %v; calls = %d", result, err, calls.Load())
 	}
 
 	record := decodeLogRecord(t, output.Bytes())
@@ -144,20 +113,23 @@ func TestCompleteLogsOneCorrelatedLogicalOutcome(t *testing.T) {
 	}
 }
 
-func TestCompleteLogsFinalProviderFailure(t *testing.T) {
+func TestCompleteRejectsForbiddenWithoutRetryAndLogsFailure(t *testing.T) {
 	var output bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	var calls atomic.Int32
 	client := New(testConfig("http://ai.test/v1/chat/completions"), logger)
 	client.httpClient = &http.Client{
 		Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			calls.Add(1)
 			return jsonResponse(http.StatusForbidden, `{"error":{"status":"PERMISSION_DENIED"}}`), nil
 		}),
 		Timeout: time.Second,
 	}
 
 	_, err := client.Complete(context.Background(), ai.Request{Task: ai.TaskMonthlyPlan})
-	if err == nil {
-		t.Fatal("Complete() error = nil")
+	var aiErr *ai.Error
+	if !errors.As(err, &aiErr) || aiErr.Status != http.StatusForbidden || aiErr.Code != "PERMISSION_DENIED" || calls.Load() != 1 {
+		t.Fatalf("Complete() error = %#v; calls = %d", err, calls.Load())
 	}
 
 	record := decodeLogRecord(t, output.Bytes())

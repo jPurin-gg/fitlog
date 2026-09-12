@@ -183,41 +183,82 @@ describe("WorkoutPage record-first flow", () => {
     expect(keys[1]).toBe(keys[0]);
   });
 
-  it("終了集計をAI総評より先に表示する", async () => {
+  it("終了集計をAI総評より先に表示し、総評の再試行でも記録を再送しない", async () => {
     useCommonHandlers();
     const summaryComment = deferred<Response>();
+    const retriedSummaryComment = deferred<Response>();
+    let saveCalls = 0;
+    let finishCalls = 0;
+    let summaryCalls = 0;
     server.use(
-      http.post(`${apiOrigin}/api/workouts/42/finish`, () => HttpResponse.json({
-        workout_id: 42,
-        status: "completed",
-        summary: {
-          total_sets: 1,
-          total_reps: 8,
-          total_volume: 480,
-          duration_min: 4,
-          pr_count: 0,
-          exercises: [{
-            exercise_id: "bench_press",
-            name: "ベンチプレス",
-            sets: 1,
-            total_reps: 8,
-            best_weight: 60,
-            total_volume: 480,
-          }],
-        },
+      http.post(`${apiOrigin}/api/workouts/42/sets`, () => {
+        saveCalls += 1;
+        return HttpResponse.json({ id: 105, workout_id: 42 });
+      }),
+      http.post(`${apiOrigin}/api/workouts/42/sets/105/recommendation`, () => HttpResponse.json({
+        next_action: "CONTINUE",
+        recommendation: "同じ重量で続けましょう。",
+        target_weight: 60,
+        target_reps: 8,
+        reason: "安定しているため",
+        max_weight: 75,
       })),
-      http.post(`${apiOrigin}/api/workouts/42/summary-comment`, () => summaryComment.promise),
+      http.post(`${apiOrigin}/api/workouts/42/finish`, () => {
+        finishCalls += 1;
+        return HttpResponse.json({
+          workout_id: 42,
+          status: "completed",
+          summary: {
+            total_sets: 1,
+            total_reps: 8,
+            total_volume: 480,
+            duration_min: 4,
+            pr_count: 0,
+            exercises: [{
+              exercise_id: "bench_press",
+              name: "ベンチプレス",
+              sets: 1,
+              total_reps: 8,
+              best_weight: 60,
+              total_volume: 480,
+            }],
+          },
+        });
+      }),
+      http.post(`${apiOrigin}/api/workouts/42/summary-comment`, () => {
+        summaryCalls += 1;
+        return summaryCalls === 1 ? summaryComment.promise : retriedSummaryComment.promise;
+      }),
     );
     const user = userEvent.setup();
     await startWorkout(user);
 
+    await user.click(screen.getByRole("button", { name: "セットを保存" }));
+    await screen.findByText("同じ重量で続けましょう。");
     await user.click(screen.getByRole("button", { name: "終了" }));
+
     expect(await screen.findByRole("heading", { name: "今日のまとめ" })).toBeInTheDocument();
     expect(screen.getByText("AIコーチが総評を作成中です")).toBeInTheDocument();
     expect(screen.getByText("480")).toBeInTheDocument();
 
-    summaryComment.resolve(HttpResponse.json({ comment: "今日の記録はすでに安全に保存されています。", replayed: false }));
-    expect(await screen.findByText("今日の記録はすでに安全に保存されています。")).toBeInTheDocument();
+    summaryComment.resolve(HttpResponse.json(
+      { status: 503, detail: "AI総評が一時的に使えません。" },
+      { status: 503, headers: { "Content-Type": "application/problem+json" } },
+    ));
+    expect(await screen.findByText("AI総評のみ取得できませんでした")).toBeInTheDocument();
+    expect(screen.getByText("480")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "AI総評を再試行" }));
+    expect(await screen.findByText("AIコーチが総評を作成中です")).toBeInTheDocument();
+    expect(screen.getByText("480")).toBeInTheDocument();
+
+    retriedSummaryComment.resolve(HttpResponse.json({ comment: "最後までよく頑張りました。", replayed: false }));
+    expect(await screen.findByText("最後までよく頑張りました。")).toBeInTheDocument();
+    expect(screen.queryByText("AI総評のみ取得できませんでした")).not.toBeInTheDocument();
+    expect(screen.getByText("480")).toBeInTheDocument();
+    expect(saveCalls).toBe(1);
+    expect(finishCalls).toBe(1);
+    expect(summaryCalls).toBe(2);
   });
 
   it("AI調整失敗時に基礎プランで開始したことを表示する", async () => {
