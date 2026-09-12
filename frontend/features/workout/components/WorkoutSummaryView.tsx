@@ -2,25 +2,9 @@
 
 import React from "react";
 import { BarChart3, BrainCircuit, Clock3, ListChecks, Trophy } from "lucide-react";
+import type { WorkoutSummary } from "../types";
 
-export interface WorkoutSummaryExercise {
-  exercise_id: string;
-  name: string;
-  sets: number;
-  total_reps: number;
-  best_weight: number;
-  total_volume: number;
-}
-
-export interface WorkoutSummary {
-  total_sets: number;
-  total_reps: number;
-  total_volume: number;
-  duration_min: number;
-  pr_count: number;
-  ai_comment?: string;
-  exercises: WorkoutSummaryExercise[];
-}
+export type { WorkoutSummary } from "../types";
 
 interface WorkoutSummaryViewProps {
   summary: WorkoutSummary;

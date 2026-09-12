@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { initialRecordFlowState, recordFlowReducer } from "./workoutFlow";
+import { initialRecordFlowState, recordFlowReducer } from "@/features/workout/workoutFlow";
 
 describe("recordFlowReducer", () => {
   it("marks the set as saved before starting the optional recommendation", () => {

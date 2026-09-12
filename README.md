@@ -58,9 +58,11 @@ Next.js、Go、PostgreSQLで構成され、開発環境はDocker Composeで起�
 │   │   └── prompt/                     # プロンプトテンプレートの描画
 │   └── prompts/                        # AIプロンプト
 ├── frontend/
-│   ├── app/                            # Next.js App Routerの画面
-│   ├── components/                     # 共通UI
-│   └── lib/                            # APIクライアントと共通処理
+│   ├── app/                            # Next.js App Routerの薄いルート入口
+│   ├── features/                       # 機能別の画面、状態、API、型、専用UI
+│   ├── components/                     # アプリ全体で共有するUI
+│   ├── hooks/                          # アプリ全体で共有するReact hooks
+│   └── lib/                            # HTTPクライアントと汎用処理
 ├── docker/                             # Dockerfileと環境変数の例
 ├── compose.yaml                        # 開発環境
 ├── compose.prod.yml                    # 本番向け構成
@@ -69,6 +71,8 @@ Next.js、Go、PostgreSQLで構成され、開発環境はDocker Composeで起�
 ```
 
 バックエンドは機能単位のモジュラーモノリスです。各機能の中心パッケージがユースケースとインターフェースを定義し、`httpapi` と `postgres` がそれぞれHTTP・PostgreSQLアダプターとして中心パッケージに依存します。具体実装の組み立ては主に `internal/app` が担当します。
+
+フロントエンドも `dashboard`、`workout`、`calendar`、`exercises` の機能単位で整理しています。`app` の各 `page.tsx` はルーティングと機能画面の組み立てだけを担当し、機能固有の画面実装・API契約・型・UIは `features` に置きます。認証や下部ナビゲーションなど、複数機能から使うUIだけを共通 `components` に置きます。
 
 ## ローカル開発
 
