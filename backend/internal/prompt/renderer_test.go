@@ -1,7 +1,10 @@
 package prompt
 
 import (
+	"encoding/json"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -36,8 +39,68 @@ func TestRendererRejectsMissingTemplateData(t *testing.T) {
 	}
 }
 
-func TestJSONTextRemovesJSONFence(t *testing.T) {
-	if got := JSONText("```json\n{\"ok\":true}\n```"); got != `{"ok":true}` {
-		t.Fatalf("JSONText() = %q", got)
+func TestRendererRejectsPathEscapingPromptDirectory(t *testing.T) {
+	renderer := NewRenderer(filepath.Join("..", "..", "prompts"))
+	_, _, err := renderer.Pair("../go.mod", "../go.mod", nil)
+	if err == nil || !strings.Contains(err.Error(), "parse prompt") {
+		t.Fatalf("Pair(../go.mod) error = %v; want parse error inside prompt directory", err)
+	}
+}
+
+func TestJSONTextStripsMarkdownFence(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "no fence", input: "  {\"ok\":true}\n", want: `{"ok":true}`},
+		{name: "json fence", input: "```json\n{\n  \"ok\": true\n}\n```", want: "{\n  \"ok\": true\n}"},
+		{name: "plain fence", input: "```\n{\"ok\":true}\n```", want: `{"ok":true}`},
+		{name: "uppercase fence", input: "```JSON\n{\"ok\":true}\n```", want: `{"ok":true}`},
+		{name: "fence with trailing space", input: "```json \n{\"ok\":true}\n```", want: `{"ok":true}`},
+		{name: "crlf fence", input: "```json\r\n{\"ok\":true}\r\n```", want: `{"ok":true}`},
+		{name: "blank lines around fence", input: "\n\n```json\n{\"ok\":true}\n```\n\n", want: `{"ok":true}`},
+		{name: "backticks inside string without fence", input: "{\"note\":\"use ``` for code\"}", want: "{\"note\":\"use ``` for code\"}"},
+		{name: "closing fence with trailing newline", input: "```json\n{\"ok\":true}\n```\n", want: `{"ok":true}`},
+		{name: "single line json fence", input: "```json{\"ok\":true}```", want: `{"ok":true}`},
+		{name: "body on fence line without tag", input: "```{\"ok\":true}\n```", want: `{"ok":true}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := JSONText(test.input); got != test.want {
+				t.Fatalf("JSONText(%q) = %q, want %q", test.input, got, test.want)
+			}
+		})
+	}
+}
+
+func TestJSONTextFencedOutputUnmarshalsLikeBody(t *testing.T) {
+	body := "{\"ok\":true,\"sets\":[{\"weight\":80,\"reps\":10}],\"note\":\"use ``` for code\"}"
+	var want map[string]any
+	if err := json.Unmarshal([]byte(body), &want); err != nil {
+		t.Fatalf("json.Unmarshal(body) error = %v", err)
+	}
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "json fence", input: "```json\n" + body + "\n```"},
+		{name: "plain fence", input: "```\n" + body + "\n```"},
+		{name: "uppercase fence", input: "```JSON\n" + body + "\n```"},
+		{name: "fence with trailing space", input: "```json \n" + body + "\n```"},
+		{name: "crlf fence", input: "```json\r\n" + body + "\r\n```"},
+		{name: "blank lines around fence", input: "\n\n```json\n" + body + "\n```\n\n"},
+		{name: "closing fence with trailing newline", input: "```json\n" + body + "\n```\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var got map[string]any
+			if err := json.Unmarshal([]byte(JSONText(test.input)), &got); err != nil {
+				t.Fatalf("json.Unmarshal(JSONText(%q)) error = %v", test.input, err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("JSONText(%q) unmarshaled = %#v, want %#v", test.input, got, want)
+			}
+		})
 	}
 }

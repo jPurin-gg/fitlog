@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"reflect"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/jPurin-gg/myfitlog-backend/internal/ai"
+	"github.com/jPurin-gg/myfitlog-backend/internal/apperr"
 	"github.com/jPurin-gg/myfitlog-backend/internal/clock"
 	"github.com/jPurin-gg/myfitlog-backend/internal/profile"
 	"github.com/jPurin-gg/myfitlog-backend/internal/requestctx"
@@ -30,18 +33,27 @@ func TestGenerateMonthlyLogsFinalFeatureOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	unknownPlan := validPlan
+	unknownPlan.WeeklyRoutine = []DayRoutine{{
+		DayName: "月曜日", Target: "胸", ExampleExercises: []string{"AI name"}, ExerciseIDs: []string{"unknown"},
+	}}
+	unknownJSON, err := json.Marshal(unknownPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name           string
 		completion     string
 		completionErr  error
 		saveMonthlyErr error
 		wantOutcome    string
-		wantErr        bool
+		wantStatus     int
 	}{
 		{name: "applied", completion: string(validJSON), wantOutcome: "applied"},
-		{name: "provider error", completionErr: errors.New("provider unavailable"), wantOutcome: "provider_error", wantErr: true},
-		{name: "invalid output", completion: "not-json", wantOutcome: "invalid_output", wantErr: true},
-		{name: "storage error", completion: string(validJSON), saveMonthlyErr: errors.New("database unavailable"), wantOutcome: "storage_error", wantErr: true},
+		{name: "provider error", completionErr: errors.New("provider unavailable"), wantOutcome: "provider_error", wantStatus: 502},
+		{name: "invalid output", completion: "not-json", wantOutcome: "invalid_output", wantStatus: 502},
+		{name: "unknown exercise id", completion: string(unknownJSON), wantOutcome: "invalid_output", wantStatus: 502},
+		{name: "storage error", completion: string(validJSON), saveMonthlyErr: errors.New("database unavailable"), wantOutcome: "storage_error", wantStatus: 500},
 	}
 
 	for _, test := range tests {
@@ -59,8 +71,11 @@ func TestGenerateMonthlyLogsFinalFeatureOutcome(t *testing.T) {
 			ctx := requestctx.WithRequestID(context.Background(), "planning-request")
 
 			_, err := service.GenerateMonthly(ctx, 1, "2026-08", GenerateMonthlyInput{Frequency: "週1回"})
-			if (err != nil) != test.wantErr {
-				t.Fatalf("GenerateMonthly() error = %v, wantErr %v", err, test.wantErr)
+			if test.wantStatus == 0 && err != nil {
+				t.Fatalf("GenerateMonthly() error = %v", err)
+			}
+			if test.wantStatus != 0 && (err == nil || apperr.As(err).Status != test.wantStatus) {
+				t.Fatalf("GenerateMonthly() error = %#v, want status %d", apperr.As(err), test.wantStatus)
 			}
 
 			record := decodePlanningFeatureLog(t, output.Bytes())
@@ -68,6 +83,49 @@ func TestGenerateMonthlyLogsFinalFeatureOutcome(t *testing.T) {
 				t.Fatalf("feature log = %#v", record)
 			}
 		})
+	}
+}
+
+func TestGenerateMonthlySanitizesAppliedPlan(t *testing.T) {
+	aiPlan := MonthlyPlan{
+		PlanName:        "週1回プラン",
+		Description:     "無理なく継続するプランです。",
+		Rationale:       "初心者向けに負荷を調整します。",
+		RecommendedDays: []int{1},
+		WeeklyRoutine: []DayRoutine{{
+			DayName: "月曜日", Target: "胸", ExampleExercises: []string{"AI name"}, ExerciseIDs: []string{"bench"},
+		}},
+	}
+	encoded, err := json.Marshal(aiPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	repository := newStartDailyRepository(now)
+	repository.candidates = []Candidate{{ID: "bench", Name: "ベンチプレス", Equipment: "バーベル", PrimaryMuscles: []string{"胸"}}}
+	aiClient := &stubPlanningAI{complete: func(context.Context, ai.Request) (string, error) {
+		return string(encoded), nil
+	}}
+	service := NewService(repository, stubPlanningPreferences{}, aiClient, stubPlanningPrompts{}, clock.Fixed{Time: now}, time.Second)
+
+	result, err := service.GenerateMonthly(context.Background(), 1, "2026-08", GenerateMonthlyInput{Frequency: "週1回", RestDays: []int{1}})
+	if err != nil {
+		t.Fatalf("GenerateMonthly() error = %v", err)
+	}
+	if result.PlanMonth != "2026-08" || result.Frequency != "週1回" {
+		t.Fatalf("GenerateMonthly() = %#v", result)
+	}
+	if got := result.WeeklyRoutine[0].ExampleExercises[0]; got != "ベンチプレス" {
+		t.Fatalf("example_exercises[0] = %q, want dictionary name", got)
+	}
+	if !slices.Equal(result.RecommendedDays, []int{2}) || !slices.Equal(result.RestDays, []int{1}) {
+		t.Fatalf("recommended_days = %v; rest_days = %v", result.RecommendedDays, result.RestDays)
+	}
+	if result.Rationale != "初心者向けに負荷を調整します。 月曜は休息日として避けて、実施曜日を調整しました。" {
+		t.Fatalf("rationale = %q", result.Rationale)
+	}
+	if repository.saveMonthlyCalls != 1 || !reflect.DeepEqual(repository.savedMonthly, result) {
+		t.Fatalf("SaveMonthly() plan = %#v; calls = %d; returned = %#v", repository.savedMonthly, repository.saveMonthlyCalls, result)
 	}
 }
 
@@ -104,6 +162,103 @@ func TestStartDailyAppliesAIRefinement(t *testing.T) {
 	}
 	if repository.savedPlan.WorkoutTitle != "AI調整済み" || repository.saveCalls != 1 {
 		t.Fatalf("saved plan = %#v; calls = %d", repository.savedPlan, repository.saveCalls)
+	}
+}
+
+func TestStartDailySanitizesAIRefinement(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	base := newStartDailyRepository(now).basePlan()
+	with := func(mutate func(*WorkoutPlan)) WorkoutPlan {
+		plan := newStartDailyRepository(now).basePlan()
+		mutate(&plan)
+		return plan
+	}
+	tests := []struct {
+		name       string
+		response   WorkoutPlan
+		wantStatus string
+		wantSaved  WorkoutPlan
+	}{
+		{
+			name: "exercise count mismatch falls back",
+			response: with(func(plan *WorkoutPlan) {
+				plan.Exercises = append(plan.Exercises, PlanExercise{ExerciseID: "squat", Name: "スクワット", PlannedSets: 3, TargetWeight: 60, TargetReps: 8})
+			}),
+			wantStatus: AIStatusFallback,
+			wantSaved:  base,
+		},
+		{
+			name:       "empty workout title falls back",
+			response:   with(func(plan *WorkoutPlan) { plan.WorkoutTitle = "" }),
+			wantStatus: AIStatusFallback,
+			wantSaved:  base,
+		},
+		{
+			name:       "planned sets zero uses base",
+			response:   with(func(plan *WorkoutPlan) { plan.Exercises[0].PlannedSets = 0 }),
+			wantStatus: AIStatusApplied,
+			wantSaved:  base,
+		},
+		{
+			name:       "planned sets above six are clamped",
+			response:   with(func(plan *WorkoutPlan) { plan.Exercises[0].PlannedSets = 10 }),
+			wantStatus: AIStatusApplied,
+			wantSaved:  with(func(plan *WorkoutPlan) { plan.Exercises[0].PlannedSets = 6 }),
+		},
+		{
+			name:       "target weight zero uses base",
+			response:   with(func(plan *WorkoutPlan) { plan.Exercises[0].TargetWeight = 0 }),
+			wantStatus: AIStatusApplied,
+			wantSaved:  base,
+		},
+		{
+			name:       "negative target weight uses base",
+			response:   with(func(plan *WorkoutPlan) { plan.Exercises[0].TargetWeight = -5 }),
+			wantStatus: AIStatusApplied,
+			wantSaved:  base,
+		},
+		{
+			name:       "target reps zero uses base",
+			response:   with(func(plan *WorkoutPlan) { plan.Exercises[0].TargetReps = 0 }),
+			wantStatus: AIStatusApplied,
+			wantSaved:  base,
+		},
+		{
+			name: "exercise identity cannot be swapped",
+			response: with(func(plan *WorkoutPlan) {
+				plan.Exercises[0].ExerciseID, plan.Exercises[0].Name, plan.Exercises[0].LastMaxWeight = "squat", "スクワット", 999
+			}),
+			wantStatus: AIStatusApplied,
+			wantSaved:  base,
+		},
+		{
+			name:       "coach note and title are applied",
+			response:   with(func(plan *WorkoutPlan) { plan.WorkoutTitle, plan.CoachNote = "AIタイトル", "AIメモ" }),
+			wantStatus: AIStatusApplied,
+			wantSaved:  with(func(plan *WorkoutPlan) { plan.WorkoutTitle, plan.CoachNote = "AIタイトル", "AIメモ" }),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			encoded, err := json.Marshal(test.response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			repository := newStartDailyRepository(now)
+			aiClient := &stubPlanningAI{complete: func(context.Context, ai.Request) (string, error) {
+				return string(encoded), nil
+			}}
+			service := NewService(repository, nil, aiClient, stubPlanningPrompts{}, clock.Fixed{Time: now}, time.Second)
+
+			result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"))
+			if err != nil || result.AIStatus != test.wantStatus {
+				t.Fatalf("StartDaily() = %#v, %v; want ai_status %q", result, err, test.wantStatus)
+			}
+			if repository.saveCalls != 1 || !reflect.DeepEqual(repository.savedPlan, test.wantSaved) {
+				t.Fatalf("saved plan = %#v; calls = %d; want %#v", repository.savedPlan, repository.saveCalls, test.wantSaved)
+			}
+		})
 	}
 }
 
@@ -201,15 +356,17 @@ func TestDailyAndSaveDailyMarkAINotRequested(t *testing.T) {
 }
 
 type startDailyRepository struct {
-	now            time.Time
-	dailyResult    PlanSession
-	dailyErr       error
-	candidates     []Candidate
-	saveMonthlyErr error
-	savedPlan      WorkoutPlan
-	saveCalls      int
-	saveContextErr error
-	attachResult   PlanSession
+	now              time.Time
+	dailyResult      PlanSession
+	dailyErr         error
+	candidates       []Candidate
+	saveMonthlyErr   error
+	savedMonthly     MonthlyPlan
+	saveMonthlyCalls int
+	savedPlan        WorkoutPlan
+	saveCalls        int
+	saveContextErr   error
+	attachResult     PlanSession
 }
 
 func newStartDailyRepository(now time.Time) *startDailyRepository {
@@ -221,7 +378,7 @@ func (r *startDailyRepository) basePlan() WorkoutPlan {
 		WorkoutTitle:         "胸",
 		Target:               "胸",
 		EstimatedDurationMin: 30,
-		CoachNote:            "月間プランを反映します。",
+		CoachNote:            "月間プランの今日のメニューに、直近の重量と目標セット数を反映します。",
 		Exercises: []PlanExercise{{
 			ExerciseID: "bench", Name: "ベンチプレス", PlannedSets: 3, TargetWeight: 40, TargetReps: 10, LastMaxWeight: 50,
 		}},
@@ -242,6 +399,8 @@ func (*startDailyRepository) MonthlyList(context.Context, int) ([]MonthlyPlan, e
 }
 
 func (r *startDailyRepository) SaveMonthly(_ context.Context, _ int, _ string, plan MonthlyPlan) (MonthlyPlan, error) {
+	r.saveMonthlyCalls++
+	r.savedMonthly = plan
 	return plan, r.saveMonthlyErr
 }
 

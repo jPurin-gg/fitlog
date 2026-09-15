@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"unicode"
 )
 
 type Renderer struct {
@@ -43,9 +44,11 @@ func (r *Renderer) render(filename string, data any) (string, error) {
 
 func JSONText(value string) string {
 	value = strings.TrimSpace(value)
-	if strings.HasPrefix(value, "```json") {
-		value = strings.TrimPrefix(value, "```json")
-		value = strings.TrimSuffix(strings.TrimSpace(value), "```")
+	if !strings.HasPrefix(value, "```") {
+		return value
 	}
-	return strings.TrimSpace(value)
+	body := strings.TrimPrefix(value, "```")
+	body = strings.TrimLeftFunc(body, unicode.IsLetter)
+	body = strings.TrimSuffix(strings.TrimSpace(body), "```")
+	return strings.TrimSpace(body)
 }
