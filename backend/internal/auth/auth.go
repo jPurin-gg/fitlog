@@ -42,11 +42,18 @@ type Repository interface {
 }
 
 type Service struct {
-	repository Repository
+	repository     Repository
+	hashIterations int
 }
 
 func NewService(repository Repository) *Service {
-	return &Service{repository: repository}
+	return &Service{repository: repository, hashIterations: passwordHashIterations}
+}
+
+// WithPasswordHashIterations lowers the PBKDF2 cost for tests; at the default every login takes ~0.6s under -race.
+func (s *Service) WithPasswordHashIterations(iterations int) *Service {
+	s.hashIterations = iterations
+	return s
 }
 
 func (s *Service) Login(ctx context.Context, nickname, password string) (User, bool, error) {
@@ -72,7 +79,7 @@ func (s *Service) Login(ctx context.Context, nickname, password string) (User, b
 	switch {
 	case err == nil:
 		if stored.PasswordHash == "" {
-			hash, hashErr := HashPassword(password)
+			hash, hashErr := hashPassword(password, s.hashIterations)
 			if hashErr != nil {
 				return User{}, false, apperr.Internal(hashErr)
 			}
@@ -93,7 +100,7 @@ func (s *Service) Login(ctx context.Context, nickname, password string) (User, b
 		return User{}, false, apperr.Internal(err)
 	}
 
-	hash, err := HashPassword(password)
+	hash, err := hashPassword(password, s.hashIterations)
 	if err != nil {
 		return User{}, false, apperr.Internal(err)
 	}
@@ -172,12 +179,16 @@ func (s *TokenSigner) Verify(token string, now time.Time) (int, error) {
 }
 
 func HashPassword(password string) (string, error) {
+	return hashPassword(password, passwordHashIterations)
+}
+
+func hashPassword(password string, iterations int) (string, error) {
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	hash := pbkdf2SHA256([]byte(password), salt, passwordHashIterations, 32)
-	return fmt.Sprintf("pbkdf2_sha256$%d$%s$%s", passwordHashIterations, base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(hash)), nil
+	hash := pbkdf2SHA256([]byte(password), salt, iterations, 32)
+	return fmt.Sprintf("pbkdf2_sha256$%d$%s$%s", iterations, base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(hash)), nil
 }
 
 func VerifyPassword(password, stored string) (bool, error) {
