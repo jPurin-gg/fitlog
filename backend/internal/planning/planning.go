@@ -61,6 +61,10 @@ type GenerateMonthlyInput struct {
 	RestDays   []int  `json:"rest_days"`
 }
 
+type StartDailyInput struct {
+	UseAI *bool `json:"use_ai"`
+}
+
 type Candidate struct {
 	ID             string   `json:"id"`
 	Name           string   `json:"name"`
@@ -285,7 +289,7 @@ func (s *Service) SaveDaily(ctx context.Context, userID int, dateText string, pl
 	return saved, nil
 }
 
-func (s *Service) StartDaily(ctx context.Context, userID int, dateText string) (PlanSession, error) {
+func (s *Service) StartDaily(ctx context.Context, userID int, dateText string, input StartDailyInput) (PlanSession, error) {
 	date, err := s.parseDate(dateText)
 	if err != nil {
 		return PlanSession{}, err
@@ -300,14 +304,17 @@ func (s *Service) StartDaily(ctx context.Context, userID int, dateText string) (
 			return PlanSession{}, buildErr
 		}
 		aiStarted := time.Now()
-		aiContext, cancel := s.optionalAIContext(ctx)
-		refined, refineErr := s.refineDaily(aiContext, base)
-		cancel()
-		if refineErr != nil {
-			refined = base
-			aiStatus = AIStatusFallback
-		} else {
-			aiStatus = AIStatusApplied
+		refined := base
+		if input.UseAI == nil || *input.UseAI {
+			aiContext, cancel := s.optionalAIContext(ctx)
+			adjusted, refineErr := s.refineDaily(aiContext, base)
+			cancel()
+			if refineErr != nil {
+				aiStatus = AIStatusFallback
+			} else {
+				refined = adjusted
+				aiStatus = AIStatusApplied
+			}
 		}
 		if _, saveErr := s.repository.SaveDaily(ctx, userID, date, refined); saveErr != nil {
 			ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutPlan, "storage_error", aiStarted)
