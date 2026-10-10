@@ -3,6 +3,7 @@
 import React from "react";
 import { Loader2, Lock, LogOut, Sparkles } from "lucide-react";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
+import { AISettingsProvider } from "./AISettings";
 
 export interface AuthUser {
   id: number;
@@ -75,7 +76,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider value={{ user, logout }}>
-      {children}
+      <AISettingsProvider userID={user.id}>{children}</AISettingsProvider>
     </AuthContext.Provider>
   );
 }
