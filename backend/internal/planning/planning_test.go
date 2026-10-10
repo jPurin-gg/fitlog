@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"reflect"
 	"slices"
@@ -371,6 +372,9 @@ func TestDailyAndSaveDailyMarkAINotRequested(t *testing.T) {
 }
 
 type startDailyRepository struct {
+	monthlyErr       error
+	monthlyCalls     int
+	resolveErr       error
 	createdByOther   bool
 	now              time.Time
 	dailyResult      PlanSession
@@ -402,6 +406,10 @@ func (r *startDailyRepository) basePlan() WorkoutPlan {
 }
 
 func (r *startDailyRepository) Monthly(context.Context, int, string) (MonthlyPlan, error) {
+	r.monthlyCalls++
+	if r.monthlyErr != nil {
+		return MonthlyPlan{}, r.monthlyErr
+	}
 	return MonthlyPlan{
 		RecommendedDays: []int{int(r.now.Weekday())},
 		WeeklyRoutine: []DayRoutine{{
@@ -473,8 +481,61 @@ func TestStartDailyPreservesPlanCommittedWhileAIWasRunning(t *testing.T) {
 	}
 }
 
-func (*startDailyRepository) ResolveExercise(context.Context, int, string, string) (ExerciseStats, string, error) {
+func (r *startDailyRepository) ResolveExercise(context.Context, int, string, string) (ExerciseStats, string, error) {
+	if r.resolveErr != nil {
+		return ExerciseStats{}, "", r.resolveErr
+	}
 	return ExerciseStats{Name: "ベンチプレス", TargetSets: 3, TargetWeight: 40, TargetReps: 10, MaxWeight: 50}, "bench", nil
+}
+
+func TestManualStartNeverNeedsMonthlyPlanOrAI(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	for _, stored := range []bool{false, true} {
+		t.Run(fmt.Sprint(stored), func(t *testing.T) {
+			repository := newStartDailyRepository(now)
+			repository.monthlyErr = ErrNotFound
+			if stored {
+				repository.dailyErr = nil
+				repository.attachResult = PlanSession{ID: 7, WorkoutID: 9, Plan: repository.basePlan()}
+			}
+			service := NewService(repository, nil, nil, nil, clock.Fixed{Time: now}, time.Second)
+			exerciseID := "bench"
+			result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{ExerciseID: &exerciseID})
+			if err != nil || result.WorkoutID == 0 || result.AIStatus != AIStatusNotRequested || repository.monthlyCalls != 0 {
+				t.Fatalf("manual start = %#v, %v; monthly calls = %d", result, err, repository.monthlyCalls)
+			}
+			if stored && (repository.saveCalls != 0 || result.Plan.WorkoutTitle != "胸") {
+				t.Fatal("existing plan replaced")
+			}
+			if !stored && result.Plan.WorkoutTitle != "フリーワークアウト" {
+				t.Fatal("manual plan missing")
+			}
+		})
+	}
+}
+
+func TestManualStartValidatesExercise(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	for _, exerciseID := range []string{"", "unknown"} {
+		repository := newStartDailyRepository(now)
+		repository.resolveErr = ErrExerciseNotFound
+		service := NewService(repository, nil, nil, nil, clock.Fixed{Time: now}, time.Second)
+		_, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{ExerciseID: &exerciseID})
+		if err == nil || repository.saveCalls != 0 {
+			t.Fatal("invalid exercise was accepted")
+		}
+	}
+}
+
+func TestBasePlanDoesNotMaskStorageFailureAsMissingPlan(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	repository := newStartDailyRepository(now)
+	repository.monthlyErr = errors.New("database unavailable")
+	service := NewService(repository, nil, nil, nil, clock.Fixed{Time: now}, time.Second)
+	_, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{})
+	if apperr.As(err).Status != 500 {
+		t.Fatalf("storage failure = %v", err)
+	}
 }
 
 type stubPlanningAI struct {
