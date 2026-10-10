@@ -111,6 +111,14 @@ export default function WorkoutPage() {
     dispatchRecordFlow({ type: "RECOMMENDATION_CANCELED" });
   }, [aiEnabled]);
 
+  React.useEffect(() => {
+    if (aiEnabled) return;
+    summaryCommentAbortRef.current?.abort();
+    summaryCommentRequestRef.current += 1;
+    setSummaryCommentState("idle");
+    setSummaryCommentError(null);
+  }, [aiEnabled]);
+
   // 種目が変わったら目標セット数を取得
   React.useEffect(() => {
     const fetchTargetSets = async () => {
@@ -343,6 +351,7 @@ export default function WorkoutPage() {
   };
 
   const fetchSummaryComment = async (workoutID: number) => {
+    if (!isEnabled()) return;
     summaryCommentAbortRef.current?.abort();
     const controller = new AbortController();
     const requestID = summaryCommentRequestRef.current + 1;
@@ -352,11 +361,11 @@ export default function WorkoutPage() {
     setSummaryCommentError(null);
     try {
       const data = await getSummaryComment(workoutID, controller.signal);
-      if (controller.signal.aborted || summaryCommentRequestRef.current !== requestID || finishedWorkoutIDRef.current !== workoutID) return;
+      if (!isEnabled() || controller.signal.aborted || summaryCommentRequestRef.current !== requestID || finishedWorkoutIDRef.current !== workoutID) return;
       setFinishedSummary(previous => previous ? { ...previous, ai_comment: data.comment } : previous);
       setSummaryCommentState("ready");
     } catch (e) {
-      if (controller.signal.aborted || summaryCommentRequestRef.current !== requestID || finishedWorkoutIDRef.current !== workoutID) return;
+      if (!isEnabled() || controller.signal.aborted || summaryCommentRequestRef.current !== requestID || finishedWorkoutIDRef.current !== workoutID) return;
       console.error(e);
       setSummaryCommentError(apiErrorMessage(e, "AI総評を取得できませんでした。"));
       setSummaryCommentState("unavailable");
@@ -382,8 +391,10 @@ export default function WorkoutPage() {
       setFinishedSummary(data.summary || null);
       if (data.summary?.ai_comment) {
         setSummaryCommentState("ready");
-      } else {
+      } else if (isEnabled()) {
         void fetchSummaryComment(workoutID);
+      } else {
+        setSummaryCommentState("idle");
       }
       setWorkoutStarted(false);
       setWorkoutPlan(null);
@@ -450,7 +461,13 @@ export default function WorkoutPage() {
             exerciseSectionClassName="mb-6"
           />
 
-          {summaryCommentState === "loading" && (
+          {aiEnabled && summaryCommentState === "idle" && !finishedSummary.ai_comment && finishedWorkoutID && (
+            <button type="button" onClick={() => void fetchSummaryComment(finishedWorkoutID)} className="mb-6 rounded-2xl border border-primary/30 px-5 py-3 text-sm font-bold text-primary">
+              AI総評を取得
+            </button>
+          )}
+
+          {aiEnabled && summaryCommentState === "loading" && (
             <div className="mb-6 flex items-center gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm text-white/65">
               <Loader2 className="h-5 w-5 animate-spin text-primary" />
               <div>
@@ -460,7 +477,7 @@ export default function WorkoutPage() {
             </div>
           )}
 
-          {summaryCommentState === "unavailable" && (
+          {aiEnabled && summaryCommentState === "unavailable" && (
             <div className="mb-6 rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4">
               <div className="flex items-start gap-3">
                 <BrainCircuit className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-300" />
