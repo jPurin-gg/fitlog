@@ -371,6 +371,7 @@ func TestDailyAndSaveDailyMarkAINotRequested(t *testing.T) {
 }
 
 type startDailyRepository struct {
+	createdByOther   bool
 	now              time.Time
 	dailyResult      PlanSession
 	dailyErr         error
@@ -439,6 +440,37 @@ func (r *startDailyRepository) AttachWorkout(context.Context, int, time.Time) (P
 		return r.attachResult, nil
 	}
 	return PlanSession{ID: 7, WorkoutID: 9, PlanDate: r.now.Format("2006-01-02"), Status: "active", Plan: r.savedPlan}, nil
+}
+
+func (r *startDailyRepository) CreateDailyIfMissing(ctx context.Context, userID int, date time.Time, plan WorkoutPlan) (bool, error) {
+	if r.createdByOther {
+		return false, nil
+	}
+	_, err := r.SaveDaily(ctx, userID, date, plan)
+	return err == nil, err
+}
+
+func TestStartDailyPreservesPlanCommittedWhileAIWasRunning(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	repository := newStartDailyRepository(now)
+	manual := repository.basePlan()
+	manual.WorkoutTitle = "手動で選んだプラン"
+	aiClient := &stubPlanningAI{complete: func(context.Context, ai.Request) (string, error) {
+		repository.createdByOther = true
+		repository.attachResult = PlanSession{ID: 7, WorkoutID: 9, Plan: manual}
+		late := repository.basePlan()
+		late.WorkoutTitle = "遅れて返ったAIプラン"
+		encoded, _ := json.Marshal(late)
+		return string(encoded), nil
+	}}
+	service := NewService(repository, nil, aiClient, stubPlanningPrompts{}, clock.Fixed{Time: now}, time.Second)
+	result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{})
+	if err != nil || result.WorkoutID != 9 || result.Plan.WorkoutTitle != manual.WorkoutTitle || result.AIStatus != AIStatusNotRequested {
+		t.Fatalf("StartDaily() = %#v, %v", result, err)
+	}
+	if repository.saveCalls != 0 {
+		t.Fatalf("late request overwrote the plan %d times", repository.saveCalls)
+	}
 }
 
 func (*startDailyRepository) ResolveExercise(context.Context, int, string, string) (ExerciseStats, string, error) {

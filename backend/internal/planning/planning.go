@@ -116,6 +116,7 @@ type Repository interface {
 	Candidates(ctx context.Context, userID int) ([]Candidate, error)
 	Daily(ctx context.Context, userID int, date time.Time) (PlanSession, error)
 	SaveDaily(ctx context.Context, userID int, date time.Time, plan WorkoutPlan) (PlanSession, error)
+	CreateDailyIfMissing(ctx context.Context, userID int, date time.Time, plan WorkoutPlan) (bool, error)
 	AttachWorkout(ctx context.Context, userID int, date time.Time) (PlanSession, error)
 	ResolveExercise(ctx context.Context, userID int, exerciseID, name string) (ExerciseStats, string, error)
 }
@@ -316,9 +317,14 @@ func (s *Service) StartDaily(ctx context.Context, userID int, dateText string, i
 				aiStatus = AIStatusApplied
 			}
 		}
-		if _, saveErr := s.repository.SaveDaily(ctx, userID, date, refined); saveErr != nil {
+		created, saveErr := s.repository.CreateDailyIfMissing(ctx, userID, date, refined)
+		if saveErr != nil {
 			ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutPlan, "storage_error", aiStarted)
 			return PlanSession{}, apperr.Internal(saveErr)
+		}
+		if !created {
+			// Another start or manual edit won while optional AI was running.
+			aiStatus = AIStatusNotRequested
 		}
 		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutPlan, aiStatus, aiStarted)
 	} else if err != nil {

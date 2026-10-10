@@ -155,6 +155,25 @@ func (r *Repository) SaveDaily(ctx context.Context, userID int, date time.Time, 
 	return session, nil
 }
 
+// CreateDailyIfMissing never replaces a plan committed by another request.
+// AttachWorkout subsequently locks that plan and reuses its workout_id.
+func (r *Repository) CreateDailyIfMissing(ctx context.Context, userID int, date time.Time, plan planning.WorkoutPlan) (bool, error) {
+	encoded, err := json.Marshal(plan)
+	if err != nil {
+		return false, err
+	}
+	result, err := r.db.ExecContext(ctx, `
+		INSERT INTO workout_plans (workout_id,user_id,plan_date,title,estimated_duration_min,status,plan)
+		VALUES (NULL,$1,$2::date,$3,$4,'active',$5::jsonb)
+		ON CONFLICT (user_id,plan_date,status) DO NOTHING
+	`, userID, date, plan.WorkoutTitle, plan.EstimatedDurationMin, string(encoded))
+	if err != nil {
+		return false, err
+	}
+	count, err := result.RowsAffected()
+	return count == 1, err
+}
+
 func (r *Repository) AttachWorkout(ctx context.Context, userID int, date time.Time) (planning.PlanSession, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
