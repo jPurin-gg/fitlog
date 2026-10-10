@@ -115,6 +115,64 @@ describe("WorkoutPage record-first flow", () => {
     expect(screen.queryByText("遅い応答")).not.toBeInTheDocument();
   });
 
+  it("保存待機中のOFFでも保存と入力を維持し、AI提案は開始しない", async () => {
+    useCommonHandlers();
+    const saved = deferred<Response>();
+    let requests = 0;
+    let aiCalls = 0;
+    server.use(
+      http.post(`${apiOrigin}/api/workouts/42/sets`, async () => { requests++; return saved.promise; }),
+      http.post(`${apiOrigin}/api/workouts/42/sets/100/recommendation`, () => { aiCalls++; return HttpResponse.json({}); }),
+    );
+    const user = userEvent.setup();
+    await startWorkout(user);
+    await user.click(screen.getByRole("button", { name: "セットを保存" }));
+    await waitFor(() => expect(requests).toBe(1));
+    await user.click(screen.getByRole("switch"));
+    await act(async () => { saved.resolve(HttpResponse.json({ id: 100 })); await saved.promise; });
+    await screen.findByText(/セットは保存済みです/);
+    expect(aiCalls).toBe(0);
+    expect(screen.getByPlaceholderText("80")).toHaveValue(60);
+    await user.click(screen.getByRole("button", { name: "同じ内容で次へ" }));
+    expect(screen.getByText("セット 2 / 3")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("80")).toHaveValue(60);
+    await user.click(screen.getByRole("switch"));
+    expect(requests).toBe(1);
+    expect(aiCalls).toBe(0);
+  });
+
+  it("AI提案中にOFF→ONとしても古い提案を適用せず、保存済み状態を保つ", async () => {
+    useCommonHandlers();
+    const delayed = deferred<Response>();
+    let aiCalls = 0;
+    let finished = false;
+    server.use(
+      http.post(`${apiOrigin}/api/workouts/42/sets`, () => HttpResponse.json({ id: 100 })),
+      http.post(`${apiOrigin}/api/workouts/42/sets/100/recommendation`, async () => {
+        aiCalls++;
+        const result = await delayed.promise;
+        finished = true;
+        return result;
+      }),
+    );
+    const user = userEvent.setup();
+    await startWorkout(user);
+    await user.click(screen.getByRole("button", { name: "セットを保存" }));
+    await screen.findByText("AI提案を取得中");
+    await user.click(screen.getByRole("switch"));
+    expect(screen.queryByText("AI提案を取得中")).not.toBeInTheDocument();
+    expect(screen.getByText(/セットは保存済みです/)).toBeInTheDocument();
+    await user.click(screen.getByRole("switch"));
+    await act(async () => {
+      delayed.resolve(HttpResponse.json({ next_action: "CONTINUE", recommendation: "古い提案", target_weight: 100 }));
+      await delayed.promise;
+    });
+    await waitFor(() => expect(finished).toBe(true));
+    expect(screen.queryByText("古い提案")).not.toBeInTheDocument();
+    expect(aiCalls).toBe(1);
+    expect(screen.getByRole("button", { name: "同じ内容で次へ" })).toBeEnabled();
+  });
+
   it("AI提案だけを再試行し、保存済みセットは再送しない", async () => {
     useCommonHandlers();
     let saveCalls = 0;

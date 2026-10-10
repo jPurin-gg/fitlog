@@ -13,7 +13,8 @@ export type RecordFlowAction =
   | { type: "SAVE_FAILED" }
   | { type: "RECOMMENDATION_STARTED" }
   | { type: "RECOMMENDATION_SUCCEEDED" }
-  | { type: "RECOMMENDATION_FAILED" };
+  | { type: "RECOMMENDATION_FAILED" }
+  | { type: "RECOMMENDATION_CANCELED" };
 
 export const initialRecordFlowState: RecordFlowState = {
   save: "editing",
@@ -36,5 +37,7 @@ export function recordFlowReducer(state: RecordFlowState, action: RecordFlowActi
       return { ...state, recommendation: "ready" };
     case "RECOMMENDATION_FAILED":
       return { ...state, recommendation: "unavailable" };
+    case "RECOMMENDATION_CANCELED":
+      return { ...state, recommendation: "idle" };
   }
 }
