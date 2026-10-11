@@ -110,9 +110,26 @@ JSON入力は1 MiBまでで、未知フィールドと複数JSON値を拒否し�
 | POST | `/api/monthly-plans/{YYYY-MM}/generate` | AIで生成して保存 |
 | GET | `/api/workout-plans/{YYYY-MM-DD}` | 保存済み予定、なければ月間プランからdraftを構築 |
 | PUT | `/api/workout-plans/{YYYY-MM-DD}` | 日次予定を保存 |
-| POST | `/api/workout-plans/{YYYY-MM-DD}/start` | 日次予定を確定してワークアウト開始。AI調整失敗時は基礎プランを保存 |
+| POST | `/api/workout-plans/{YYYY-MM-DD}/start` | AI利用を選択して開始、または種目指定で手動開始 |
 
-開始APIはアプリ設定のタイムゾーンにおける当日だけ受け付けます。過去・未来の記録編集は `/api/workouts/by-date/{YYYY-MM-DD}` を使います。`PlanSession.ai_status` は `applied`（AI調整を反映）、`fallback`（AIを使えず基礎プランを反映）、`not_requested`（保存済み予定を利用）のいずれかです。月間プランがない場合は、クライアントが `PUT` で1種目以上の日次予定を保存してから開始できます。
+開始APIはアプリ設定のタイムゾーンにおける当日だけ受け付けます。過去・未来の記録編集は `/api/workouts/by-date/{YYYY-MM-DD}` を使います。開始リクエストは任意のJSON本文を受け付けます。
+
+```json
+{ "use_ai": false, "exercise_id": "bench_press" }
+```
+
+| フィールド | 動作 |
+|---|---|
+| `use_ai: false` | AI調整を呼び出さず開始。日次予定がなければ月間プランから基礎メニューを構築 |
+| `use_ai: true` | 日次予定がない場合にAI調整を試み、失敗時は基礎メニューで開始 |
+| `use_ai` 省略・`null`、または本文なし | 従来クライアントとの互換性のためONと同じ動作 |
+| `exercise_id` | 手動で選択した種目。月間プランを参照せず、`use_ai` にかかわらずAI調整なしで開始 |
+
+手動開始は有効な種目IDが必要です。日次予定がなければその種目の予定を作り、既存の日次予定があれば予定とワークアウトをそのまま再利用します。クライアントは開始前に日次予定をPUTする必要がありません。種目指定なしで月間・日次プランの両方がない場合は404を返し、画面は手動選択へ進みます。DBの障害は未作成とは区別してエラーにします。不正JSON・未知のフィールド・型が異なる値は拒否します。
+
+開始用の予定保存は `CreateDailyIfMissing` による作成専用です。ワークアウトの紐付けは日次予定の行ロックで直列化し、同時開始では同じ `workout_id` を返します。AIの応答待ち中に別の開始や手動編集が予定を確定しても、後着の開始処理では上書きしません。日次予定の明示的な編集は引き続きPUTで行います。
+
+`PlanSession.ai_status` は `applied`（AI調整を反映）、`fallback`（AIに失敗して基礎プランを反映）、`not_requested`（明示OFF・手動開始・保存済み予定の再利用）のいずれかです。競合した開始が先に予定を作成していた場合も、その予定を再利用して `not_requested` を返します。
 
 ### ワークアウト
 
@@ -135,6 +152,10 @@ AI総評は `{ "comment": "...", "replayed": false }` を返します。同じ�
 
 ## AI境界
 
+フロントエンドは `AISettingsProvider` でユーザーごとの設定を共有します。`localStorage` の `fitlog:ai-enabled:{userID}` に `true` / `false` を保存し、初期値・読み込み前・不正値・読み込み例外時はOFFです。画面をまたいで同じトグルを使い、認証ユーザーが変わると状態を切り替えます。
+
+OFFでは開始リクエストに `use_ai: false` を送り、セット保存後の提案・終了後の総評・月間生成・代替種目相談の呼び出しを止めます。待機中のAIはAbortControllerで中断し、リクエスト識別子と最新設定で後着結果を破棄します。通常のセット保存は中断せず、入力・セット番号・保存状態・冪等キーを維持します。ONに戻しても保存済みの記録を再送しません。終了後は明示ボタンで総評を取得できます。すでに送信したAI処理の撤回や、完了済み保存の取り消しは保証しません。
+
 機能Serviceは `ai.Client` だけを参照し、HTTP APIのURLや認証方式を知りません。現在の具体実装はOpenAI互換Chat Completionsアダプター1つです。
 
 - xAI向け設定名は `XAI_API_KEY`、`XAI_API_URL`、`XAI_MODEL`
@@ -149,6 +170,14 @@ AI総評は `{ "comment": "...", "replayed": false }` を返します。同じ�
 HTTPログは `request_id`、method、生のIDを含まないroute pattern、status、response bytes、所要時間を記録します。AIログは同じ `request_id` で相関でき、provider段階の最終outcome・試行回数・総時間と、feature段階の `applied`、`fallback`、`invalid_output`、`unavailable`、`replayed` などを分けて記録します。
 
 プロバイダーを追加する場合も、機能Serviceではなく `internal/ai` 配下へ新しいアダプターを追加します。現時点では自動ルーティングや複数キー管理は行いません。
+
+## 月間プランの案内
+
+ホームでは当月の月間プランが404で、非表示設定の読み込みが完了し、当月が非表示でない場合に案内を自動表示します。AI利用設定とは独立した判定で、案内の表示だけでは生成しません。プラン取得が404以外で失敗した場合や、当月のプランがある場合は自動表示しません。
+
+「今月は次回以降表示しない」は `localStorage` の `fitlog:monthly-prompt-dismissed:{userID}` に対象年月を保存します。月の形式・基準はプラン取得と同じ `formatPlanMonth`（ブラウザのローカル年月の `YYYY-MM`）です。当月との完全一致だけを非表示とし、翌月・年越し・別ユーザーには持ち越しません。ストレージの読み書きができない場合も今回の案内は閉じられます。
+
+通常の閉じる操作では保存値を変更しません。同じホーム表示中は開き直さず、次の訪問で再判定します。ホームの「月間プランを作成／見直す」は非表示中も利用でき、開閉しても非表示設定を解除しません。ホームを開いたままの月またぎは画面復帰・可視状態の変更・1分ごとの時刻確認で判定します。記録画面では自動案内を行いません。
 
 ## データベース変更
 
@@ -165,12 +194,14 @@ HTTPログは `request_id`、method、生のIDを含まないroute pattern、sta
 
 - `auth`: パスワード、署名Cookieトークン、登録・旧ユーザー移行
 - `ai/openaicompat`: リクエスト形式、再試行、非再試行、レート制限、壊れたレスポンス
-- `planning`: 休息日ポリシー、AIが辞書外IDを返した場合の拒否
+- `planning`: 休息日ポリシー、AIが辞書外IDを返した場合の拒否、開始オプション、AIなしの手動開始と既存予定保持
 - `profile`: 設定正規化
 - `prompt`: 全テンプレートの描画
 - `workout`: 冪等キー入力契約
 - 専用の一時PostgreSQLで、同一セットの同時再送、終了と保存の競合、終了後リプレイを検証
-- React Testing LibraryとMSWでrecord-first状態遷移、AI提案だけの再試行、終了集計の先行表示を検証
-- Playwrightで「保存 → AI障害中も継続 → 終了 → AI総評再試行」をブラウザ検証
+- `app` のHTTP統合テストで認証→月間・日次プランなしの手動開始→複数セット・種目変更→終了→履歴取得を検証。ローカルのAI用サーバーで呼び出し0件を確認し、8件の並行開始と遅いAIによる上書き防止も検証
+- React Testing LibraryとMSWで保存状態とAI状態の分離、保存・提案・総評の待機中のOFF切り替え、入力保持、遅い応答の破棄を検証
+- 時刻・ストレージを制御し、月間案内の当月非表示、通常の閉じる、再訪、翌月、年越し、別ユーザー、手動表示を検証
+- PlaywrightでAI OFFの手動記録・終了とAI呼び出し0件、AI ONの障害時継続、月間案内の非表示・再表示と設定共有をブラウザ検証
 - Docker上で `go test`、race detector、`go vet`、ESLint、TypeScript検査、Next.js本番ビルド
 - npm本番依存は `npm audit --omit=dev` で監査
