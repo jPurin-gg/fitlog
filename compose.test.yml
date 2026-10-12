@@ -30,4 +30,4 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: go test -race -tags=integration -count=1 ./internal/workout/postgres
+    command: go test -race -tags=integration -count=1 ./internal/workout/postgres ./internal/app
