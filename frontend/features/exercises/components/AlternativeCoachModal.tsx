@@ -2,44 +2,66 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
+import { AIToggle, useAISettings } from "@/components/AISettings";
 import { motion } from "framer-motion";
 import { Loader2, X, MessageSquare, BrainCircuit, ArrowRight, AlertCircle } from "lucide-react";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { apiErrorMessage, apiFetch } from "@/lib/api";
 
 export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onReplace }: any) {
+  const { enabled: aiEnabled, isEnabled } = useAISettings();
   const [loading, setLoading] = React.useState(false);
   const [reason, setReason] = React.useState("");
   const [customName, setCustomName] = React.useState("");
   const [result, setResult] = React.useState<any>(null);
   const [error, setError] = React.useState("");
+  const [aiError, setAIError] = React.useState("");
   const [customLoading, setCustomLoading] = React.useState(false);
   const inFlightRef = React.useRef(false);
+  const abortRef = React.useRef<AbortController | null>(null);
+  const requestRef = React.useRef(0);
+
+  React.useEffect(() => () => abortRef.current?.abort(), []);
+  React.useEffect(() => {
+    if (aiEnabled) return;
+    abortRef.current?.abort();
+    requestRef.current += 1;
+    inFlightRef.current = false;
+    setLoading(false);
+    setResult(null);
+    setAIError("");
+  }, [aiEnabled]);
 
   useBodyScrollLock();
 
   const fetchAlternatives = async () => {
-    if (inFlightRef.current) return;
+    if (!isEnabled() || inFlightRef.current) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const requestID = ++requestRef.current;
+    const current = () => isEnabled() && !controller.signal.aborted && requestRef.current === requestID;
     inFlightRef.current = true;
     setLoading(true);
-    setError("");
+    setAIError("");
     setResult(null);
     try {
       if (!exerciseId) {
-        setError("種目IDがないため、AIに代替種目を相談できません。");
+        setAIError("種目IDがないため、AIに代替種目を相談できません。");
         return;
       }
       const data = await apiFetch<any>(`/api/exercises/${encodeURIComponent(exerciseId)}/alternatives`, {
         method: 'POST',
+        signal: controller.signal,
         body: JSON.stringify({ reason })
       });
-      setResult(data);
+      if (current()) setResult(data);
     } catch (e) {
-      console.error(e);
-      setError(apiErrorMessage(e, "ネットワークエラーが発生しました。バックエンドに接続できません。"));
+      if (current()) setAIError(apiErrorMessage(e, "AIに相談できませんでした。手動で変更できます。"));
     } finally {
-      inFlightRef.current = false;
-      setLoading(false);
+      if (requestRef.current === requestID) {
+        inFlightRef.current = false;
+        setLoading(false);
+      }
     }
   };
 
@@ -67,6 +89,9 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
       <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={onClose} />
       
       <motion.div 
+        role="dialog"
+        aria-modal="true"
+        aria-label="種目を変更"
         initial={{ opacity: 0, y: 20, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 10, scale: 0.95 }}
@@ -86,12 +111,16 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
           <h2 className="text-xl font-bold tracking-tight">種目を変更</h2>
         </div>
 
+        <div className="mb-4"><AIToggle /></div>
+        {!aiEnabled && <p className="mb-4 text-sm text-white/50">AIはOFFです。種目は手動で変更できます。</p>}
+        {error && <p role="alert" className="mb-4 text-sm text-red-300">{error}</p>}
+
         <div className="bg-white/5 rounded-2xl p-4 mb-6 border border-white/5 flex items-center justify-between">
           <div className="text-sm font-medium text-white/40">変更対象</div>
           <div className="text-lg font-black text-white">{exerciseName}</div>
         </div>
 
-        {!result ? (
+        {!aiEnabled || !result ? (
           <div className="space-y-6">
             <div className="space-y-3">
               <label className="text-[12px] font-black text-white/40 ml-1">マシンが空いていないですか？</label>
@@ -105,21 +134,21 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
             
             <button 
               onClick={fetchAlternatives}
-              disabled={loading}
+              disabled={loading || !aiEnabled}
               className="w-full py-4 bg-primary text-black font-black rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-30 flex items-center justify-center gap-2"
             >
               {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><BrainCircuit className="w-5 h-5" /> AIに代替種目を相談する</>}
             </button>
 
-            {error && (
+            {aiEnabled && aiError && (
               <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-start gap-3">
                 <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
                   <p className="text-red-300 font-bold text-sm">エラーが発生しました</p>
-                  <p className="text-red-200/70 text-xs mt-1 whitespace-pre-line">{error}</p>
+                  <p className="text-red-200/70 text-xs mt-1 whitespace-pre-line">{aiError}</p>
                   <button
                     onClick={fetchAlternatives}
-                    disabled={loading}
+                    disabled={loading || !aiEnabled}
                     className="mt-3 text-xs text-red-300 hover:text-red-200 underline transition-colors disabled:opacity-50"
                   >
                     もう一度試す

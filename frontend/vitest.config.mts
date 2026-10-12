@@ -19,7 +19,7 @@ export default defineConfig({
     env: {
       NEXT_PUBLIC_API_URL: "http://localhost:3000",
     },
-    include: ["app/**/*.test.{ts,tsx}", "components/**/*.test.{ts,tsx}", "lib/**/*.test.{ts,tsx}"],
+    include: ["app/**/*.test.{ts,tsx}", "components/**/*.test.{ts,tsx}", "features/**/*.test.{ts,tsx}", "lib/**/*.test.{ts,tsx}"],
     setupFiles: ["./vitest.setup.ts"],
     restoreMocks: true,
   },
