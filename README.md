@@ -232,6 +232,50 @@ npm run test:e2e
 # E2E_PORT=3002 PLAYWRIGHT_CHANNEL=chrome npm run test:e2e -- --workers=1
 ```
 
+## CI（GitHub Actions）
+
+`.github/workflows/ci.yml` は、全baseブランチのPR作成・追加コミット・再オープン・編集（base変更を含む）、mainへのpush、手動実行で動きます。PRではcheckout既定のマージ結果を検証します。作業ブランチへのpushだけでは実行しません。同じPRの古い実行だけをキャンセルし、main pushと手動実行は実行IDごとに分離します。
+
+Ubuntu 24.04で次の4ジョブを並列実行し、`ci-required` に集約します。Node.jsはDockerと同じ22系（22.14以上）、Goは `backend/go.mod` のバージョンを使います。npmは `frontend/package-lock.json`、Goは `backend/go.sum` に対応するキャッシュを利用します。
+
+| ジョブ | 検証コマンド | 上限 |
+| --- | --- | --- |
+| `frontend` | `npm ci` → `npm run lint` → `npx tsc --noEmit` → `npm test` → `npm run build` | 15分 |
+| `backend` | `go test -race ./...` → `go vet ./...` | 15分 |
+| `db-integration` | `go test -race -tags=integration -count=1 -json ./internal/app ./internal/workout/postgres` → 結果検査 | 20分 |
+| `e2e` | `npm ci` → `npx playwright install --with-deps chromium` → `npm run test:e2e -- --workers=1 --reporter=list,html` | 25分 |
+
+各コマンドは対応する `frontend` / `backend` ディレクトリで実行します。DB統合テストはPostgreSQL 16の一時service containerに、明示した `FITLOG_TEST_DATABASE_DSN` で接続します。接続情報はCI専用のダミー値です。JSON結果からskip・失敗・未完了のスイートを拒否し、両スイートの代表的な統合テストが通ったことも確認します。代表テストを改名する際は `.github/scripts/check_integration_tests.py` の `REQUIRED_TESTS` も更新してください。実行するテスト件数は固定しません。
+
+E2Eは既存のNext.js devサーバーとAPIモックを使います。`CI=true`、worker 1、retry 2回、全体20分、サーバー起動120秒で実行し、専用Chromiumを導入するため `PLAYWRIGHT_CHANNEL` は指定しません。再試行1回目にtraceを記録します。通常のCIは `contents: read` 権限と合成データだけで実行でき、外部AIや本番シークレットは不要です。
+
+### 失敗の調査
+
+PRのChecks、またはActions → CIから失敗したジョブとステップのログを確認します。DBが接続できない場合はserviceのhealthcheckとDSN、型検査・ビルドの場合は新規checkoutでの再現を確認してください。集約が失敗した場合は依存4ジョブの結果を確認します。failure・cancelled・skippedはすべて不合格です。
+
+E2E失敗時はActionsの実行画面のArtifactsから `playwright-failure-<run_id>-<run_attempt>` を取得できます（保持7日）。ZIPを展開し、frontendで次のように開きます。
+
+```sh
+npx playwright show-report /path/to/artifact/playwright-report
+npx playwright show-trace /path/to/artifact/test-results/<test>-retry1/trace.zip
+```
+
+HTMLレポートから失敗内容と添付traceを確認できます。ブラウザ導入などテスト前の失敗ではレポートが生成されない場合があり、その場合はジョブログを使います。CI中のHTML自動起動は無効です。
+
+CIの結果判定自体は、リポジトリルートで `python3 -B -m unittest discover -s .github/scripts -p 'test_*.py'` により検証できます。各ジョブのfailure・cancelled・skipped、DBテストのskip・結果欠落を拒否することを確認します。
+
+### 初期導入と必須チェック
+
+CIファイルの追加だけではマージを制限しません。次の順で導入し、設定と実測結果を [issue #37](https://github.com/jPurin-gg/fitlog/issues/37) に記録します。ワークフロー実装の検証とGitHub側の設定完了は分けて扱います。
+
+1. CI追加PRで全ジョブの成功を確認します。PRの更新・再オープン、main以外のbase、baseをmainへ変更した後のマージSHA、同じPRの古い実行のキャンセルも確認します。
+2. mainへのマージ後、main pushでの実行とActions → CI → Run workflowでの手動実行を確認します。連続するmain pushが互いをキャンセルしないことも確認します。手動実行はデフォルトブランチへの導入後に利用でき、ルールセットのPR必須チェックの代用にはしません。
+3. 管理者がSettings → Branchesでmainを対象にブランチ保護を作成します。Require a pull request before merging、Require status checks to pass before mergingを有効にし、チェック `ci-required`（GitHub Actions）を選択します。Do not allow bypassing the above settingsも有効にし、管理者も通常のPRとCIを通します。直近7日以内に成功したチェックを候補に表示させてから設定します。
+4. main向けの失敗する検証用PRで `ci-required` が失敗し、マージがブロックされることを確認します。管理者バイパスを利用せず、失敗コミットはmainへマージしません。E2Eも意図的に失敗させ、ダウンロードしたHTMLと再試行traceを確認します。
+5. 設定方式・対象main・設定者・設定日時・`ci-required`・管理者/バイパスの扱い、および検証PRとActions実行URLをissueに残します。権限やプランで必須化できない場合は制約と代替のレビュー運用を記録し、「マージを止める」条件は未達として残します。
+
+`ci-required` は他のワークフローと重複させない固定名です。改名時は新旧両チェックを一時的に出し、新名の成功後にmainの保護設定へ追加し、旧名を必須チェックから外してから旧ジョブを削除します。必須チェックを存在しない名前にしないでください。Merge queueを導入する場合は先に `merge_group` イベントへ対応し、必須チェックを再検証します。
+
 ## 本番環境
 
 本番用ファイルのひな形を作成します。

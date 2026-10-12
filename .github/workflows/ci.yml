@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build
+
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: go test -race ./...
+      - run: go vet ./...
+
+  db-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: fitlog_test
+          POSTGRES_PASSWORD: fitlog_test
+          POSTGRES_DB: fitlog_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fitlog_test -d fitlog_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      FITLOG_TEST_DATABASE_DSN: host=127.0.0.1 port=5432 user=fitlog_test password=fitlog_test dbname=fitlog_test sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Run integration tests
+        working-directory: backend
+        run: |
+          go test -race -tags=integration -count=1 -json ./internal/app ./internal/workout/postgres | tee "$RUNNER_TEMP/integration.jsonl"
+      - name: Verify integration tests ran without skips
+        run: python3 .github/scripts/check_integration_tests.py "$RUNNER_TEMP/integration.jsonl"
+
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      CI: 'true'
+      PLAYWRIGHT_HTML_OPEN: never
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e -- --workers=1 --reporter=list,html
+      - name: Upload E2E failure report and traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          if-no-files-found: warn
+          retention-days: 7
+
+  ci-required:
+    name: ci-required
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: [frontend, backend, db-integration, e2e]
+    if: always()
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test CI result guards
+        run: python3 -B -m unittest discover -s .github/scripts -p 'test_*.py'
+      - name: Require every job to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 .github/scripts/check_required.py
