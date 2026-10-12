@@ -12,26 +12,11 @@ export function updateTargetSets(exerciseID: string, targetSets: number) {
   });
 }
 
-export function startWorkoutPlan(date: string) {
-  return apiFetch<WorkoutPlanSession>(`/api/workout-plans/${date}/start`, { method: "POST" });
-}
-
-export function saveManualWorkoutPlan(date: string, exercise: { id: string; name: string }) {
-  return apiFetch<WorkoutPlanSession>(`/api/workout-plans/${date}`, {
-    method: "PUT",
-    body: JSON.stringify({
-      workout_title: "フリーワークアウト",
-      target: "自分で選んだ種目",
-      estimated_duration_min: 15,
-      coach_note: "体調に合わせて無理のない重量で進めましょう。",
-      exercises: [{
-        exercise_id: exercise.id,
-        name: exercise.name,
-        planned_sets: 3,
-        target_weight: 0,
-        target_reps: 10,
-      }],
-    }),
+export function startWorkoutPlan(date: string, input: { use_ai: boolean; exercise_id?: string }, signal?: AbortSignal) {
+  return apiFetch<WorkoutPlanSession>(`/api/workout-plans/${date}/start`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    signal,
   });
 }
 

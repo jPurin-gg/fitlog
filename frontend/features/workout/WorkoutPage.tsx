@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { AIToggle, useAISettings } from "@/components/AISettings";
 import { 
   Flame, 
   TrendingUp, 
@@ -24,7 +25,7 @@ import { WorkoutSummaryView, type WorkoutSummary } from "./components/WorkoutSum
 import { ApiError, apiErrorMessage } from "@/lib/api";
 import { displayPlanText, formatLocalDate } from "@/lib/fitlog";
 import { initialRecordFlowState, recordFlowReducer } from "./workoutFlow";
-import { finishWorkoutSession, getSetRecommendation, getSummaryComment, getTargetSets, recordWorkoutSet, saveManualWorkoutPlan, startWorkoutPlan, updateTargetSets } from "./api";
+import { finishWorkoutSession, getSetRecommendation, getSummaryComment, getTargetSets, recordWorkoutSet, startWorkoutPlan, updateTargetSets } from "./api";
 import type { SetRecommendation, WorkoutPlanSession } from "./types";
 
 type SummaryCommentState = "idle" | "loading" | "ready" | "unavailable";
@@ -42,6 +43,7 @@ function isAmbiguousSaveFailure(error: unknown) {
 }
 
 export default function WorkoutPage() {
+  const { enabled: aiEnabled, isEnabled } = useAISettings();
   const [starting, setStarting] = React.useState(false);
   const [finishing, setFinishing] = React.useState(false);
   const [recommendation, setRecommendation] = React.useState<SetRecommendation | null>(null);
@@ -50,7 +52,6 @@ export default function WorkoutPage() {
   const recommendationState = recordFlow.recommendation;
   const [summaryCommentState, setSummaryCommentState] = React.useState<SummaryCommentState>("idle");
   const [startError, setStartError] = React.useState<string | null>(null);
-  const [manualStartAvailable, setManualStartAvailable] = React.useState(false);
   const [startNotice, setStartNotice] = React.useState<string | null>(null);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [saveRetryLocked, setSaveRetryLocked] = React.useState(false);
@@ -76,6 +77,9 @@ export default function WorkoutPage() {
   const [finishedWorkoutID, setFinishedWorkoutID] = React.useState<number | null>(null);
   const [recordedSetID, setRecordedSetID] = React.useState<number | null>(null);
   const startInFlightRef = React.useRef(false);
+  const startAbortRef = React.useRef<AbortController | null>(null);
+  const startRequestRef = React.useRef(0);
+  const startWithoutAIRef = React.useRef<(() => void) | null>(null);
   const saveInFlightRef = React.useRef(false);
   const finishInFlightRef = React.useRef(false);
   const setRequestRef = React.useRef<{ signature: string; key: string; setID?: number } | null>(null);
@@ -89,9 +93,14 @@ export default function WorkoutPage() {
   const recordTransitionLocked = saveState === "saving" || saveRetryLocked;
 
   React.useEffect(() => () => {
+    startAbortRef.current?.abort();
     recommendationAbortRef.current?.abort();
     summaryCommentAbortRef.current?.abort();
   }, []);
+
+  React.useEffect(() => {
+    if (!aiEnabled) startWithoutAIRef.current?.();
+  }, [aiEnabled]);
 
   // 種目が変わったら目標セット数を取得
   React.useEffect(() => {
@@ -147,26 +156,42 @@ export default function WorkoutPage() {
     });
   };
 
-  const applyStartedWorkout = (data: WorkoutPlanSession) => {
+  const applyStartedWorkout = (data: WorkoutPlanSession, selected?: { id: string; name: string }) => {
+    let index = selected ? data.plan.exercises.findIndex(ex => ex.exercise_id === selected.id) : 0;
+    if (selected && index < 0) {
+      // 記録画面だけに選択種目を追加し、保存済みの日次予定は変更しない。
+      index = data.plan.exercises.length;
+      data = { ...data, plan: { ...data.plan, exercises: [...data.plan.exercises, {
+        exercise_id: selected.id, name: selected.name, planned_sets: 3, target_weight: 0, target_reps: 10,
+      }] } };
+    }
     if (!data.plan.exercises.length) {
       throw new Error("開始できる種目がありません。");
     }
     setWorkoutPlan(data);
     setWorkoutStarted(true);
-    setManualStartAvailable(false);
     nextSetByExerciseRef.current = {};
-    setStartNotice(data.ai_status === "fallback"
+    setStartNotice(isEnabled() && data.ai_status === "fallback"
       ? "AI調整は利用できませんでしたが、記録できるメニューで開始しました。"
       : null);
-    activatePlanExercise(data, 0);
+    activatePlanExercise(data, index);
   };
 
-  const startWorkout = async () => {
+  const beginWorkout = async (exercise?: { id: string; name: string }, useAI = isEnabled()) => {
     if (startInFlightRef.current) return;
     startInFlightRef.current = true;
+    const requestID = ++startRequestRef.current;
+    const controller = new AbortController();
+    startAbortRef.current = controller;
+    const restartWithoutAI = () => {
+      if (startRequestRef.current !== requestID || controller.signal.aborted) return;
+      controller.abort();
+      startInFlightRef.current = false;
+      void beginWorkout(exercise, false);
+    };
+    startWithoutAIRef.current = useAI && !exercise ? restartWithoutAI : null;
     setStarting(true);
     setStartError(null);
-    setManualStartAvailable(false);
     setStartNotice(null);
     setFinishedSummary(null);
     setFinishedWorkoutID(null);
@@ -174,38 +199,36 @@ export default function WorkoutPage() {
     setSummaryCommentState("idle");
     setSummaryCommentError(null);
     try {
-      const data = await startWorkoutPlan(formatLocalDate(new Date()));
-      applyStartedWorkout(data);
+      const data = await startWorkoutPlan(formatLocalDate(new Date()), {
+        use_ai: exercise ? false : useAI,
+        ...(exercise ? { exercise_id: exercise.id } : {}),
+      }, controller.signal);
+      if (controller.signal.aborted || startRequestRef.current !== requestID) return;
+      if (useAI && !exercise && !isEnabled()) {
+        restartWithoutAI();
+        return;
+      }
+      applyStartedWorkout(data, exercise);
     } catch (e) {
-      console.error(e);
-      setStartError(apiErrorMessage(e, '今日の計画作成に失敗しました。'));
-      setManualStartAvailable(e instanceof ApiError && e.status === 404);
+      if (controller.signal.aborted || startRequestRef.current !== requestID) return;
+      if (!exercise && e instanceof ApiError && e.status === 404) {
+        setShowManualExerciseSelector(true);
+      } else {
+        setStartError(apiErrorMessage(e, "ワークアウトを開始できませんでした。"));
+      }
     } finally {
-      startInFlightRef.current = false;
-      setStarting(false);
+      if (startRequestRef.current === requestID) {
+        startInFlightRef.current = false;
+        startWithoutAIRef.current = null;
+        setStarting(false);
+      }
     }
   };
 
-  const startManualWorkout = async (exercise: { id: string; name: string }) => {
-    if (startInFlightRef.current) return;
-    startInFlightRef.current = true;
-    setStarting(true);
-    setStartError(null);
-    setManualStartAvailable(false);
-    setStartNotice(null);
+  const startWorkout = () => { void beginWorkout(); };
+  const startManualWorkout = (exercise: { id: string; name: string }) => {
     setShowManualExerciseSelector(false);
-    try {
-      const date = formatLocalDate(new Date());
-      await saveManualWorkoutPlan(date, exercise);
-      const data = await startWorkoutPlan(date);
-      applyStartedWorkout(data);
-    } catch (e) {
-      console.error(e);
-      setStartError(apiErrorMessage(e, "手動メニューでワークアウトを開始できませんでした。"));
-    } finally {
-      startInFlightRef.current = false;
-      setStarting(false);
-    }
+    void beginWorkout(exercise, false);
   };
 
   const fetchRecommendation = async (workoutID: number, setID: number) => {
@@ -407,6 +430,8 @@ export default function WorkoutPage() {
             <p className="text-white/50">おつかれさまでした。今日の積み上げを記録しました。</p>
           </div>
 
+          <div className="mb-5"><AIToggle /></div>
+
           <WorkoutSummaryView
             summary={finishedSummary}
             emptyText="セット記録はまだありません。次回は1セット目から記録していきましょう。"
@@ -482,6 +507,7 @@ export default function WorkoutPage() {
             <Play className="w-10 h-10 text-primary ml-2" />
           </div>
           <h1 className="text-3xl font-bold mb-4">今日の筋トレを始めますか？</h1>
+          <div className="mb-5"><AIToggle /></div>
           <p className="text-white/50 mb-10">今日のメニューを開始します。AIが使えないときも記録は続けられます。</p>
           <button 
             onClick={startWorkout}
@@ -493,7 +519,6 @@ export default function WorkoutPage() {
               {starting ? <Loader2 className="w-6 h-6 animate-spin" /> : <>ワークアウトを開始 <Sparkles className="w-5 h-5" /></>}
             </span>
           </button>
-          {manualStartAvailable && (
             <div className="mt-3">
               <button
                 type="button"
@@ -503,9 +528,8 @@ export default function WorkoutPage() {
               >
                 自分で種目を選んで始める
               </button>
-              <p className="mt-2 text-[11px] text-white/30">月間プランがないため、1種目のフリーワークアウトを作成できます。</p>
+              <p className="mt-2 text-[11px] text-white/30">月間プランがなくても、好きな種目から記録できます。</p>
             </div>
-          )}
           {startError && (
             <div className="mt-5 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-left">
               <p className="text-red-300 font-bold text-sm">エラーが発生しました</p>
@@ -571,6 +595,7 @@ export default function WorkoutPage() {
               </p>
             </div>
             <div className="flex items-center gap-3">
+              <AIToggle />
               <button
                 onClick={finishWorkout}
                 disabled={finishing || recordTransitionLocked}

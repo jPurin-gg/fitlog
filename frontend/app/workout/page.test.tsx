@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import WorkoutPage from "./page";
+import { AISettingsProvider } from "@/components/AISettings";
 
 const apiOrigin = "http://localhost:3000";
 const server = setupServer();
@@ -49,8 +50,13 @@ function useCommonHandlers(aiStatus: "applied" | "fallback" | "not_requested" = 
   );
 }
 
+function renderWorkout(aiEnabled = true) {
+  window.localStorage.setItem("fitlog:ai-enabled:1", String(aiEnabled));
+  return render(<AISettingsProvider userID={1}><WorkoutPage /></AISettingsProvider>);
+}
+
 async function startWorkout(user: ReturnType<typeof userEvent.setup>) {
-  render(<WorkoutPage />);
+  renderWorkout();
   await user.click(screen.getByRole("button", { name: /ワークアウトを開始/ }));
   await screen.findByRole("heading", { name: "ワークアウト中" });
 }
@@ -270,66 +276,55 @@ describe("WorkoutPage record-first flow", () => {
     expect(screen.getByRole("button", { name: "セットを保存" })).toBeEnabled();
   });
 
-  it("月間プランなしでも選んだ種目を日次予定に保存して開始する", async () => {
-    let savedPlan: Record<string, unknown> | null = null;
-    let startCalls = 0;
-    const manualPlan = {
-      ...startedPlan,
-      id: 11,
-      workout_id: 43,
-      ai_status: "not_requested",
-      plan: {
-        workout_title: "フリーワークアウト",
-        target: "自分で選んだ種目",
-        estimated_duration_min: 15,
-        coach_note: "体調に合わせて無理のない重量で進めましょう。",
-        exercises: [{
-          exercise_id: "squat",
-          name: "スクワット",
-          planned_sets: 3,
-          target_weight: 0,
-          target_reps: 10,
-          last_max_weight: 0,
-        }],
-      },
-    };
+  it("開始エラーを経由せず、月間プランなしで種目を選んで開始する", async () => {
+    const startInputs: unknown[] = [];
     server.use(
       http.get(`${apiOrigin}/api/exercises/:exerciseID/settings`, () => HttpResponse.json({ target_sets: 3 })),
-      http.post(new RegExp(`${apiOrigin}/api/workout-plans/\\d{4}-\\d{2}-\\d{2}/start`), () => {
-        startCalls += 1;
-        if (startCalls === 1) {
-          return HttpResponse.json(
-            { status: 404, detail: "今月の月間プランがまだありません。" },
-            { status: 404, headers: { "Content-Type": "application/problem+json" } },
-          );
-        }
-        return HttpResponse.json(manualPlan);
+      http.post(new RegExp(`${apiOrigin}/api/workout-plans/[^/]+/start`), async ({ request }) => {
+        startInputs.push(await request.json());
+        return HttpResponse.json({ ...startedPlan, ai_status: "not_requested" });
       }),
       http.get(`${apiOrigin}/api/exercises/favorites`, () => HttpResponse.json([])),
       http.get(`${apiOrigin}/api/exercises/recent`, () => HttpResponse.json([])),
-      http.get(`${apiOrigin}/api/exercises`, () => HttpResponse.json([
-        { id: "squat", name: "スクワット", category: "strength" },
-      ])),
-      http.put(new RegExp(`${apiOrigin}/api/workout-plans/\\d{4}-\\d{2}-\\d{2}$`), async ({ request }) => {
-        savedPlan = await request.json() as Record<string, unknown>;
-        return HttpResponse.json({ id: 11, status: "active" });
-      }),
+      http.get(`${apiOrigin}/api/exercises`, () => HttpResponse.json([{ id: "squat", name: "スクワット", category: "strength" }])),
     );
     const user = userEvent.setup();
-    render(<WorkoutPage />);
-
-    expect(screen.queryByRole("button", { name: "自分で種目を選んで始める" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /ワークアウトを開始/ }));
+    renderWorkout(false);
     await user.click(screen.getByRole("button", { name: "自分で種目を選んで始める" }));
     await user.type(screen.getByPlaceholderText("種目名で検索..."), "スクワット");
     await user.click(await screen.findByRole("button", { name: /^スクワット/ }));
-
     await screen.findByRole("heading", { name: "ワークアウト中" });
-    expect(startCalls).toBe(2);
-    expect(savedPlan).toMatchObject({
-      workout_title: "フリーワークアウト",
-      exercises: [{ exercise_id: "squat", name: "スクワット" }],
+    expect(screen.getByRole("heading", { name: "スクワット" })).toBeInTheDocument();
+    expect(startInputs).toEqual([{ use_ai: false, exercise_id: "squat" }]);
+  });
+
+  it("AI調整を待つ間にOFFにするとAIなしで開始し、古い応答を捨てる", async () => {
+    const delayed = deferred<Response>();
+    const inputs: unknown[] = [];
+    let delayedFinished = false;
+    server.use(
+      http.get(`${apiOrigin}/api/exercises/:exerciseID/settings`, () => HttpResponse.json({ target_sets: 3 })),
+      http.post(new RegExp(`${apiOrigin}/api/workout-plans/[^/]+/start`), async ({ request }) => {
+        const input = await request.json() as { use_ai: boolean };
+        inputs.push(input);
+        if (input.use_ai) { const response = await delayed.promise; delayedFinished = true; return response; }
+        return HttpResponse.json({ ...startedPlan, ai_status: "not_requested" });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWorkout();
+    await user.click(screen.getByRole("button", { name: /ワークアウトを開始/ }));
+    await waitFor(() => expect(inputs).toHaveLength(1));
+    await user.click(screen.getByRole("switch", { name: "AIを使う" }));
+    await screen.findByRole("heading", { name: "ワークアウト中" });
+    expect(inputs).toEqual([{ use_ai: true }, { use_ai: false }]);
+    await act(async () => {
+      delayed.resolve(HttpResponse.json({ ...startedPlan, plan: { ...startedPlan.plan, exercises: [{ ...startedPlan.plan.exercises[0], name: "遅い種目" }] } }));
+      await delayed.promise;
     });
+    await waitFor(() => expect(delayedFinished).toBe(true));
+    expect(screen.queryByText("遅い種目")).not.toBeInTheDocument();
+    expect(screen.getByRole("switch")).not.toBeChecked();
   });
 
   it("種目を往復しても次のセット番号を保つ", async () => {
