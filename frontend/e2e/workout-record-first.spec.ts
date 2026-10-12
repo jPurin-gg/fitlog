@@ -74,6 +74,7 @@ test("ブラウザでワークアウトを開始し、AI障害中も記録を完
   });
 
   await page.goto("/workout");
+  await page.getByRole("switch", { name: "AIを使う" }).click();
   await page.getByRole("button", { name: /ワークアウトを開始/ }).click();
   await expect(page.getByText(/AI調整は利用できませんでしたが/)).toBeVisible();
 
