@@ -102,6 +102,15 @@ export default function WorkoutPage() {
     if (!aiEnabled) startWithoutAIRef.current?.();
   }, [aiEnabled]);
 
+  React.useEffect(() => {
+    if (aiEnabled) return;
+    recommendationAbortRef.current?.abort();
+    recommendationRequestRef.current += 1;
+    setRecommendation(null);
+    setRecommendationError(null);
+    dispatchRecordFlow({ type: "RECOMMENDATION_CANCELED" });
+  }, [aiEnabled]);
+
   // 種目が変わったら目標セット数を取得
   React.useEffect(() => {
     const fetchTargetSets = async () => {
@@ -232,6 +241,7 @@ export default function WorkoutPage() {
   };
 
   const fetchRecommendation = async (workoutID: number, setID: number) => {
+    if (!isEnabled()) return;
     recommendationAbortRef.current?.abort();
     const controller = new AbortController();
     const requestID = recommendationRequestRef.current + 1;
@@ -242,11 +252,11 @@ export default function WorkoutPage() {
     setRecommendationError(null);
     try {
       const data = await getSetRecommendation(workoutID, setID, controller.signal);
-      if (controller.signal.aborted || recommendationRequestRef.current !== requestID || activeSetIDRef.current !== setID) return;
+      if (!isEnabled() || controller.signal.aborted || recommendationRequestRef.current !== requestID || activeSetIDRef.current !== setID) return;
       setRecommendation(data);
       dispatchRecordFlow({ type: "RECOMMENDATION_SUCCEEDED" });
     } catch (e) {
-      if (controller.signal.aborted || recommendationRequestRef.current !== requestID || activeSetIDRef.current !== setID) return;
+      if (!isEnabled() || controller.signal.aborted || recommendationRequestRef.current !== requestID || activeSetIDRef.current !== setID) return;
       console.error(e);
       setRecommendationError(apiErrorMessage(e, "AI提案を取得できませんでした。"));
       dispatchRecordFlow({ type: "RECOMMENDATION_FAILED" });
@@ -310,6 +320,7 @@ export default function WorkoutPage() {
   };
 
   const retryRecommendation = () => {
+    if (!isEnabled()) return;
     if (!workoutPlan?.workout_id || !recordedSetID || recommendationState === "loading") return;
     void fetchRecommendation(workoutPlan.workout_id, recordedSetID);
   };
@@ -319,7 +330,7 @@ export default function WorkoutPage() {
     const nextSet = currentSet + 1;
     nextSetByExerciseRef.current[currentExercise.id] = nextSet;
     setCurrentSet(nextSet);
-    if (recommendation?.target_weight) {
+    if (isEnabled() && recommendation?.target_weight) {
       setFormData({
         weight: String(recommendation.target_weight),
         reps: recommendation.target_reps ? String(recommendation.target_reps) : formData.reps,
@@ -606,7 +617,7 @@ export default function WorkoutPage() {
             </div>
         </header>
 
-        {startNotice && (
+        {aiEnabled && startNotice && (
           <div className="mb-5 flex items-start gap-3 rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100/80">
             <BrainCircuit className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-300" />
             <p>{startNotice}</p>
@@ -786,7 +797,7 @@ export default function WorkoutPage() {
                 </div>
               )}
 
-              {saveState === "saved" && recommendationState === "loading" && (
+              {aiEnabled && saveState === "saved" && recommendationState === "loading" && (
                 <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
                   <div className="flex items-center gap-3">
                     <Loader2 className="h-5 w-5 animate-spin text-primary" />
@@ -798,7 +809,7 @@ export default function WorkoutPage() {
                 </div>
               )}
 
-              {saveState === "saved" && recommendationState === "unavailable" && (
+              {aiEnabled && saveState === "saved" && recommendationState === "unavailable" && (
                 <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4">
                   <div className="flex items-start gap-3">
                     <BrainCircuit className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-300" />
@@ -864,7 +875,7 @@ export default function WorkoutPage() {
             </div>
 
             {/* AI Result Area - Only shows when recommendation exists */}
-            {recommendationState === "ready" && recommendation && (
+            {aiEnabled && recommendationState === "ready" && recommendation && (
               <div className="animate-in slide-in-from-bottom-8 fade-in duration-500 pt-6 border-t border-white/5">
                 <div className="space-y-6">
                   <div className={`p-6 rounded-[24px] border-2 flex items-center justify-between ${
