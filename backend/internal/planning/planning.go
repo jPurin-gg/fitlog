@@ -62,7 +62,8 @@ type GenerateMonthlyInput struct {
 }
 
 type StartDailyInput struct {
-	UseAI *bool `json:"use_ai"`
+	UseAI      *bool   `json:"use_ai"`
+	ExerciseID *string `json:"exercise_id,omitempty"`
 }
 
 type Candidate struct {
@@ -299,14 +300,32 @@ func (s *Service) StartDaily(ctx context.Context, userID int, dateText string, i
 		return PlanSession{}, apperr.Validation("ワークアウトを開始できるのは今日のプランだけです。", map[string]string{"date": "must be today"})
 	}
 	aiStatus := AIStatusNotRequested
+	var manual *WorkoutPlan
+	if input.ExerciseID != nil {
+		plan := WorkoutPlan{
+			WorkoutTitle: "フリーワークアウト", Target: "自分で選んだ種目", EstimatedDurationMin: 15,
+			CoachNote: "体調に合わせて無理のない重量で進めましょう。",
+			Exercises: []PlanExercise{{ExerciseID: strings.TrimSpace(*input.ExerciseID), PlannedSets: 3, TargetReps: 10}},
+		}
+		if err := s.normalizeDaily(ctx, userID, &plan); err != nil {
+			return PlanSession{}, err
+		}
+		manual = &plan
+	}
 	if _, err := s.repository.Daily(ctx, userID, date); errors.Is(err, ErrNotFound) {
-		base, buildErr := s.basePlan(ctx, userID, date)
-		if buildErr != nil {
-			return PlanSession{}, buildErr
+		var base WorkoutPlan
+		if manual != nil {
+			base = *manual
+		} else {
+			var buildErr error
+			base, buildErr = s.basePlan(ctx, userID, date)
+			if buildErr != nil {
+				return PlanSession{}, buildErr
+			}
 		}
 		aiStarted := time.Now()
 		refined := base
-		if input.UseAI == nil || *input.UseAI {
+		if manual == nil && (input.UseAI == nil || *input.UseAI) {
 			aiContext, cancel := s.optionalAIContext(ctx)
 			adjusted, refineErr := s.refineDaily(aiContext, base)
 			cancel()
@@ -340,11 +359,14 @@ func (s *Service) StartDaily(ctx context.Context, userID int, dateText string, i
 
 func (s *Service) basePlan(ctx context.Context, userID int, date time.Time) (WorkoutPlan, error) {
 	monthly, err := s.repository.Monthly(ctx, userID, date.Format("2006-01"))
-	if errors.Is(err, ErrNotFound) || len(monthly.WeeklyRoutine) == 0 {
+	if errors.Is(err, ErrNotFound) {
 		return WorkoutPlan{}, apperr.NotFound("今月の月間プランがまだありません。")
 	}
 	if err != nil {
 		return WorkoutPlan{}, apperr.Internal(err)
+	}
+	if len(monthly.WeeklyRoutine) == 0 {
+		return WorkoutPlan{}, apperr.NotFound("今月の月間プランがまだありません。")
 	}
 	index := -1
 	for i, day := range monthly.RecommendedDays {
