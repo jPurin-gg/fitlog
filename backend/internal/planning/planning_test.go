@@ -156,7 +156,7 @@ func TestStartDailyAppliesAIRefinement(t *testing.T) {
 	}}
 	service := NewService(repository, nil, aiClient, stubPlanningPrompts{}, clock.Fixed{Time: now}, time.Second)
 
-	result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"))
+	result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{})
 	if err != nil || result.AIStatus != AIStatusApplied {
 		t.Fatalf("StartDaily() = %#v, %v", result, err)
 	}
@@ -251,7 +251,7 @@ func TestStartDailySanitizesAIRefinement(t *testing.T) {
 			}}
 			service := NewService(repository, nil, aiClient, stubPlanningPrompts{}, clock.Fixed{Time: now}, time.Second)
 
-			result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"))
+			result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{})
 			if err != nil || result.AIStatus != test.wantStatus {
 				t.Fatalf("StartDaily() = %#v, %v; want ai_status %q", result, err, test.wantStatus)
 			}
@@ -270,7 +270,7 @@ func TestStartDailyFallsBackToBasePlanWhenAIFails(t *testing.T) {
 	}}
 	service := NewService(repository, nil, aiClient, stubPlanningPrompts{}, clock.Fixed{Time: now}, time.Second)
 
-	result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"))
+	result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{})
 	if err != nil || result.AIStatus != AIStatusFallback {
 		t.Fatalf("StartDaily() = %#v, %v", result, err)
 	}
@@ -291,7 +291,7 @@ func TestStartDailyFallsBackAfterOptionalAITimeout(t *testing.T) {
 	}}
 	service := NewService(repository, nil, aiClient, stubPlanningPrompts{}, clock.Fixed{Time: now}, time.Millisecond)
 
-	result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"))
+	result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{})
 	if err != nil || result.AIStatus != AIStatusFallback {
 		t.Fatalf("StartDaily() = %#v, %v", result, err)
 	}
@@ -308,8 +308,23 @@ func TestStartDailyFallsBackWhenAIResponseIsInvalid(t *testing.T) {
 	}}
 	service := NewService(repository, nil, aiClient, stubPlanningPrompts{}, clock.Fixed{Time: now}, time.Second)
 
-	result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"))
+	result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{})
 	if err != nil || result.AIStatus != AIStatusFallback {
+		t.Fatalf("StartDaily() = %#v, %v", result, err)
+	}
+	if repository.saveCalls != 1 || repository.savedPlan.WorkoutTitle != repository.basePlan().WorkoutTitle {
+		t.Fatalf("saved plan = %#v; calls = %d", repository.savedPlan, repository.saveCalls)
+	}
+}
+
+func TestStartDailySkipsAIWhenExplicitlyDisabled(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	repository := newStartDailyRepository(now)
+	// A nil AI client proves the OFF path never requests the provider.
+	service := NewService(repository, nil, nil, nil, clock.Fixed{Time: now}, time.Second)
+	enabled := false
+	result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{UseAI: &enabled})
+	if err != nil || result.AIStatus != AIStatusNotRequested || result.WorkoutID == 0 {
 		t.Fatalf("StartDaily() = %#v, %v", result, err)
 	}
 	if repository.saveCalls != 1 || repository.savedPlan.WorkoutTitle != repository.basePlan().WorkoutTitle {
@@ -329,7 +344,7 @@ func TestStartDailyDoesNotRequestAIForStoredPlan(t *testing.T) {
 	}}
 	service := NewService(repository, nil, aiClient, stubPlanningPrompts{}, clock.Fixed{Time: now}, time.Second)
 
-	result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"))
+	result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{})
 	if err != nil || result.AIStatus != AIStatusNotRequested {
 		t.Fatalf("StartDaily() = %#v, %v", result, err)
 	}

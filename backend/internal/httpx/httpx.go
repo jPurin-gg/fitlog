@@ -24,10 +24,22 @@ type Problem struct {
 }
 
 func DecodeJSON(w http.ResponseWriter, r *http.Request, destination any) error {
+	return decodeJSON(w, r, destination, false)
+}
+
+// DecodeOptionalJSON also accepts an empty body for backwards-compatible endpoints.
+func DecodeOptionalJSON(w http.ResponseWriter, r *http.Request, destination any) error {
+	return decodeJSON(w, r, destination, true)
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, destination any, optional bool) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(destination); err != nil {
+		if optional && errors.Is(err, io.EOF) {
+			return nil
+		}
 		return apperr.Validation("JSONリクエストを解析できません。", nil)
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {

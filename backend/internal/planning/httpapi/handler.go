@@ -46,6 +46,11 @@ func (h *Handler) PutDaily(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) StartDaily(w http.ResponseWriter, r *http.Request) {
-	result, err := h.service.StartDaily(r.Context(), authhttp.UserID(r.Context()), r.PathValue("date"))
+	var input planning.StartDailyInput
+	if err := httpx.DecodeOptionalJSON(w, r, &input); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	result, err := h.service.StartDaily(r.Context(), authhttp.UserID(r.Context()), r.PathValue("date"), input)
 	httpx.Respond(w, r, http.StatusOK, result, err)
 }
