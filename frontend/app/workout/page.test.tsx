@@ -247,6 +247,52 @@ describe("WorkoutPage record-first flow", () => {
     expect(keys[1]).toBe(keys[0]);
   });
 
+  it("OFFで終了し、ONに戻した後は明示操作だけで総評を取得する", async () => {
+    useCommonHandlers();
+    let finishes = 0;
+    let comments = 0;
+    server.use(
+      http.post(`${apiOrigin}/api/workouts/42/finish`, () => {
+        finishes++;
+        return HttpResponse.json({ summary: { total_sets: 0, total_reps: 0, total_volume: 0, duration_min: 1, pr_count: 0, exercises: [] } });
+      }),
+      http.post(`${apiOrigin}/api/workouts/42/summary-comment`, () => { comments++; return HttpResponse.json({ comment: "後から取得した総評" }); }),
+    );
+    const user = userEvent.setup();
+    renderWorkout(false);
+    await user.click(screen.getByRole("button", { name: /ワークアウトを開始/ }));
+    await screen.findByRole("heading", { name: "ワークアウト中" });
+    await user.click(screen.getByRole("button", { name: "終了" }));
+    await screen.findByRole("heading", { name: "今日のまとめ" });
+    expect(comments).toBe(0);
+    await user.click(screen.getByRole("switch"));
+    expect(comments).toBe(0);
+    await user.click(screen.getByRole("button", { name: "AI総評を取得" }));
+    await screen.findByText("後から取得した総評");
+    expect(comments).toBe(1);
+    expect(finishes).toBe(1);
+  });
+
+  it("総評待機中のOFFは終了結果を維持し、遅い総評を表示しない", async () => {
+    useCommonHandlers();
+    const delayed = deferred<Response>();
+    let finished = false;
+    server.use(
+      http.post(`${apiOrigin}/api/workouts/42/finish`, () => HttpResponse.json({ summary: { total_sets: 0, total_reps: 0, total_volume: 0, duration_min: 1, pr_count: 0, exercises: [] } })),
+      http.post(`${apiOrigin}/api/workouts/42/summary-comment`, async () => { const result = await delayed.promise; finished = true; return result; }),
+    );
+    const user = userEvent.setup();
+    await startWorkout(user);
+    await user.click(screen.getByRole("button", { name: "終了" }));
+    await screen.findByText("AIコーチが総評を作成中です");
+    await user.click(screen.getByRole("switch"));
+    expect(screen.queryByText("AIコーチが総評を作成中です")).not.toBeInTheDocument();
+    await act(async () => { delayed.resolve(HttpResponse.json({ comment: "遅い総評" })); await delayed.promise; });
+    await waitFor(() => expect(finished).toBe(true));
+    expect(screen.queryByText("遅い総評")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "今日のまとめ" })).toBeInTheDocument();
+  });
+
   it("終了集計をAI総評より先に表示し、総評の再試行でも記録を再送しない", async () => {
     useCommonHandlers();
     const summaryComment = deferred<Response>();
