@@ -24,6 +24,7 @@ import { AIToggle, useAISettings } from "@/components/AISettings";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
 import { displayPlanText, formatPlanMonth } from "@/lib/fitlog";
+import { useMonthlyPromptDismissal } from "./useMonthlyPromptDismissal";
 
 const WEEKDAY_OPTIONS = [
   { value: 0, label: "日" },
@@ -55,7 +56,16 @@ export default function DashboardPage() {
   const [dashboardData, setDashboardData] = React.useState<any>(null);
   const [altModalData, setAltModalData] = React.useState<{dayIdx: number, exIdx: number, exName: string, exId?: string} | null>(null);
   const [today, setToday] = React.useState<Date | null>(null);
-  const currentMonth = formatPlanMonth(new Date());
+  const [currentMonth, setCurrentMonth] = React.useState(() => formatPlanMonth(new Date()));
+  const promptScope = `${user.id}:${currentMonth}`;
+  const [monthlyLoad, setMonthlyLoad] = React.useState({ scope: "", missing: false });
+  const promptHandledRef = React.useRef("");
+  const { ready: dismissalReady, dismissed, dismiss } = useMonthlyPromptDismissal(user.id, currentMonth);
+
+  const closeMonthlyModal = () => {
+    promptHandledRef.current = promptScope;
+    setShowMonthlyModal(false);
+  };
 
   const saveMonthlyPlan = async (plan: any) => {
     const planToSave = { ...plan, plan_month: plan.plan_month || currentMonth };
@@ -81,35 +91,76 @@ export default function DashboardPage() {
   };
 
   React.useEffect(() => {
-    setToday(new Date());
+    const refreshDate = () => {
+      const now = new Date();
+      setToday(now);
+      setCurrentMonth(formatPlanMonth(now));
+    };
+    refreshDate();
+    window.addEventListener("focus", refreshDate);
+    document.addEventListener("visibilitychange", refreshDate);
+    const interval = window.setInterval(refreshDate, 60_000);
+    return () => {
+      window.removeEventListener("focus", refreshDate);
+      document.removeEventListener("visibilitychange", refreshDate);
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
     apiFetch<any>("/api/dashboard")
-      .then(data => setDashboardData(data))
-      .catch(console.error);
+      .then(data => { if (!controller.signal.aborted) setDashboardData(data); })
+      .catch(err => { if (!controller.signal.aborted) console.error(err); });
 
     apiFetch<any>("/api/preferences")
-      .then(data => setPreferences(data))
-      .catch(console.error);
+      .then(data => { if (!controller.signal.aborted) setPreferences(data); })
+      .catch(err => { if (!controller.signal.aborted) console.error(err); });
+    return () => controller.abort();
+  }, [user.id]);
 
-    apiFetch<any>(`/api/monthly-plans/${currentMonth}`)
-      .then(data => setMonthlyPlan(data))
+  React.useEffect(() => {
+    const controller = new AbortController();
+    setMonthlyPlan(null);
+    setShowMonthlyModal(false);
+    apiFetch<any>(`/api/monthly-plans/${currentMonth}`, { signal: controller.signal })
+      .then(data => {
+        if (controller.signal.aborted) return;
+        setMonthlyPlan(data);
+        setMonthlyLoad({ scope: promptScope, missing: false });
+      })
       .catch(err => {
+        if (controller.signal.aborted) return;
         if (err instanceof ApiError && err.status === 404) {
-          setTimeout(() => setShowMonthlyModal(true), 1000);
+          setMonthlyLoad({ scope: promptScope, missing: true });
           return;
         }
+        setMonthlyLoad({ scope: promptScope, missing: false });
         console.error("Failed to fetch monthly plan:", err);
       });
-  }, [currentMonth]);
+    return () => controller.abort();
+  }, [currentMonth, promptScope]);
+
+  React.useEffect(() => {
+    if (!dismissalReady || monthlyLoad.scope !== promptScope || !monthlyLoad.missing) return;
+    if (promptHandledRef.current === promptScope) return;
+    promptHandledRef.current = promptScope;
+    if (!dismissed) setShowMonthlyModal(true);
+  }, [dismissalReady, dismissed, monthlyLoad, promptScope]);
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white p-4 md:p-8 font-sans selection:bg-primary/30">
       <AnimatePresence>
         {showMonthlyModal && (
           <MonthlyPlanModal
-            onClose={() => setShowMonthlyModal(false)} 
+            key={promptScope}
+            month={currentMonth}
+            onClose={closeMonthlyModal}
+            onDismissMonth={() => { dismiss(); closeMonthlyModal(); }}
             onPlanGenerated={(plan: any) => {
               setMonthlyPlan(plan);
-              setShowMonthlyModal(false);
+              setMonthlyLoad({ scope: promptScope, missing: false });
+              closeMonthlyModal();
             }} 
           />
         )}
@@ -178,6 +229,15 @@ export default function DashboardPage() {
           </div>
         </header>
 
+        <div className="mb-6">
+          <button
+            onClick={() => { promptHandledRef.current = promptScope; setShowMonthlyModal(true); }}
+            className="text-sm font-bold text-primary hover:text-white transition-colors"
+          >
+            月間プランを作成／見直す
+          </button>
+        </div>
+
         {/* 今日のワークアウト */}
         <section className="mb-8">
           <div className="glass rounded-[32px] p-6 md:p-10 relative overflow-hidden border border-white/10 shadow-2xl shadow-primary/5">
@@ -203,8 +263,11 @@ export default function DashboardPage() {
                       <div className="inline-block p-4 rounded-full bg-white/5 mb-4">
                         <Target className="w-8 h-8 text-white/20" />
                       </div>
-                      <h3 className="text-lg font-bold mb-2">プランを生成してください</h3>
-                      <p className="text-white/50 text-sm">月初のアンケートに答えると、本日のメニューが表示されます。</p>
+                      <h3 className="text-lg font-bold mb-2">月間プランは任意です</h3>
+                      <p className="text-white/50 text-sm mb-6">種目を選べば、AIや月間プランなしですぐに記録できます。</p>
+                      <Link href="/workout" className="inline-flex px-6 py-3 bg-primary text-black font-bold rounded-2xl">
+                        プランなしで記録を始める
+                      </Link>
                     </div>
                   );
                 }
@@ -476,7 +539,7 @@ function EquipmentPicker({ label, selected, onToggle, activeClassName }: any) {
 }
 
 
-export function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
+export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, month = formatPlanMonth(new Date()) }: any) {
   useBodyScrollLock();
   const { enabled: aiEnabled, isEnabled } = useAISettings();
 
@@ -519,7 +582,7 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
     setLoading(true);
     setError("");
     try {
-      const data = await apiFetch<any>(`/api/monthly-plans/${formatPlanMonth(new Date())}/generate`, {
+      const data = await apiFetch<any>(`/api/monthly-plans/${month}/generate`, {
         method: 'POST',
         signal: controller.signal,
         body: JSON.stringify({
@@ -570,13 +633,21 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
           <div className="w-16 h-16 bg-primary/20 rounded-2xl flex items-center justify-center mb-6">
             <Calendar className="w-8 h-8 text-primary" />
           </div>
-          <h2 className="text-2xl font-bold mb-2">新しい月が始まりました！</h2>
+          <h2 className="text-2xl font-bold mb-2 pr-8">今月の月間プラン</h2>
           <p className="text-white/60 text-sm mb-6 leading-relaxed">
             今月の目標やペースに合わせて、AIで月間プランを作成できます。
           </p>
           <div className="mb-6 space-y-3">
             <AIToggle />
             {!aiEnabled && <p className="text-sm text-white/60">AIはOFFです。プランを作成するときはONにしてください。</p>}
+            <Link href="/workout" onClick={onClose} className="block rounded-2xl bg-white/10 px-4 py-3 text-center font-bold hover:bg-white/15">
+              プランなしで記録を始める
+            </Link>
+            {onDismissMonth && (
+              <button onClick={onDismissMonth} className="w-full rounded-2xl border border-white/20 px-4 py-3 text-sm text-white/70 hover:bg-white/10">
+                今月は次回以降表示しない
+              </button>
+            )}
           </div>
           
           <div className="space-y-6 mb-8">
