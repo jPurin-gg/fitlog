@@ -20,6 +20,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { AlternativeCoachModal } from "@/features/exercises/components/AlternativeCoachModal";
 import { LogoutButton, useAuth } from "@/components/AuthGate";
+import { AIToggle, useAISettings } from "@/components/AISettings";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
 import { displayPlanText, formatPlanMonth } from "@/lib/fitlog";
@@ -158,6 +159,7 @@ export default function DashboardPage() {
             <p className="text-white/50">今日のコンディションに合わせて進めましょう。</p>
           </div>
           <div className="flex flex-wrap gap-3 sm:gap-4 w-full sm:w-auto">
+            <AIToggle />
             <Link href="/calendar" className="flex-none p-3 glass rounded-2xl hover:bg-white/10 transition-colors block">
               <Calendar className="w-5 h-5 text-white/70" />
             </Link>
@@ -474,8 +476,9 @@ function EquipmentPicker({ label, selected, onToggle, activeClassName }: any) {
 }
 
 
-function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
+export function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
   useBodyScrollLock();
+  const { enabled: aiEnabled, isEnabled } = useAISettings();
 
   const [motivation, setMotivation] = React.useState("健康維持");
   const [frequency, setFrequency] = React.useState("週3-4回");
@@ -483,7 +486,19 @@ function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
   const generateInFlightRef = React.useRef(false);
+  const generateAbortRef = React.useRef<AbortController | null>(null);
+  const generateRequestRef = React.useRef(0);
   const canGenerate = restDays.length < 7;
+
+  React.useEffect(() => () => generateAbortRef.current?.abort(), []);
+  React.useEffect(() => {
+    if (aiEnabled) return;
+    generateAbortRef.current?.abort();
+    generateRequestRef.current++;
+    generateInFlightRef.current = false;
+    setLoading(false);
+    setError("");
+  }, [aiEnabled]);
 
   const toggleRestDay = (day: number) => {
     setRestDays(prev => (
@@ -494,27 +509,33 @@ function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
   };
 
   const generatePlan = async () => {
-    if (!canGenerate) return;
+    if (!canGenerate || !isEnabled()) return;
     if (generateInFlightRef.current) return;
+    const controller = new AbortController();
+    generateAbortRef.current = controller;
+    const requestID = ++generateRequestRef.current;
+    const isCurrent = () => isEnabled() && !controller.signal.aborted && requestID === generateRequestRef.current;
     generateInFlightRef.current = true;
     setLoading(true);
     setError("");
     try {
       const data = await apiFetch<any>(`/api/monthly-plans/${formatPlanMonth(new Date())}/generate`, {
         method: 'POST',
+        signal: controller.signal,
         body: JSON.stringify({
           motivation,
           frequency,
           rest_days: restDays
         })
       });
-      onPlanGenerated(data);
+      if (isCurrent()) onPlanGenerated(data);
     } catch (e) {
-      console.error(e);
-      setError(apiErrorMessage(e, "月間プランの作成に失敗しました。"));
+      if (isCurrent()) setError(apiErrorMessage(e, "月間プランの作成に失敗しました。"));
     } finally {
-      generateInFlightRef.current = false;
-      setLoading(false);
+      if (isCurrent()) {
+        generateInFlightRef.current = false;
+        setLoading(false);
+      }
     }
   };
 
@@ -532,13 +553,16 @@ function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md overflow-hidden overscroll-none">
-      <motion.div 
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-label="月間プラン"
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
         className="glass border-primary/20 w-full max-w-lg rounded-[32px] overflow-hidden relative shadow-2xl shadow-primary/10 max-h-[90vh] overflow-y-auto overscroll-contain"
       >
-        <button onClick={onClose} className="absolute top-6 right-6 p-2 bg-white/5 rounded-full hover:bg-white/10 transition z-10 text-white/60 hover:text-white">
+        <button onClick={onClose} aria-label="閉じる" className="absolute top-6 right-6 p-2 bg-white/5 rounded-full hover:bg-white/10 transition z-10 text-white/60 hover:text-white">
           <X className="w-5 h-5" />
         </button>
         
@@ -548,8 +572,12 @@ function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
           </div>
           <h2 className="text-2xl font-bold mb-2">新しい月が始まりました！</h2>
           <p className="text-white/60 text-sm mb-6 leading-relaxed">
-            今月の目標やペースを教えてください。AIコーチが最適なトレーニングルーティンを即座に設計します。
+            今月の目標やペースに合わせて、AIで月間プランを作成できます。
           </p>
+          <div className="mb-6 space-y-3">
+            <AIToggle />
+            {!aiEnabled && <p className="text-sm text-white/60">AIはOFFです。プランを作成するときはONにしてください。</p>}
+          </div>
           
           <div className="space-y-6 mb-8">
             <div className="space-y-3">
@@ -619,7 +647,7 @@ function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
             </div>
           </div>
 
-          {error && (
+          {aiEnabled && error && (
             <div className="mb-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200 whitespace-pre-line">
               {error}
             </div>
@@ -627,7 +655,7 @@ function MonthlyPlanModal({ onClose, onPlanGenerated }: any) {
 
           <button 
             onClick={generatePlan}
-            disabled={loading || !canGenerate}
+            disabled={loading || !canGenerate || !aiEnabled}
             className="group relative w-full py-5 mt-2 bg-primary text-black font-black rounded-2xl shadow-[0_0_30px_rgba(255,170,0,0.5)] hover:shadow-[0_0_50px_rgba(255,170,0,0.7)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 disabled:opacity-50 disabled:pointer-events-none tracking-widest overflow-hidden"
           >
             {/* Shimmer effect inside button */}
