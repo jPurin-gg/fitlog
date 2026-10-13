@@ -96,8 +96,7 @@ test("月間プランなし・AI OFFで複数セットと種目変更を記録�
   await expect(page.getByText(/セットは保存済みです/)).toBeVisible();
   await page.getByRole("button", { name: "終了", exact: true }).click();
   await expect(page.getByRole("heading", { name: "今日のまとめ" })).toBeVisible();
-  // Temporary #37 validation: exercise failure reports and retry traces in Actions.
-  await expect(page.getByText("201", { exact: true })).toBeVisible();
+  await expect(page.getByText("200", { exact: true })).toBeVisible();
   await page.getByRole("switch").click();
   await expect(page.getByRole("button", { name: "AI総評を取得", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("manual-summary.png"), fullPage: true });
