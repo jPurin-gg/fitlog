@@ -81,7 +81,9 @@ func NewHandler(db *sql.DB, cfg config.Config, logger *slog.Logger) http.Handler
 
 	mux.Handle("GET /api/workouts/by-date/{date}", protected(workoutHandler.CalendarWorkout))
 	mux.Handle("PUT /api/workouts/by-date/{date}", protected(workoutHandler.PutCalendarWorkout))
+	mux.Handle("GET /api/workouts", protected(workoutHandler.History))
 	mux.Handle("GET /api/workouts/{workoutID}", protected(workoutHandler.Detail))
+	mux.Handle("DELETE /api/workouts/{workoutID}", protected(workoutHandler.Delete))
 	mux.Handle("POST /api/workouts/{workoutID}/sets", protected(workoutHandler.RecordSet))
 	mux.Handle("POST /api/workouts/{workoutID}/sets/{setID}/recommendation", protected(workoutHandler.Recommendation))
 	mux.Handle("POST /api/workouts/{workoutID}/finish", protected(workoutHandler.Finish))

@@ -219,7 +219,103 @@ func (r *Repository) Detail(ctx context.Context, userID, workoutID int) (workout
 		detail.EndedAt = endedAt.Time.Format(time.RFC3339)
 	}
 	detail.Summary, err = r.summary(ctx, userID, workoutID)
+	if err != nil {
+		return detail, err
+	}
+	detail.Sets, err = r.detailSets(ctx, userID, workoutID)
 	return detail, err
+}
+
+func (r *Repository) History(ctx context.Context, userID, limit, offset int) ([]workout.HistoryEntry, int, error) {
+	var total int
+	if err := r.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)::int FROM workouts WHERE user_id=$1 AND ended_at IS NOT NULL
+	`, userID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT w.id,COALESCE(w.notes,'ワークアウト'),w.started_at,w.ended_at,
+		       GREATEST(1,CEIL(EXTRACT(EPOCH FROM (w.ended_at-w.started_at))/60))::int,
+		       COALESCE(s.total_sets,0)::int,COALESCE(s.total_volume,0)
+		FROM workouts w
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*) AS total_sets,SUM(ws.weight*ws.reps) AS total_volume
+			FROM workout_sets ws WHERE ws.workout_id=w.id
+		) s ON TRUE
+		WHERE w.user_id=$1 AND w.ended_at IS NOT NULL
+		ORDER BY w.started_at DESC,w.id DESC
+		LIMIT $2 OFFSET $3
+	`, userID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	result := []workout.HistoryEntry{}
+	for rows.Next() {
+		var entry workout.HistoryEntry
+		var startedAt, endedAt time.Time
+		if err := rows.Scan(&entry.ID, &entry.Title, &startedAt, &endedAt, &entry.DurationMin, &entry.TotalSets, &entry.TotalVolume); err != nil {
+			return nil, 0, err
+		}
+		entry.StartedAt = startedAt.Format(time.RFC3339)
+		entry.EndedAt = endedAt.Format(time.RFC3339)
+		result = append(result, entry)
+	}
+	return result, total, rows.Err()
+}
+
+// Delete はワークアウトとセットを削除し、関係する種目の最新重量・最大重量を残りの記録から再計算する。
+func (r *Repository) Delete(ctx context.Context, userID, workoutID int) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// セット保存・終了・カレンダー編集と同じworkout行のロックで直列化する。
+	var lockedID int
+	err = tx.QueryRowContext(ctx, `SELECT id FROM workouts WHERE id=$1 AND user_id=$2 FOR UPDATE`, workoutID, userID).Scan(&lockedID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return workout.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	impacted := map[string]bool{}
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT exercise_id FROM workout_sets WHERE workout_id=$1 AND exercise_id IS NOT NULL`, workoutID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		impacted[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	// 日次予定はworkoutsを参照している。実施済みの予定は記録と一緒に消し、
+	// 進行中だった予定は紐付けだけ外して、その日をやり直せるようにする。
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workout_plans WHERE workout_id=$1 AND status<>'active'`, workoutID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE workout_plans SET workout_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE workout_id=$1`, workoutID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workout_sets WHERE workout_id=$1`, workoutID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workouts WHERE id=$1 AND user_id=$2`, workoutID, userID); err != nil {
+		return err
+	}
+	if err := recalculateImpactedStats(ctx, tx, userID, impacted); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) SaveSummaryComment(ctx context.Context, userID, workoutID int, comment string) (string, bool, error) {
@@ -517,6 +613,30 @@ func (r *Repository) summary(ctx context.Context, userID, workoutID int) (workou
 		summary.Exercises = append(summary.Exercises, item)
 	}
 	return summary, rows.Err()
+}
+
+func (r *Repository) detailSets(ctx context.Context, userID, workoutID int) ([]workout.DetailSet, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT ws.id,COALESCE(ws.exercise_id,''),COALESCE(e.name,ws.exercise_id,''),ws.set_order,ws.weight,ws.reps,
+		       COALESCE(ws.feeling,''),COALESCE(ws.is_pr,FALSE),ws.created_at
+		FROM workout_sets ws JOIN workouts w ON w.id=ws.workout_id LEFT JOIN exercises e ON e.id=ws.exercise_id
+		WHERE w.user_id=$1 AND ws.workout_id=$2 ORDER BY ws.created_at,ws.id
+	`, userID, workoutID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []workout.DetailSet{}
+	for rows.Next() {
+		var set workout.DetailSet
+		var createdAt time.Time
+		if err := rows.Scan(&set.ID, &set.ExerciseID, &set.ExerciseName, &set.SetOrder, &set.Weight, &set.Reps, &set.Feeling, &set.IsPR, &createdAt); err != nil {
+			return nil, err
+		}
+		set.CreatedAt = createdAt.Format(time.RFC3339)
+		result = append(result, set)
+	}
+	return result, rows.Err()
 }
 
 func (r *Repository) calendarSets(ctx context.Context, userID, workoutID int) ([]workout.CalendarSet, error) {

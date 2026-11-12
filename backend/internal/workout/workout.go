@@ -90,14 +90,51 @@ type Summary struct {
 	Exercises   []SummaryExercise `json:"exercises"`
 }
 
-type Detail struct {
-	ID        int     `json:"id"`
-	Title     string  `json:"title"`
-	StartedAt string  `json:"started_at"`
-	EndedAt   string  `json:"ended_at"`
-	Status    string  `json:"status"`
-	Summary   Summary `json:"summary"`
+// DetailSet は詳細画面に出すセットごとの記録。
+type DetailSet struct {
+	ID           int     `json:"id"`
+	ExerciseID   string  `json:"exercise_id"`
+	ExerciseName string  `json:"exercise_name"`
+	SetOrder     int     `json:"set_order"`
+	Weight       float64 `json:"weight"`
+	Reps         int     `json:"reps"`
+	Feeling      string  `json:"feeling"`
+	IsPR         bool    `json:"is_pr"`
+	CreatedAt    string  `json:"created_at"`
 }
+
+type Detail struct {
+	ID        int         `json:"id"`
+	Title     string      `json:"title"`
+	StartedAt string      `json:"started_at"`
+	EndedAt   string      `json:"ended_at"`
+	Status    string      `json:"status"`
+	Summary   Summary     `json:"summary"`
+	Sets      []DetailSet `json:"sets"`
+}
+
+// HistoryEntry は履歴一覧の1件。完了したワークアウトだけを対象にする。
+type HistoryEntry struct {
+	ID          int     `json:"id"`
+	Title       string  `json:"title"`
+	StartedAt   string  `json:"started_at"`
+	EndedAt     string  `json:"ended_at"`
+	DurationMin int     `json:"duration_min"`
+	TotalSets   int     `json:"total_sets"`
+	TotalVolume float64 `json:"total_volume"`
+}
+
+type HistoryPage struct {
+	Workouts []HistoryEntry `json:"workouts"`
+	Total    int            `json:"total"`
+	Limit    int            `json:"limit"`
+	Offset   int            `json:"offset"`
+}
+
+const (
+	DefaultHistoryLimit = 20
+	MaxHistoryLimit     = 100
+)
 
 type FinishResult struct {
 	WorkoutID int     `json:"workout_id"`
@@ -139,6 +176,8 @@ type Repository interface {
 	RecommendationContext(ctx context.Context, userID, workoutID, setID int) (RecommendationContext, error)
 	Finish(ctx context.Context, userID, workoutID int) (Detail, error)
 	Detail(ctx context.Context, userID, workoutID int) (Detail, error)
+	History(ctx context.Context, userID, limit, offset int) ([]HistoryEntry, int, error)
+	Delete(ctx context.Context, userID, workoutID int) error
 	SaveSummaryComment(ctx context.Context, userID, workoutID int, comment string) (string, bool, error)
 	CalendarWorkout(ctx context.Context, userID int, date time.Time) (CalendarWorkout, error)
 	SaveCalendarWorkout(ctx context.Context, userID int, date time.Time, input CalendarWorkoutInput) (CalendarWorkout, error)
@@ -279,7 +318,50 @@ func (s *Service) Detail(ctx context.Context, userID, workoutID int) (Detail, er
 		return Detail{}, apperr.Internal(err)
 	}
 	detail.Title = displayTitle(detail.Title)
+	if detail.Sets == nil {
+		detail.Sets = []DetailSet{}
+	}
 	return detail, nil
+}
+
+// History は完了したワークアウトを新しい順に返す。limit が0なら既定件数を使う。
+func (s *Service) History(ctx context.Context, userID, limit, offset int) (HistoryPage, error) {
+	if limit == 0 {
+		limit = DefaultHistoryLimit
+	}
+	fields := map[string]string{}
+	if limit < 1 || limit > MaxHistoryLimit {
+		fields["limit"] = fmt.Sprintf("must be between 1 and %d", MaxHistoryLimit)
+	}
+	if offset < 0 {
+		fields["offset"] = "must be non-negative"
+	}
+	if len(fields) > 0 {
+		return HistoryPage{}, apperr.Validation("履歴の取得範囲を確認してください。", fields)
+	}
+	entries, total, err := s.repository.History(ctx, userID, limit, offset)
+	if err != nil {
+		return HistoryPage{}, apperr.Internal(err)
+	}
+	if entries == nil {
+		entries = []HistoryEntry{}
+	}
+	for index := range entries {
+		entries[index].Title = displayTitle(entries[index].Title)
+	}
+	return HistoryPage{Workouts: entries, Total: total, Limit: limit, Offset: offset}, nil
+}
+
+// Delete はワークアウトとそのセットを削除する。種目ごとの統計はRepositoryが再計算する。
+func (s *Service) Delete(ctx context.Context, userID, workoutID int) error {
+	err := s.repository.Delete(ctx, userID, workoutID)
+	if errors.Is(err, ErrNotFound) {
+		return apperr.NotFound("ワークアウトが見つかりません。")
+	}
+	if err != nil {
+		return apperr.Internal(err)
+	}
+	return nil
 }
 
 func (s *Service) SummaryComment(ctx context.Context, userID, workoutID int) (SummaryCommentResult, error) {
