@@ -16,6 +16,9 @@ import {
   Target,
   RefreshCw,
   ChevronRight,
+  Clock,
+  HeartPulse,
+  Scale,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlternativeCoachModal } from "@/features/exercises/components/AlternativeCoachModal";
@@ -25,6 +28,14 @@ import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
 import { displayPlanText, formatPlanMonth } from "@/lib/fitlog";
 import { useMonthlyPromptDismissal } from "./useMonthlyPromptDismissal";
+import BodyMeasurements from "./BodyMeasurements";
+
+const STAT_ICONS: Record<string, React.ReactNode> = {
+  "消費カロリー": <Flame className="w-5 h-5" />,
+  "活動時間": <Clock className="w-5 h-5" />,
+  "体重": <Scale className="w-5 h-5" />,
+  "心拍数": <HeartPulse className="w-5 h-5" />,
+};
 
 const WEEKDAY_OPTIONS = [
   { value: 0, label: "日" },
@@ -54,6 +65,7 @@ export default function DashboardPage() {
   const [monthlyPlan, setMonthlyPlan] = React.useState<any>(null);
   const [preferences, setPreferences] = React.useState<any>(null);
   const [dashboardData, setDashboardData] = React.useState<any>(null);
+  const [dashboardVersion, setDashboardVersion] = React.useState(0);
   const [altModalData, setAltModalData] = React.useState<{dayIdx: number, exIdx: number, exName: string, exId?: string} | null>(null);
   const [today, setToday] = React.useState<Date | null>(null);
   const [currentMonth, setCurrentMonth] = React.useState(() => formatPlanMonth(new Date()));
@@ -117,7 +129,7 @@ export default function DashboardPage() {
       .then(data => { if (!controller.signal.aborted) setPreferences(data); })
       .catch(err => { if (!controller.signal.aborted) console.error(err); });
     return () => controller.abort();
-  }, [user.id]);
+  }, [user.id, dashboardVersion]);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -333,6 +345,32 @@ export default function DashboardPage() {
             </div>
           </div>
         </section>
+
+        {/* 実績サマリー（直近7日・記録データから算出） */}
+        {dashboardData?.stats?.length > 0 && (
+          <section className="mb-8">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {dashboardData.stats.map((stat: any) => (
+                <div key={stat.label} className="glass rounded-3xl p-5 border border-white/5">
+                  <div className="flex items-center gap-2 text-white/40 mb-3">
+                    <span className="text-primary">{STAT_ICONS[stat.label] || <Activity className="w-5 h-5" />}</span>
+                    <span className="text-xs font-bold tracking-wider">{stat.label}</span>
+                  </div>
+                  <p className="text-3xl font-black">
+                    {stat.value}
+                    <span className="text-sm font-bold text-white/40 ml-1">{stat.unit}</span>
+                  </p>
+                  {stat.trend && <p className="text-xs font-bold text-white/40 mt-1">{stat.label === "体重" || stat.label === "心拍数" ? "前回比" : "前週比"} {stat.trend}</p>}
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-white/30 mt-3">直近7日間の記録から算出しています。体重と心拍数は下の身体データに記録された最新値です。</p>
+          </section>
+        )}
+
+        <div className="mb-8">
+          <BodyMeasurements onChanged={() => setDashboardVersion(v => v + 1)} />
+        </div>
 
         {/* 最近の記録 */}
         <section className="glass rounded-[32px] p-6 md:p-10 border border-white/5">

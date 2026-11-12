@@ -13,6 +13,7 @@ vi.mock("@/components/AuthGate", () => ({ useAuth: () => auth, LogoutButton: () 
 let monthlyCalls = 0;
 const server = setupServer(
   http.get("http://localhost:3000/api/dashboard", () => HttpResponse.json({ recent_workouts: [] })),
+  http.get("http://localhost:3000/api/body-measurements", () => HttpResponse.json([])),
   http.get("http://localhost:3000/api/preferences", () => HttpResponse.json({})),
   http.get("http://localhost:3000/api/monthly-plans/:month", () => {
     monthlyCalls++;
