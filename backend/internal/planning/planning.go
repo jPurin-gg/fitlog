@@ -108,6 +108,9 @@ type ExerciseStats struct {
 	TargetWeight float64
 	TargetReps   int
 	MaxWeight    float64
+	// LastWeight is the most recently recorded weight, or 0 without history.
+	// TargetWeight falls back to a planning default in that case.
+	LastWeight float64
 }
 
 type Repository interface {
@@ -280,7 +283,7 @@ func (s *Service) SaveDaily(ctx context.Context, userID int, dateText string, pl
 	if err != nil {
 		return PlanSession{}, err
 	}
-	if err := s.normalizeDaily(ctx, userID, &plan); err != nil {
+	if err := s.normalizeDaily(ctx, userID, &plan, false); err != nil {
 		return PlanSession{}, err
 	}
 	saved, err := s.repository.SaveDaily(ctx, userID, date, plan)
@@ -305,9 +308,9 @@ func (s *Service) StartDaily(ctx context.Context, userID int, dateText string, i
 		plan := WorkoutPlan{
 			WorkoutTitle: "フリーワークアウト", Target: "自分で選んだ種目", EstimatedDurationMin: 15,
 			CoachNote: "体調に合わせて無理のない重量で進めましょう。",
-			Exercises: []PlanExercise{{ExerciseID: strings.TrimSpace(*input.ExerciseID), PlannedSets: 3, TargetReps: 10}},
+			Exercises: []PlanExercise{{ExerciseID: strings.TrimSpace(*input.ExerciseID)}},
 		}
-		if err := s.normalizeDaily(ctx, userID, &plan); err != nil {
+		if err := s.normalizeDaily(ctx, userID, &plan, true); err != nil {
 			return PlanSession{}, err
 		}
 		manual = &plan
@@ -446,7 +449,10 @@ func (s *Service) refineDaily(ctx context.Context, base WorkoutPlan) (WorkoutPla
 	return refined, nil
 }
 
-func (s *Service) normalizeDaily(ctx context.Context, userID int, plan *WorkoutPlan) error {
+// normalizeDaily resolves every exercise against the dictionary. With fromStats
+// it also plans the sets, weight and reps from the user's saved target sets and
+// last recorded weight; otherwise the values given in the plan are kept.
+func (s *Service) normalizeDaily(ctx context.Context, userID int, plan *WorkoutPlan, fromStats bool) error {
 	plan.WorkoutTitle = strings.TrimSpace(plan.WorkoutTitle)
 	if plan.WorkoutTitle == "" {
 		plan.WorkoutTitle = "筋トレ"
@@ -471,6 +477,10 @@ func (s *Service) normalizeDaily(ctx context.Context, userID int, plan *WorkoutP
 			return apperr.Internal(err)
 		}
 		exercise.ExerciseID, exercise.Name, exercise.LastMaxWeight = resolvedID, stats.Name, stats.MaxWeight
+		if fromStats {
+			// An exercise without history keeps weight 0, so the record screen leaves the field empty.
+			exercise.PlannedSets, exercise.TargetWeight, exercise.TargetReps = stats.TargetSets, stats.LastWeight, stats.TargetReps
+		}
 		if exercise.PlannedSets <= 0 {
 			exercise.PlannedSets = 3
 		}

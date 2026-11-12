@@ -25,10 +25,15 @@ import { WorkoutSummaryView, type WorkoutSummary } from "./components/WorkoutSum
 import { ApiError, apiErrorMessage } from "@/lib/api";
 import { displayPlanText, formatLocalDate } from "@/lib/fitlog";
 import { initialRecordFlowState, recordFlowReducer } from "./workoutFlow";
-import { finishWorkoutSession, getSetRecommendation, getSummaryComment, getTargetSets, recordWorkoutSet, startWorkoutPlan, updateTargetSets } from "./api";
-import type { SetRecommendation, WorkoutPlanSession } from "./types";
+import { finishWorkoutSession, getExerciseSettings, getSetRecommendation, getSummaryComment, recordWorkoutSet, startWorkoutPlan, updateTargetSets } from "./api";
+import type { SetRecommendation, WorkoutPlanExercise, WorkoutPlanSession } from "./types";
 
 type SummaryCommentState = "idle" | "loading" | "ready" | "unavailable";
+
+// 予定にない種目は、保存済みの設定と記録を取得できるまで既定値で扱う。
+function unplannedExerciseDefaults(exercise: { id: string; name: string }): WorkoutPlanExercise {
+  return { exercise_id: exercise.id, name: exercise.name, planned_sets: 3, target_weight: 0, target_reps: 10 };
+}
 
 function newIdempotencyKey() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -61,10 +66,8 @@ export default function WorkoutPage() {
   const [currentSet, setCurrentSet] = React.useState(1);
   const [formData, setFormData] = React.useState({ weight: '', reps: '', feeling: '' });
   const [workoutStarted, setWorkoutStarted] = React.useState(false);
-  const [currentExercise, setCurrentExercise] = React.useState({
-    id: "Barbell_Bench_Press_-_Medium_Grip", 
-    name: "ベンチプレス"
-  });
+  const [currentExercise, setCurrentExercise] = React.useState({ id: "", name: "" });
+  const [unplannedExercise, setUnplannedExercise] = React.useState<WorkoutPlanExercise | null>(null);
   const [workoutPlan, setWorkoutPlan] = React.useState<WorkoutPlanSession | null>(null);
   const [currentExerciseIndex, setCurrentExerciseIndex] = React.useState(0);
   const [showAltModal, setShowAltModal] = React.useState(false);
@@ -90,6 +93,9 @@ export default function WorkoutPage() {
   const summaryCommentAbortRef = React.useRef<AbortController | null>(null);
   const summaryCommentRequestRef = React.useRef(0);
   const nextSetByExerciseRef = React.useRef<Record<string, number>>({});
+  const targetSetsByExerciseRef = React.useRef<Record<string, number>>({});
+  const exerciseRequestRef = React.useRef(0);
+  const pendingAddedExerciseRef = React.useRef<string | null>(null);
   const recordTransitionLocked = saveState === "saving" || saveRetryLocked;
 
   React.useEffect(() => () => {
@@ -119,23 +125,12 @@ export default function WorkoutPage() {
     setSummaryCommentError(null);
   }, [aiEnabled]);
 
-  // 種目が変わったら目標セット数を取得
-  React.useEffect(() => {
-    const fetchTargetSets = async () => {
-      if (workoutPlan) return;
-      try {
-        const data = await getTargetSets(currentExercise.id);
-        setTargetSets(data.target_sets ?? 3);
-        setTempTargetSets(data.target_sets ?? 3);
-      } catch { /* デフォルト3セットのまま */ }
-    };
-    fetchTargetSets();
-  }, [currentExercise.id, workoutPlan]);
-
   const saveTargetSets = async (value: number) => {
     if (saveInFlightRef.current || saveRetryLocked || finishInFlightRef.current) return;
     setTargetSets(value);
     setEditingTargetSets(false);
+    // 記録中に変更した値は、種目を切り替えて戻ったときにも使う。
+    targetSetsByExerciseRef.current[currentExercise.id] = value;
     try {
       await updateTargetSets(currentExercise.id, value);
     } catch { /* 無視 */ }
@@ -155,32 +150,89 @@ export default function WorkoutPage() {
     setRecordedSetID(null);
   };
 
+  // 予定にない種目の目標セット数・前回の重量・最大重量を取得して反映する。
+  const loadUnplannedExercise = async (exercise: { id: string; name: string }, requestID: number) => {
+    // 取得できなくても既定値のまま記録できる。
+    const settings = await getExerciseSettings(exercise.id).catch(() => null);
+    if (!settings || exerciseRequestRef.current !== requestID) return;
+    const loaded: WorkoutPlanExercise = {
+      ...unplannedExerciseDefaults(exercise),
+      planned_sets: settings.target_sets || 3,
+      target_weight: settings.last_weight || 0,
+      last_max_weight: settings.max_weight || 0,
+    };
+    setUnplannedExercise(loaded);
+    if (pendingAddedExerciseRef.current === loaded.exercise_id) {
+      // 記録画面だけに追加した種目は、以後は予定の一覧と選び直したときにも同じ値を使う。
+      pendingAddedExerciseRef.current = null;
+      setWorkoutPlan(plan => plan && {
+        ...plan,
+        plan: { ...plan.plan, exercises: plan.plan.exercises.map(ex => ex.exercise_id === loaded.exercise_id ? loaded : ex) },
+      });
+    }
+    if (targetSetsByExerciseRef.current[loaded.exercise_id] === undefined) {
+      setTargetSets(loaded.planned_sets);
+      setTempTargetSets(loaded.planned_sets);
+    }
+    if (loaded.target_weight) {
+      // 取得を待つ間に入力された重量は上書きしない。
+      setFormData(previous => previous.weight === '' ? { ...previous, weight: String(loaded.target_weight) } : previous);
+    }
+  };
+
+  // 種目が有効になるたびに、その種目の目標セット数・重量・回数を反映する。
+  // 予定にある種目は予定の値を使い、予定にない種目は保存済みの設定と記録を取得する。
+  const activateExercise = (exercise: { id: string; name: string }, planned?: WorkoutPlanExercise) => {
+    const requestID = ++exerciseRequestRef.current;
+    const targets = planned ?? unplannedExerciseDefaults(exercise);
+    const sets = targetSetsByExerciseRef.current[exercise.id] ?? (targets.planned_sets || 3);
+    setCurrentExercise(exercise);
+    setUnplannedExercise(null);
+    setTargetSets(sets);
+    setTempTargetSets(sets);
+    setCurrentSet(nextSetByExerciseRef.current[exercise.id] || 1);
+    resetSetFlow();
+    setFormData({
+      weight: targets.target_weight ? String(targets.target_weight) : '',
+      reps: targets.target_reps ? String(targets.target_reps) : '',
+      feeling: ''
+    });
+    if (!planned) void loadUnplannedExercise(exercise, requestID);
+  };
+
+  // 予定の値を使える種目だけを返す。記録画面だけに追加した種目は、設定と記録を反映できるまで予定の値を持たない。
+  const plannedTargets = (ex?: WorkoutPlanExercise) => (
+    ex && ex.exercise_id !== pendingAddedExerciseRef.current ? ex : undefined
+  );
+
   const activatePlanExercise = (plan: WorkoutPlanSession, index: number) => {
     if (saveInFlightRef.current || saveRetryLocked || finishInFlightRef.current) return;
     const ex = plan.plan.exercises[index];
     if (!ex) return;
     if (workoutPlan && index === currentExerciseIndex && ex.exercise_id === currentExercise.id) return;
     setCurrentExerciseIndex(index);
-    setCurrentExercise({ id: ex.exercise_id, name: ex.name });
-    setTargetSets(ex.planned_sets || 3);
-    setTempTargetSets(ex.planned_sets || 3);
-    setCurrentSet(nextSetByExerciseRef.current[ex.exercise_id] || 1);
-    resetSetFlow();
-    setFormData({
-      weight: ex.target_weight ? String(ex.target_weight) : '',
-      reps: ex.target_reps ? String(ex.target_reps) : '',
-      feeling: ''
-    });
+    activateExercise({ id: ex.exercise_id, name: ex.name }, plannedTargets(ex));
+  };
+
+  // 検索や代替で選んだ種目に切り替える。
+  const switchExercise = (exercise: { id: string; name: string }) => {
+    if (exercise.id === currentExercise.id) {
+      // 同じ種目を選び直したときは、入力中の内容を保つ。
+      setCurrentExercise(exercise);
+      setCurrentSet(nextSetByExerciseRef.current[exercise.id] || 1);
+      resetSetFlow();
+      return;
+    }
+    activateExercise(exercise, plannedTargets(workoutPlan?.plan.exercises.find(planned => planned.exercise_id === exercise.id)));
   };
 
   const applyStartedWorkout = (data: WorkoutPlanSession, selected?: { id: string; name: string }) => {
     let index = selected ? data.plan.exercises.findIndex(ex => ex.exercise_id === selected.id) : 0;
-    if (selected && index < 0) {
+    const added = selected && index < 0 ? unplannedExerciseDefaults(selected) : null;
+    if (added) {
       // 記録画面だけに選択種目を追加し、保存済みの日次予定は変更しない。
       index = data.plan.exercises.length;
-      data = { ...data, plan: { ...data.plan, exercises: [...data.plan.exercises, {
-        exercise_id: selected.id, name: selected.name, planned_sets: 3, target_weight: 0, target_reps: 10,
-      }] } };
+      data = { ...data, plan: { ...data.plan, exercises: [...data.plan.exercises, added] } };
     }
     if (!data.plan.exercises.length) {
       throw new Error("開始できる種目がありません。");
@@ -188,9 +240,12 @@ export default function WorkoutPage() {
     setWorkoutPlan(data);
     setWorkoutStarted(true);
     nextSetByExerciseRef.current = {};
+    targetSetsByExerciseRef.current = {};
     setStartNotice(isEnabled() && data.ai_status === "fallback"
       ? "AI調整は利用できませんでしたが、記録できるメニューで開始しました。"
       : null);
+    // 追加した種目は予定の値を持たないため、保存済みの設定と記録を取得する。
+    pendingAddedExerciseRef.current = added ? added.exercise_id : null;
     activatePlanExercise(data, index);
   };
 
@@ -402,6 +457,9 @@ export default function WorkoutPage() {
       dispatchRecordFlow({ type: "RESET" });
       setCurrentSet(1);
       nextSetByExerciseRef.current = {};
+      targetSetsByExerciseRef.current = {};
+      pendingAddedExerciseRef.current = null;
+      exerciseRequestRef.current += 1;
       setCurrentExerciseIndex(0);
       setFormData({ weight: '', reps: '', feeling: '' });
       setRequestRef.current = null;
@@ -435,7 +493,7 @@ export default function WorkoutPage() {
     setSummaryCommentError(null);
   };
 
-  const activePlanExercise = workoutPlan?.plan.exercises.find(exercise => exercise.exercise_id === currentExercise.id);
+  const activeTargets = workoutPlan?.plan.exercises.find(exercise => exercise.exercise_id === currentExercise.id) ?? unplannedExercise;
 
   if (finishedSummary && !workoutStarted) {
     return (
@@ -592,9 +650,7 @@ export default function WorkoutPage() {
               const nextExercise = typeof newExercise === "string"
                 ? { id: `custom_${Date.now()}`, name: newExercise }
                 : { id: newExercise.id || `custom_${Date.now()}`, name: newExercise.name || currentExercise.name };
-              setCurrentExercise({ id: nextExercise.id, name: nextExercise.name });
-              setCurrentSet(nextSetByExerciseRef.current[nextExercise.id] || 1);
-              resetSetFlow();
+              switchExercise(nextExercise);
               setShowAltModal(false);
             }}
           />
@@ -606,9 +662,7 @@ export default function WorkoutPage() {
           onClose={() => setShowExerciseSelector(false)}
           onSelect={(ex) => {
             if (recordTransitionLocked || finishing) return;
-            setCurrentExercise(ex);
-            setCurrentSet(nextSetByExerciseRef.current[ex.id] || 1);
-            resetSetFlow();
+            switchExercise(ex);
             setShowExerciseSelector(false);
           }}
         />
@@ -855,16 +909,16 @@ export default function WorkoutPage() {
                     <div className="rounded-xl bg-white/5 p-3">
                       <p className="text-[10px] font-bold text-white/35">計画上の目標</p>
                       <p className="mt-1 text-sm font-bold">
-                        {activePlanExercise
-                          ? `${activePlanExercise.target_weight ? `${activePlanExercise.target_weight}kg × ` : ""}${activePlanExercise.target_reps}回`
+                        {activeTargets
+                          ? `${activeTargets.target_weight ? `${activeTargets.target_weight}kg × ` : ""}${activeTargets.target_reps}回`
                           : "自分で調整"}
                       </p>
                     </div>
                     <div className="rounded-xl bg-white/5 p-3">
                       <p className="text-[10px] font-bold text-white/35">過去の最大重量</p>
                       <p className="mt-1 text-sm font-bold">
-                        {activePlanExercise?.last_max_weight
-                          ? `${activePlanExercise.last_max_weight}kg`
+                        {activeTargets?.last_max_weight
+                          ? `${activeTargets.last_max_weight}kg`
                           : "記録なし"}
                       </p>
                     </div>

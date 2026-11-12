@@ -249,14 +249,15 @@ func (r *Repository) ResolveExercise(ctx context.Context, userID int, exerciseID
 			return planning.ExerciseStats{}, "", err
 		}
 	}
-	stats := planning.ExerciseStats{Name: displayName, TargetSets: 3, TargetWeight: 20, TargetReps: 10}
+	stats := planning.ExerciseStats{Name: displayName, TargetSets: 3, TargetReps: 10}
 	err := r.db.QueryRowContext(ctx, `
 		SELECT COALESCE(weight,0),COALESCE(max_weight,0),COALESCE(target_sets,3)
 		FROM user_exercise_stats WHERE user_id=$1 AND exercise_id=$2
-	`, userID, id).Scan(&stats.TargetWeight, &stats.MaxWeight, &stats.TargetSets)
+	`, userID, id).Scan(&stats.LastWeight, &stats.MaxWeight, &stats.TargetSets)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return planning.ExerciseStats{}, "", err
 	}
+	stats.TargetWeight = stats.LastWeight
 	if stats.TargetWeight == 0 && stats.MaxWeight > 0 {
 		stats.TargetWeight = stats.MaxWeight * 0.8
 	}

@@ -7,6 +7,12 @@ export interface WorkoutPlanExercise {
   last_max_weight?: number;
 }
 
+export interface ExerciseSettings {
+  target_sets: number;
+  last_weight: number;
+  max_weight: number;
+}
+
 export interface WorkoutPlanSession {
   id: number;
   workout_id: number;

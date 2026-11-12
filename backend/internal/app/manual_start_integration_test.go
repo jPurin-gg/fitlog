@@ -25,6 +25,7 @@ import (
 	"github.com/jPurin-gg/myfitlog-backend/internal/app"
 	"github.com/jPurin-gg/myfitlog-backend/internal/config"
 	"github.com/jPurin-gg/myfitlog-backend/internal/database"
+	"github.com/jPurin-gg/myfitlog-backend/internal/exercise"
 	"github.com/jPurin-gg/myfitlog-backend/internal/planning"
 	"github.com/jPurin-gg/myfitlog-backend/internal/workout"
 )
@@ -69,6 +70,45 @@ func TestManualWorkoutWithoutMonthlyPlanHTTP(t *testing.T) {
 		t.Fatalf("calendar history = %+v", history)
 	}
 	f.request(t, "GET", monthPath, nil, "", http.StatusNotFound)
+	if calls := f.aiCalls.Load(); calls != 0 {
+		t.Fatalf("AI calls = %d, want zero", calls)
+	}
+}
+
+func TestManualStartUsesSavedTargetSetsAndLastWeightHTTP(t *testing.T) {
+	f := newManualAPIFixture(t, nil)
+	date := time.Now().UTC().Format("2006-01-02")
+	startPath := "/api/workout-plans/" + date + "/start"
+	settingsPath := "/api/exercises/squat/settings"
+
+	settings := decodeAPI[exercise.SettingsView](t, f.request(t, "GET", settingsPath, nil, "", http.StatusOK))
+	if settings != (exercise.SettingsView{TargetSets: 3}) {
+		t.Fatalf("settings without stats = %+v", settings)
+	}
+	f.request(t, "PUT", settingsPath, exercise.Settings{TargetSets: 5}, "", http.StatusOK)
+
+	// Without history the manual plan keeps the defaults and leaves the weight unset.
+	started := decodeAPI[planning.PlanSession](t, f.request(t, "POST", startPath, map[string]any{"use_ai": false, "exercise_id": "bench"}, "", http.StatusOK))
+	wantWithoutHistory := []planning.PlanExercise{{ExerciseID: "bench", Name: "ベンチプレス", PlannedSets: 3, TargetReps: 10}}
+	if !reflect.DeepEqual(started.Plan.Exercises, wantWithoutHistory) {
+		t.Fatalf("manual start without history = %+v", started.Plan.Exercises)
+	}
+
+	workoutPath := fmt.Sprintf("/api/workouts/%d", started.WorkoutID)
+	f.request(t, "POST", workoutPath+"/sets", workout.SetInput{ExerciseID: "squat", SetOrder: 1, Weight: 82.5, Reps: 8}, "stats_set_001", http.StatusCreated)
+	f.request(t, "POST", workoutPath+"/sets", workout.SetInput{ExerciseID: "squat", SetOrder: 2, Weight: 80, Reps: 8}, "stats_set_002", http.StatusCreated)
+	settings = decodeAPI[exercise.SettingsView](t, f.request(t, "GET", settingsPath, nil, "", http.StatusOK))
+	if settings != (exercise.SettingsView{TargetSets: 5, LastWeight: 80, MaxWeight: 82.5}) {
+		t.Fatalf("settings with history = %+v", settings)
+	}
+	f.request(t, "POST", workoutPath+"/finish", nil, "", http.StatusOK)
+
+	// The next manual start plans from the saved target sets and the last recorded weight.
+	restarted := decodeAPI[planning.PlanSession](t, f.request(t, "POST", startPath, map[string]any{"use_ai": false, "exercise_id": "squat"}, "", http.StatusOK))
+	wantWithHistory := []planning.PlanExercise{{ExerciseID: "squat", Name: "スクワット", PlannedSets: 5, TargetWeight: 80, TargetReps: 10, LastMaxWeight: 82.5}}
+	if !reflect.DeepEqual(restarted.Plan.Exercises, wantWithHistory) {
+		t.Fatalf("manual start with history = %+v", restarted.Plan.Exercises)
+	}
 	if calls := f.aiCalls.Load(); calls != 0 {
 		t.Fatalf("AI calls = %d, want zero", calls)
 	}

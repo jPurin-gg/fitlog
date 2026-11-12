@@ -61,6 +61,38 @@ func TestAlternativesValidatesResponseAndLogsOutcome(t *testing.T) {
 	}
 }
 
+func TestSettingsReturnsSavedTargetSetsAndRecordedWeights(t *testing.T) {
+	tests := []struct {
+		name        string
+		settings    SettingsView
+		settingsErr error
+		want        SettingsView
+	}{
+		{
+			name:     "saved settings and history",
+			settings: SettingsView{TargetSets: 5, LastWeight: 62.5, MaxWeight: 80},
+			want:     SettingsView{TargetSets: 5, LastWeight: 62.5, MaxWeight: 80},
+		},
+		{
+			name:        "no stats yet",
+			settingsErr: ErrNotFound,
+			want:        SettingsView{TargetSets: 3},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repository := &stubExerciseRepository{settings: test.settings, settingsErr: test.settingsErr}
+			service := NewService(repository, nil, nil)
+
+			got, err := service.Settings(context.Background(), 1, "bench")
+			if err != nil || got != test.want {
+				t.Fatalf("Settings() = %#v, %v; want %#v", got, err, test.want)
+			}
+		})
+	}
+}
+
 func decodeExerciseFeatureLog(t *testing.T, data []byte) map[string]any {
 	t.Helper()
 	var record map[string]any
@@ -73,6 +105,8 @@ func decodeExerciseFeatureLog(t *testing.T, data []byte) map[string]any {
 type stubExerciseRepository struct {
 	alternativeContext AlternativeContext
 	alternativeErr     error
+	settings           SettingsView
+	settingsErr        error
 }
 
 func (*stubExerciseRepository) Search(context.Context, Filters) ([]Exercise, error) { return nil, nil }
@@ -82,8 +116,8 @@ func (*stubExerciseRepository) SetFavorite(context.Context, int, string, bool) e
 	return nil
 }
 func (*stubExerciseRepository) Recent(context.Context, int) ([]Exercise, error) { return nil, nil }
-func (*stubExerciseRepository) Settings(context.Context, int, string) (Settings, error) {
-	return Settings{}, nil
+func (r *stubExerciseRepository) Settings(context.Context, int, string) (SettingsView, error) {
+	return r.settings, r.settingsErr
 }
 func (*stubExerciseRepository) SaveSettings(context.Context, int, string, Settings) error {
 	return nil

@@ -112,11 +112,14 @@ func (r *Repository) Recent(ctx context.Context, userID int) ([]exercise.Exercis
 	return scanExercises(rows)
 }
 
-func (r *Repository) Settings(ctx context.Context, userID int, exerciseID string) (exercise.Settings, error) {
-	var settings exercise.Settings
-	err := r.db.QueryRowContext(ctx, `SELECT COALESCE(target_sets, 3) FROM user_exercise_stats WHERE user_id = $1 AND exercise_id = $2`, userID, exerciseID).Scan(&settings.TargetSets)
+func (r *Repository) Settings(ctx context.Context, userID int, exerciseID string) (exercise.SettingsView, error) {
+	var settings exercise.SettingsView
+	err := r.db.QueryRowContext(ctx, `
+		SELECT COALESCE(target_sets, 3), COALESCE(weight, 0), COALESCE(max_weight, 0)
+		FROM user_exercise_stats WHERE user_id = $1 AND exercise_id = $2
+	`, userID, exerciseID).Scan(&settings.TargetSets, &settings.LastWeight, &settings.MaxWeight)
 	if errors.Is(err, sql.ErrNoRows) {
-		return exercise.Settings{}, exercise.ErrNotFound
+		return exercise.SettingsView{}, exercise.ErrNotFound
 	}
 	return settings, err
 }
