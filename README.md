@@ -213,6 +213,8 @@ docker compose exec -T frontend npm audit --omit=dev
 
 PostgreSQLの行ロックと冪等性、実HTTP経由の手動開始・記録・終了・履歴取得を確認する統合テストは、開発DBと分離した一時DBで実行します。月間プランなしでの記録、同時開始の重複防止、遅れたAI結果による上書き防止も対象です。AI通信先はテスト用のローカルサーバーに固定し、実際の外部AIは使いません。
 
+身体データも同じ統合テストに含まれます。認証済みHTTP経由のCRUD、ユーザー分離、同日重複の409、任意項目のNULL往復、更新・削除後の統計反映を確認します。統計SQLでは活動時間の集計期間とユーザー分離を、マイグレーションでは旧スキーマと既存データからの `00003_body_measurements.sql` 適用・再実行を確認します。
+
 ```sh
 docker compose -f compose.test.yml run --rm --build backend-test
 docker compose -f compose.test.yml down
