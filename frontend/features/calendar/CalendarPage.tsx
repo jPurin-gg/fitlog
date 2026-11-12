@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { ArrowLeft, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Dumbbell, Sparkles, Check, Plus, Trash2, Save, Loader2, X, ExternalLink } from "lucide-react";
+import { ArrowLeft, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Dumbbell, Sparkles, Check, Plus, Trash2, Save, Loader2, X, ExternalLink, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { ExerciseSelectorModal } from "@/features/exercises/components/ExerciseSelectorModal";
@@ -41,38 +41,58 @@ function weekdayLabels(days?: number[]) {
     .join("・");
 }
 
+type LoadStatus = "loading" | "ready" | "error";
+
+interface CalendarResponse {
+  worked_out_dates?: number[];
+  worked_out_days?: WorkedOutDay[];
+  planned_days?: PlannedWorkoutDay[];
+}
+
+interface MonthCalendar {
+  workedOutDates: number[];
+  workedOutDays: WorkedOutDay[];
+  plannedDays: PlannedWorkoutDay[];
+}
+
+// 取得結果は対象の月（YYYY-MM）と一緒に持ち、表示中の月と一致するものだけを描画に使う。
+interface MonthCalendarLoad {
+  month: string;
+  status: LoadStatus;
+  data: MonthCalendar;
+}
+
+interface MonthPlanLoad {
+  month: string;
+  status: LoadStatus;
+  plan: MonthlyPlan | null;
+}
+
+const EMPTY_MONTH_CALENDAR: MonthCalendar = { workedOutDates: [], workedOutDays: [], plannedDays: [] };
+
+const UNSAVED_CHANGES_MESSAGE = "保存していない変更があります。破棄して閉じますか？";
+
+// 編集モーダルの未保存判定に使う。読み込み時と現在の入力を同じ形にして比べる。
+// セット順は保存時に並び順から振り直すので、比較からは外す。
+function workoutSnapshot(title: string, sets: CalendarWorkoutSet[]) {
+  return JSON.stringify({ title, sets: sets.map(set => ({ ...set, set_order: 0 })) });
+}
+
+function planSnapshot(title: string, target: string, duration: number, coachNote: string, exercises: CalendarPlanExercise[]) {
+  return JSON.stringify({ title, target, duration, coachNote, exercises });
+}
+
 export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [plan, setPlan] = useState<MonthlyPlan | null>(null);
   const [planHistory, setPlanHistory] = useState<MonthlyPlan[]>([]);
-  const [plannedWeekDays, setPlannedWeekDays] = useState<number[]>([]);
-  const [workedOutDates, setWorkedOutDates] = useState<number[]>([]);
-  const [workedOutDays, setWorkedOutDays] = useState<WorkedOutDay[]>([]);
-  const [plannedDays, setPlannedDays] = useState<PlannedWorkoutDay[]>([]);
+  const [planLoad, setPlanLoad] = useState<MonthPlanLoad>({ month: "", status: "loading", plan: null });
+  const [calendarLoad, setCalendarLoad] = useState<MonthCalendarLoad>({ month: "", status: "loading", data: EMPTY_MONTH_CALENDAR });
+  const [planReloadKey, setPlanReloadKey] = useState(0);
+  const [calendarReloadKey, setCalendarReloadKey] = useState(0);
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const selectedPlanMonth = formatPlanMonth(currentDate);
-
-  const refreshCalendarData = React.useCallback(() => {
-    return apiFetch<{ worked_out_dates?: number[]; worked_out_days?: WorkedOutDay[]; planned_days?: PlannedWorkoutDay[] }>(`/api/calendar?year=${currentDate.getFullYear()}&month=${currentDate.getMonth() + 1}`)
-      .then(data => {
-        if (data && data.worked_out_dates) {
-          setWorkedOutDates(data.worked_out_dates);
-        } else {
-          setWorkedOutDates([]);
-        }
-        if (data && data.worked_out_days) {
-          setWorkedOutDays(data.worked_out_days);
-        } else {
-          setWorkedOutDays([]);
-        }
-        if (data && data.planned_days) {
-          setPlannedDays(data.planned_days);
-        } else {
-          setPlannedDays([]);
-        }
-      })
-      .catch(err => console.error("Failed to fetch calendar data:", err));
-  }, [currentDate]);
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
 
   useEffect(() => {
     apiFetch<MonthlyPlan[]>("/api/monthly-plans")
@@ -81,25 +101,69 @@ export default function CalendarPage() {
   }, []);
 
   useEffect(() => {
-    apiFetch<MonthlyPlan>(`/api/monthly-plans/${selectedPlanMonth}`)
+    const controller = new AbortController();
+    // 月が変わったら前の月の結果を捨てる。同じ月の再取得では、成否にかかわらずその月の結果を残す。
+    setPlanLoad(prev => prev.month === selectedPlanMonth
+      ? { ...prev, status: "loading" }
+      : { month: selectedPlanMonth, status: "loading", plan: null });
+    apiFetch<MonthlyPlan>(`/api/monthly-plans/${selectedPlanMonth}`, { signal: controller.signal })
       .then(data => {
-        setPlan(data);
-        setPlannedWeekDays(data.recommended_days || [1, 3, 5]);
+        if (controller.signal.aborted) return;
+        setPlanLoad({ month: selectedPlanMonth, status: "ready", plan: data });
       })
       .catch(err => {
+        if (controller.signal.aborted) return;
         if (err instanceof ApiError && err.status === 404) {
-          setPlan(null);
-          setPlannedWeekDays([]);
+          setPlanLoad({ month: selectedPlanMonth, status: "ready", plan: null });
           return;
         }
         console.error("Failed to fetch monthly plan:", err);
+        setPlanLoad(prev => prev.month === selectedPlanMonth
+          ? { ...prev, status: "error" }
+          : { month: selectedPlanMonth, status: "error", plan: null });
       });
+    return () => controller.abort();
+  }, [selectedPlanMonth, planReloadKey]);
 
-    refreshCalendarData();
-  }, [refreshCalendarData, selectedPlanMonth]);
+  useEffect(() => {
+    const controller = new AbortController();
+    setCalendarLoad(prev => prev.month === selectedPlanMonth
+      ? { ...prev, status: "loading" }
+      : { month: selectedPlanMonth, status: "loading", data: EMPTY_MONTH_CALENDAR });
+    apiFetch<CalendarResponse>(`/api/calendar?year=${year}&month=${month + 1}`, { signal: controller.signal })
+      .then(data => {
+        if (controller.signal.aborted) return;
+        setCalendarLoad({
+          month: selectedPlanMonth,
+          status: "ready",
+          data: {
+            workedOutDates: data?.worked_out_dates ?? [],
+            workedOutDays: data?.worked_out_days ?? [],
+            plannedDays: data?.planned_days ?? [],
+          },
+        });
+      })
+      .catch(err => {
+        if (controller.signal.aborted) return;
+        console.error("Failed to fetch calendar data:", err);
+        setCalendarLoad(prev => prev.month === selectedPlanMonth
+          ? { ...prev, status: "error" }
+          : { month: selectedPlanMonth, status: "error", data: EMPTY_MONTH_CALENDAR });
+      });
+    return () => controller.abort();
+  }, [year, month, selectedPlanMonth, calendarReloadKey]);
 
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
+  // 月を切り替えた直後は、取得が終わるまで前の月の結果を使わない。
+  const planView: MonthPlanLoad = planLoad.month === selectedPlanMonth
+    ? planLoad
+    : { month: selectedPlanMonth, status: "loading", plan: null };
+  const calendarView: MonthCalendarLoad = calendarLoad.month === selectedPlanMonth
+    ? calendarLoad
+    : { month: selectedPlanMonth, status: "loading", data: EMPTY_MONTH_CALENDAR };
+  const plan = planView.plan;
+  const plannedWeekDays = plan ? plan.recommended_days || [1, 3, 5] : [];
+  const { workedOutDates, workedOutDays, plannedDays } = calendarView.data;
+
   const isSelectedCurrentMonth = selectedPlanMonth === formatPlanMonth(new Date());
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -114,10 +178,11 @@ export default function CalendarPage() {
   }
 
   const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
 
   const getDayStatus = (dateNum: number | null) => {
-    if (!dateNum) return { isToday: false, isWorkedOut: false, isPlanned: false, type: "", workoutId: null as number | null };
+    if (!dateNum) return { isToday: false, isWorkedOut: false, isPlanned: false, isMissed: false, type: "", workoutId: null as number | null };
     const dateObj = new Date(year, month, dateNum);
     const isToday = isCurrentMonth && dateNum === today.getDate();
     const isWorkedOut = workedOutDates.includes(dateNum);
@@ -142,13 +207,17 @@ export default function CalendarPage() {
     const type = workedOutDay ? displayPlanText(workedOutDay.type) : "";
     const workoutId = workedOutDay?.workout_id || null;
 
-    return { 
-      isToday, 
-      isWorkedOut, 
+    // 「予定」は表示中の月に関係なく今日以降だけ。過ぎた日の未実施は「未実施」として分ける。
+    const isUpcoming = dateObj >= todayStart;
+
+    return {
+      isToday,
+      isWorkedOut,
       type,
       workoutId,
       plannedTarget,
-      isPlanned: isPlanned && !isWorkedOut && (!isCurrentMonth || dateObj >= new Date(today.getFullYear(), today.getMonth(), today.getDate())) 
+      isPlanned: isPlanned && !isWorkedOut && isUpcoming,
+      isMissed: isPlanned && !isWorkedOut && !isUpcoming,
     };
   };
 
@@ -187,7 +256,7 @@ export default function CalendarPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
             <div className="glass rounded-[32px] p-6 lg:p-8">
-              <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between mb-8">
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => moveMonth(-1)}
@@ -219,10 +288,34 @@ export default function CalendarPage() {
                     予定
                   </div>
                   <div className="flex items-center gap-1 md:gap-2">
+                    <div className="w-2 h-2 md:w-3 md:h-3 rounded-full border border-dashed border-white/60"></div>
+                    未実施
+                  </div>
+                  <div className="flex items-center gap-1 md:gap-2">
                     <div className="w-2 h-2 md:w-3 md:h-3 rounded-full border-2 border-white"></div>
                     今日
                   </div>
                 </div>
+              </div>
+
+              <div className="mb-4 min-h-5">
+                {calendarView.status === "loading" && (
+                  <p role="status" className="flex items-center gap-2 text-xs text-white/50">
+                    <Loader2 className="w-4 h-4 animate-spin" /> 実施記録と予定を読み込み中...
+                  </p>
+                )}
+                {calendarView.status === "error" && (
+                  <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                    <span>実施記録と予定を読み込めませんでした。</span>
+                    <button
+                      type="button"
+                      onClick={() => setCalendarReloadKey(key => key + 1)}
+                      className="px-3 py-1.5 rounded-xl bg-white/10 text-xs font-bold text-white hover:bg-white/20 transition-colors flex items-center gap-1.5"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" /> カレンダーを再読み込み
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-7 gap-2 lg:gap-4 mb-4">
@@ -241,15 +334,22 @@ export default function CalendarPage() {
                   
                   let bgClass = "bg-white/5 border-white/5";
                   let textClass = "text-white/50";
-                  
+                  let statusLabel = "";
+
                   if (status.isWorkedOut) {
                     bgClass = "bg-green-500/20 border-green-500/30 ring-1 ring-green-500/50";
                     textClass = "text-green-400 font-bold";
+                    statusLabel = "実施済み";
                   } else if (status.isPlanned) {
                     bgClass = "bg-primary/20 border-primary/30 ring-1 ring-primary/50 relative overflow-hidden";
                     textClass = "text-primary font-bold";
+                    statusLabel = "予定";
+                  } else if (status.isMissed) {
+                    bgClass = "bg-white/5 border-dashed border-white/25";
+                    textClass = "text-white/40";
+                    statusLabel = "未実施";
                   }
-                  
+
                   if (status.isToday) {
                     bgClass += " ring-2 ring-white ring-offset-2 ring-offset-[#0a0a0a]";
                     textClass = "text-white font-black";
@@ -294,6 +394,11 @@ export default function CalendarPage() {
                                 </span>
                               </div>
                             )}
+                            {status.isMissed && (
+                              <span className="text-[7px] md:text-[9px] font-bold text-white/40 leading-tight text-center">
+                                未実施
+                              </span>
+                            )}
                           </>
                         )}
                       </div>
@@ -305,7 +410,7 @@ export default function CalendarPage() {
                       key={day}
                       type="button"
                       onClick={() => openDayEditor(day)}
-                      aria-label={`${selectedPlanMonth}-${String(day).padStart(2, "0")} の記録を編集`}
+                      aria-label={`${selectedPlanMonth}-${String(day).padStart(2, "0")} の記録を編集${statusLabel ? `（${statusLabel}）` : ""}`}
                       className="block text-left"
                     >
                       {dayContent}
@@ -397,6 +502,21 @@ export default function CalendarPage() {
                     ))}
                   </div>
                 </div>
+              ) : planView.status === "loading" ? (
+                <p role="status" className="flex items-center gap-2 text-white/40 text-sm">
+                  <Loader2 className="w-4 h-4 animate-spin" /> 月間プランを読み込み中...
+                </p>
+              ) : planView.status === "error" ? (
+                <div role="alert" className="space-y-3 text-sm text-red-200">
+                  <p>{selectedPlanMonth} の月間プランを読み込めませんでした。</p>
+                  <button
+                    type="button"
+                    onClick={() => setPlanReloadKey(key => key + 1)}
+                    className="px-3 py-1.5 rounded-xl bg-white/10 text-xs font-bold text-white hover:bg-white/20 transition-colors flex items-center gap-1.5"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> プランを再読み込み
+                  </button>
+                </div>
               ) : (
                 <p className="text-white/40 text-sm">
                   {selectedPlanMonth} のプランはまだありません。<br/>
@@ -404,21 +524,20 @@ export default function CalendarPage() {
                 </p>
               )}
             </div>
-            
-            <motion.div 
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+
+            <button
+              type="button"
               onClick={() => setEditingDate(formatLocalDate(today))}
-              className="glass rounded-2xl p-6 bg-gradient-to-r from-green-500/10 to-transparent border-green-500/30 cursor-pointer flex justify-between items-center group"
+              className="w-full text-left glass rounded-2xl p-6 bg-gradient-to-r from-green-500/10 to-transparent border-green-500/30 cursor-pointer flex justify-between items-center group hover:scale-[1.02] active:scale-[0.98] transition-transform"
             >
-              <div>
-                <h4 className="font-bold text-green-400 mb-1 group-hover:text-green-300 transition-colors">今日の記録</h4>
-                <p className="text-xs text-white/50">今日を実施済みにする</p>
-              </div>
-              <div className="w-10 h-10 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center group-hover:bg-green-500 group-hover:text-black transition-all">
+              <span className="block">
+                <span className="block font-bold text-green-400 mb-1 group-hover:text-green-300 transition-colors">今日の記録</span>
+                <span className="block text-xs text-white/50">今日を実施済みにする</span>
+              </span>
+              <span className="w-10 h-10 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center group-hover:bg-green-500 group-hover:text-black transition-all">
                 <Check className="w-5 h-5 font-bold" />
-              </div>
-            </motion.div>
+              </span>
+            </button>
           </div>
         </div>
       </main>
@@ -427,7 +546,7 @@ export default function CalendarPage() {
           date={editingDate}
           onClose={() => setEditingDate(null)}
           onSaved={() => {
-            refreshCalendarData();
+            setCalendarReloadKey(key => key + 1);
             setEditingDate(null);
           }}
         />
@@ -437,7 +556,7 @@ export default function CalendarPage() {
           date={editingDate}
           onClose={() => setEditingDate(null)}
           onSaved={() => {
-            refreshCalendarData();
+            setCalendarReloadKey(key => key + 1);
             setEditingDate(null);
           }}
         />
@@ -459,6 +578,8 @@ export function CalendarWorkoutEditor({
   const [workout, setWorkout] = useState<CalendarWorkout | null>(null);
   const [title, setTitle] = useState("筋トレ");
   const [sets, setSets] = useState<CalendarWorkoutSet[]>([]);
+  // 読み込んだ時点の内容。現在の入力と違えば、保存していない変更がある。
+  const [loadedSnapshot, setLoadedSnapshot] = useState(() => workoutSnapshot("筋トレ", []));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -469,15 +590,19 @@ export function CalendarWorkoutEditor({
     setError("");
     apiFetch<CalendarWorkout>(`/api/workouts/by-date/${date}`)
       .then((data: CalendarWorkout) => {
+        const loadedTitle = data.title || "筋トレ";
+        const loadedSets = Array.isArray(data.sets) ? data.sets : [];
         setWorkout(data);
-        setTitle(data.title || "筋トレ");
-        setSets(Array.isArray(data.sets) ? data.sets : []);
+        setTitle(loadedTitle);
+        setSets(loadedSets);
+        setLoadedSnapshot(workoutSnapshot(loadedTitle, loadedSets));
       })
       .catch(err => {
         if (err instanceof ApiError && err.status === 404) {
           setWorkout({ workout_id: 0, date, title: "筋トレ", sets: [] });
           setTitle("筋トレ");
           setSets([]);
+          setLoadedSnapshot(workoutSnapshot("筋トレ", []));
           return;
         }
         console.error(err);
@@ -485,6 +610,13 @@ export function CalendarWorkoutEditor({
       })
       .finally(() => setLoading(false));
   }, [date]);
+
+  const hasUnsavedChanges = !loading && workoutSnapshot(title, sets) !== loadedSnapshot;
+
+  const requestClose = () => {
+    if (hasUnsavedChanges && !window.confirm(UNSAVED_CHANGES_MESSAGE)) return;
+    onClose();
+  };
 
   const addExercise = (exercise: { id: string; name: string }) => {
     setSets(prev => [
@@ -499,6 +631,23 @@ export function CalendarWorkoutEditor({
       },
     ]);
     setShowExerciseSelector(false);
+  };
+
+  // 種目検索をやり直さずに、同じ種目・同じ重量と回数のセットを直後に足す。
+  const addSameExerciseSet = (index: number) => {
+    setSets(prev => {
+      const source = prev[index];
+      if (!source) return prev;
+      const added: CalendarWorkoutSet = {
+        exercise_id: source.exercise_id,
+        exercise_name: source.exercise_name,
+        weight: source.weight,
+        reps: source.reps,
+        set_order: index + 2,
+        feeling: "",
+      };
+      return [...prev.slice(0, index + 1), added, ...prev.slice(index + 1)].map((set, i) => ({ ...set, set_order: i + 1 }));
+    });
   };
 
   const updateSet = (index: number, patch: Partial<CalendarWorkoutSet>) => {
@@ -537,14 +686,14 @@ export function CalendarWorkoutEditor({
   };
 
   return (
-    <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md p-4 flex items-center justify-center overflow-hidden overscroll-none" onClick={onClose}>
-      <div className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-[28px] border border-white/10 bg-[#111] shadow-2xl text-white" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md p-4 flex items-center justify-center overflow-hidden overscroll-none" onClick={requestClose}>
+      <div role="dialog" aria-label="記録を編集" className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-[28px] border border-white/10 bg-[#111] shadow-2xl text-white" onClick={e => e.stopPropagation()}>
         <div className="p-5 border-b border-white/10 flex items-start justify-between gap-4 bg-[#171717]">
           <div>
             <div className="text-xs font-black text-primary mb-1">{date}</div>
             <h2 className="text-xl font-black tracking-tight">記録を編集</h2>
           </div>
-          <button onClick={onClose} className="p-2 rounded-xl text-white/50 hover:text-white hover:bg-white/10 transition-colors" aria-label="閉じる">
+          <button onClick={requestClose} className="p-2 rounded-xl text-white/50 hover:text-white hover:bg-white/10 transition-colors" aria-label="閉じる">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -648,20 +797,30 @@ export function CalendarWorkoutEditor({
                           />
                         </label>
                       </div>
+
+                      {sets[index + 1]?.exercise_id !== set.exercise_id && (
+                        <button
+                          type="button"
+                          onClick={() => addSameExerciseSet(index)}
+                          className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold text-white/70 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-1.5"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> 同じ種目でセットを追加
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
               )}
 
               {error && (
-                <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200 whitespace-pre-line">
+                <div role="alert" className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200 whitespace-pre-line">
                   {error}
                 </div>
               )}
 
               <div className="flex flex-col sm:flex-row gap-3 pt-2">
                 <button
-                  onClick={onClose}
+                  onClick={requestClose}
                   className="sm:flex-1 py-3 rounded-2xl bg-white/5 border border-white/10 font-bold text-white/70 hover:text-white hover:bg-white/10 transition-colors"
                 >
                   キャンセル
@@ -702,34 +861,61 @@ export function CalendarPlanEditor({
 }) {
   useBodyScrollLock();
   const [plan, setPlan] = useState<CalendarPlan | null>(null);
+  // 月間プランも保存済みの予定もない日は、空の予定を新規作成する。
+  const [isNew, setIsNew] = useState(false);
   const [title, setTitle] = useState("筋トレ");
   const [target, setTarget] = useState("筋トレ");
   const [duration, setDuration] = useState(45);
   const [coachNote, setCoachNote] = useState("");
   const [exercises, setExercises] = useState<CalendarPlanExercise[]>([]);
+  // 読み込んだ時点の内容。現在の入力と違えば、保存していない変更がある。
+  const [loadedSnapshot, setLoadedSnapshot] = useState(() => planSnapshot("筋トレ", "筋トレ", 45, "", []));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [showExerciseSelector, setShowExerciseSelector] = useState(false);
 
   useEffect(() => {
+    const showPlan = (loaded: CalendarPlan | null) => {
+      const content = loaded?.plan;
+      const loadedTitle = content?.workout_title || "筋トレ";
+      const loadedTarget = content?.target || content?.workout_title || "筋トレ";
+      const loadedDuration = content?.estimated_duration_min || 45;
+      const loadedCoachNote = content?.coach_note || "";
+      const exerciseList = content?.exercises;
+      const loadedExercises = Array.isArray(exerciseList) ? exerciseList : [];
+      setPlan(loaded);
+      setIsNew(loaded === null);
+      setTitle(loadedTitle);
+      setTarget(loadedTarget);
+      setDuration(loadedDuration);
+      setCoachNote(loadedCoachNote);
+      setExercises(loadedExercises);
+      setLoadedSnapshot(planSnapshot(loadedTitle, loadedTarget, loadedDuration, loadedCoachNote, loadedExercises));
+    };
+
     setLoading(true);
     setError("");
     apiFetch<CalendarPlan>(`/api/workout-plans/${date}`)
-      .then((data: CalendarPlan) => {
-        setPlan(data);
-        setTitle(data.plan?.workout_title || "筋トレ");
-        setTarget(data.plan?.target || data.plan?.workout_title || "筋トレ");
-        setDuration(data.plan?.estimated_duration_min || 45);
-        setCoachNote(data.plan?.coach_note || "");
-        setExercises(Array.isArray(data.plan?.exercises) ? data.plan.exercises : []);
-      })
+      .then((data: CalendarPlan) => showPlan(data))
       .catch(err => {
+        if (err instanceof ApiError && err.status === 404) {
+          // 月間プランなしの利用では予定がまだないだけなので、エラーにせず新規作成へ進める。
+          showPlan(null);
+          return;
+        }
         console.error(err);
-        setError(apiErrorMessage(err, "予定の取得に失敗しました。月間プランがない月かもしれません。"));
+        setError(apiErrorMessage(err, "予定の取得に失敗しました。"));
       })
       .finally(() => setLoading(false));
   }, [date]);
+
+  const hasUnsavedChanges = !loading && planSnapshot(title, target, duration, coachNote, exercises) !== loadedSnapshot;
+
+  const requestClose = () => {
+    if (hasUnsavedChanges && !window.confirm(UNSAVED_CHANGES_MESSAGE)) return;
+    onClose();
+  };
 
   const addExercise = (exercise: { id: string; name: string }) => {
     setExercises(prev => [
@@ -783,15 +969,16 @@ export function CalendarPlanEditor({
   };
 
   return (
-    <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md p-4 flex items-center justify-center overflow-hidden overscroll-none" onClick={onClose}>
-      <div className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-[28px] border border-white/10 bg-[#111] shadow-2xl text-white" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md p-4 flex items-center justify-center overflow-hidden overscroll-none" onClick={requestClose}>
+      <div role="dialog" aria-label={isNew ? "予定を作成" : "予定を編集"} className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-[28px] border border-white/10 bg-[#111] shadow-2xl text-white" onClick={e => e.stopPropagation()}>
         <div className="p-5 border-b border-white/10 flex items-start justify-between gap-4 bg-[#171717]">
           <div>
             <div className="text-xs font-black text-primary mb-1">{date}</div>
-            <h2 className="text-xl font-black tracking-tight">予定を編集</h2>
+            <h2 className="text-xl font-black tracking-tight">{isNew ? "予定を作成" : "予定を編集"}</h2>
             {plan?.status === "draft" && <p className="text-xs text-white/40 mt-1">月間プランから作った未保存の予定です。</p>}
+            {isNew && <p className="text-xs text-white/40 mt-1">この日の予定はまだありません。種目を追加して作成できます。</p>}
           </div>
-          <button onClick={onClose} className="p-2 rounded-xl text-white/50 hover:text-white hover:bg-white/10 transition-colors" aria-label="閉じる">
+          <button onClick={requestClose} className="p-2 rounded-xl text-white/50 hover:text-white hover:bg-white/10 transition-colors" aria-label="閉じる">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -926,14 +1113,14 @@ export function CalendarPlanEditor({
               )}
 
               {error && (
-                <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200 whitespace-pre-line">
+                <div role="alert" className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200 whitespace-pre-line">
                   {error}
                 </div>
               )}
 
               <div className="flex flex-col sm:flex-row gap-3 pt-2">
                 <button
-                  onClick={onClose}
+                  onClick={requestClose}
                   className="sm:flex-1 py-3 rounded-2xl bg-white/5 border border-white/10 font-bold text-white/70 hover:text-white hover:bg-white/10 transition-colors"
                 >
                   キャンセル
