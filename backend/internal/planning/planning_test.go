@@ -375,6 +375,7 @@ type startDailyRepository struct {
 	monthlyErr       error
 	monthlyCalls     int
 	resolveErr       error
+	stats            *ExerciseStats
 	createdByOther   bool
 	now              time.Time
 	dailyResult      PlanSession
@@ -485,7 +486,10 @@ func (r *startDailyRepository) ResolveExercise(context.Context, int, string, str
 	if r.resolveErr != nil {
 		return ExerciseStats{}, "", r.resolveErr
 	}
-	return ExerciseStats{Name: "ベンチプレス", TargetSets: 3, TargetWeight: 40, TargetReps: 10, MaxWeight: 50}, "bench", nil
+	if r.stats != nil {
+		return *r.stats, "bench", nil
+	}
+	return ExerciseStats{Name: "ベンチプレス", TargetSets: 3, TargetWeight: 40, TargetReps: 10, MaxWeight: 50, LastWeight: 40}, "bench", nil
 }
 
 func TestManualStartNeverNeedsMonthlyPlanOrAI(t *testing.T) {
@@ -524,6 +528,71 @@ func TestManualStartValidatesExercise(t *testing.T) {
 		if err == nil || repository.saveCalls != 0 {
 			t.Fatal("invalid exercise was accepted")
 		}
+	}
+}
+
+func TestManualStartPlansFromSavedTargetSetsAndLastWeight(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name  string
+		stats ExerciseStats
+		want  PlanExercise
+	}{
+		{
+			name:  "exercise with history",
+			stats: ExerciseStats{Name: "ベンチプレス", TargetSets: 5, TargetWeight: 62.5, TargetReps: 10, MaxWeight: 80, LastWeight: 62.5},
+			want:  PlanExercise{ExerciseID: "bench", Name: "ベンチプレス", PlannedSets: 5, TargetWeight: 62.5, TargetReps: 10, LastMaxWeight: 80},
+		},
+		{
+			// The 20kg planning default is not a recorded weight, so the weight stays unset.
+			name:  "exercise without history",
+			stats: ExerciseStats{Name: "ベンチプレス", TargetSets: 3, TargetWeight: 20, TargetReps: 10},
+			want:  PlanExercise{ExerciseID: "bench", Name: "ベンチプレス", PlannedSets: 3, TargetWeight: 0, TargetReps: 10},
+		},
+		{
+			name:  "invalid stats fall back to defaults",
+			stats: ExerciseStats{Name: "ベンチプレス", LastWeight: 30, MaxWeight: 30},
+			want:  PlanExercise{ExerciseID: "bench", Name: "ベンチプレス", PlannedSets: 3, TargetWeight: 30, TargetReps: 10, LastMaxWeight: 30},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repository := newStartDailyRepository(now)
+			repository.monthlyErr = ErrNotFound
+			repository.stats = &test.stats
+			service := NewService(repository, nil, nil, nil, clock.Fixed{Time: now}, time.Second)
+			exerciseID := "bench"
+
+			result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{ExerciseID: &exerciseID})
+			if err != nil || result.AIStatus != AIStatusNotRequested {
+				t.Fatalf("manual start = %#v, %v", result, err)
+			}
+			want := []PlanExercise{test.want}
+			if repository.saveCalls != 1 || !reflect.DeepEqual(repository.savedPlan.Exercises, want) {
+				t.Fatalf("saved exercises = %#v; calls = %d; want %#v", repository.savedPlan.Exercises, repository.saveCalls, want)
+			}
+			if !reflect.DeepEqual(result.Plan.Exercises, want) {
+				t.Fatalf("started exercises = %#v; want %#v", result.Plan.Exercises, want)
+			}
+		})
+	}
+}
+
+func TestSaveDailyKeepsPlannedValuesInsteadOfStats(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	repository := newStartDailyRepository(now)
+	repository.stats = &ExerciseStats{Name: "ベンチプレス", TargetSets: 5, TargetWeight: 62.5, TargetReps: 10, MaxWeight: 80, LastWeight: 62.5}
+	service := NewService(repository, nil, nil, nil, clock.Fixed{Time: now}, time.Second)
+	plan := WorkoutPlan{WorkoutTitle: "胸", Exercises: []PlanExercise{{ExerciseID: "bench", PlannedSets: 4, TargetWeight: 0, TargetReps: 6}}}
+
+	saved, err := service.SaveDaily(context.Background(), 1, now.Format("2006-01-02"), plan)
+	if err != nil {
+		t.Fatalf("SaveDaily() error = %v", err)
+	}
+	want := []PlanExercise{{ExerciseID: "bench", Name: "ベンチプレス", PlannedSets: 4, TargetWeight: 0, TargetReps: 6, LastMaxWeight: 80}}
+	if !reflect.DeepEqual(saved.Plan.Exercises, want) {
+		t.Fatalf("saved exercises = %#v; want %#v", saved.Plan.Exercises, want)
 	}
 }
 

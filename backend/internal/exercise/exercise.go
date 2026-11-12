@@ -54,6 +54,15 @@ type Settings struct {
 	TargetSets int `json:"target_sets"`
 }
 
+// SettingsView is what reading the settings returns: the saved target sets and
+// the recorded weights that the record screen applies when an exercise becomes
+// active. The weights are 0 without history.
+type SettingsView struct {
+	TargetSets int     `json:"target_sets"`
+	LastWeight float64 `json:"last_weight"`
+	MaxWeight  float64 `json:"max_weight"`
+}
+
 type Alternative struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -83,7 +92,7 @@ type Repository interface {
 	Favorites(ctx context.Context, userID int) ([]Exercise, error)
 	SetFavorite(ctx context.Context, userID int, exerciseID string, favorite bool) error
 	Recent(ctx context.Context, userID int) ([]Exercise, error)
-	Settings(ctx context.Context, userID int, exerciseID string) (Settings, error)
+	Settings(ctx context.Context, userID int, exerciseID string) (SettingsView, error)
 	SaveSettings(ctx context.Context, userID int, exerciseID string, settings Settings) error
 	AlternativeContext(ctx context.Context, exerciseID string) (AlternativeContext, error)
 }
@@ -174,13 +183,13 @@ func (s *Service) Recent(ctx context.Context, userID int) ([]Exercise, error) {
 	return exercises, nil
 }
 
-func (s *Service) Settings(ctx context.Context, userID int, exerciseID string) (Settings, error) {
+func (s *Service) Settings(ctx context.Context, userID int, exerciseID string) (SettingsView, error) {
 	settings, err := s.repository.Settings(ctx, userID, exerciseID)
 	if errors.Is(err, ErrNotFound) {
-		return Settings{TargetSets: 3}, nil
+		return SettingsView{TargetSets: 3}, nil
 	}
 	if err != nil {
-		return Settings{}, apperr.Internal(err)
+		return SettingsView{}, apperr.Internal(err)
 	}
 	return settings, nil
 }

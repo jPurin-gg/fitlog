@@ -1,8 +1,8 @@
 import { apiFetch } from "@/lib/api";
-import type { SetInput, SetRecommendation, WorkoutDetail, WorkoutPlanSession, WorkoutSummary } from "./types";
+import type { ExerciseSettings, SetInput, SetRecommendation, WorkoutDetail, WorkoutPlanSession, WorkoutSummary } from "./types";
 
-export function getTargetSets(exerciseID: string) {
-  return apiFetch<{ target_sets: number }>(`/api/exercises/${encodeURIComponent(exerciseID)}/settings`);
+export function getExerciseSettings(exerciseID: string) {
+  return apiFetch<ExerciseSettings>(`/api/exercises/${encodeURIComponent(exerciseID)}/settings`);
 }
 
 export function updateTargetSets(exerciseID: string, targetSets: number) {
