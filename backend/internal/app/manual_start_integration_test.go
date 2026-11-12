@@ -174,7 +174,9 @@ type apiResult struct {
 	err    error
 }
 
-func newManualAPIFixture(t *testing.T, aiHandler http.HandlerFunc) *manualAPIFixture {
+// newIntegrationDatabase returns an empty, isolated schema so tests can also
+// exercise upgrades from an older schema before starting the HTTP application.
+func newIntegrationDatabase(t *testing.T) *sql.DB {
 	t.Helper()
 	dsn := os.Getenv("FITLOG_TEST_DATABASE_DSN")
 	if dsn == "" {
@@ -210,6 +212,14 @@ func newManualAPIFixture(t *testing.T, aiHandler http.HandlerFunc) *manualAPIFix
 	}
 	t.Cleanup(func() { db.Close() })
 	db.SetMaxOpenConns(20)
+	return db
+}
+
+func newManualAPIFixture(t *testing.T, aiHandler http.HandlerFunc) *manualAPIFixture {
+	t.Helper()
+	db := newIntegrationDatabase(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 	if err := database.Migrate(ctx, db); err != nil {
 		t.Fatal(err)
 	}
