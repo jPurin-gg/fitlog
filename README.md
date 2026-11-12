@@ -234,31 +234,46 @@ npm run test:e2e
 
 ## 本番環境
 
-本番用ファイルのひな形を作成します。
+新規セットアップでは、リポジトリのルートで `.env.example` を `.env` にコピーし、コメントに従って必須項目を埋めます。実キー・実パスワードはデプロイ先だけに保存し、Gitへコミットしないでください。
 
 ```sh
-cp .env.example .env.prod
-cp docker/env/backend.env.example docker/env/backend.prod.env
+cp .env.example .env
+chmod 600 .env
+```
+
+`.env` はComposeの変数展開に使われますが、全項目が自動的にコンテナへ渡るわけではありません。現行の `compose.prod.yml` は以下の3つの `env_file` も必要とします。バックエンド用は `.env` へのシンボリックリンクにし、AIキーの実値はデプロイ先の `.env` にだけ置きます。フロントエンド用ファイルにバックエンドの秘密情報をコピーしないでください。
+
+```sh
+ln -s ../../.env docker/env/backend.prod.env
 cp docker/env/frontend.env.example docker/env/frontend.prod.env
 cp docker/env/db.env.example docker/env/db.prod.env
+chmod 600 docker/env/db.prod.env
 ```
 
-起動前に、コピーしたすべてのファイルを本番環境に合わせて編集してください。特に次の項目は、そのまま使用しないでください。
+既存の設定ファイルがある場合は、上の作成コマンドで上書きせず、既存設定とテンプレートを照合して不足分だけを反映してください。すでに実ファイルの `backend.prod.env` を運用している場合、以下のバックエンド設定はそのファイルへ反映します。`.env` への一本化は既存の秘密情報を保全したうえで行ってください。
 
-- `.env.prod` の `NEXT_PUBLIC_API_URL`
-- `backend.prod.env` の `SESSION_SECRET`
-- `backend.prod.env` と `db.prod.env` のDBユーザー・パスワード・DB名
-- `backend.prod.env` の `XAI_API_KEY`、`XAI_API_URL`、`XAI_MODEL`
-- `backend.prod.env` の `FRONTEND_URL`
+起動前に次の値を設定してください（`change-me` はすべて置換）。変数の用途と既定値の全一覧は [.env.example](./.env.example) にあります。
 
-同一オリジンでNext.jsからバックエンドへ中継する場合、`NEXT_PUBLIC_API_URL` は空欄にします。APIを別オリジンで公開する場合は、ブラウザから到達可能なAPI URLを設定してください。
+| 設定先 | 項目 |
+|---|---|
+| `.env`（バックエンドにも渡る） | `SESSION_SECRET` を32 bytes以上のランダム値へ変更（生成例: `openssl rand -base64 48`）、`APP_ENV=production`、`FRONTEND_URL` を実際の公開オリジンへ変更、HTTPSで `SESSION_COOKIE_SECURE=true` |
+| `.env` と `docker/env/db.prod.env` | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` をそろえ、`.env` の `DB_USER` / `DB_PASSWORD` / `DB_NAME` にも対応する同じ値を設定 |
+| `.env` | AIを使う場合のみ `XAI_API_KEY` を設定。`XAI_API_URL` / `XAI_MODEL` / `AI_*` 調整値を確認。キーなしでもAI OFFで記録可能 |
+| `.env` と `docker/env/frontend.prod.env` | `NEXT_PUBLIC_API_URL` と `BACKEND_INTERNAL_URL` をそろえる（ビルド時と実行時の不一致を避ける） |
 
-HTTPSで運用する場合は、`SESSION_COOKIE_SECURE=true` に設定します。
+同一オリジンでNext.jsからバックエンドへ中継する場合、`NEXT_PUBLIC_API_URL` は空欄、`BACKEND_INTERNAL_URL` は `http://backend:8080` にします。APIを別オリジンで公開する場合は、ブラウザから到達可能なAPI URLを設定し、バックエンドの `FRONTEND_URL` をフロントエンドの公開オリジンに合わせます。これらのURLはフロントエンドのビルドにも使われるため、変更後は再ビルドが必要です。`NEXT_PUBLIC_*` には秘密情報を入れないでください。
 
-設定後に起動します。
+`POSTGRES_*` は新規DBの初期化用です。既存の `db_data` がある場合、環境変数の変更だけでは既存DBの認証情報は更新されません。
+
+`.env.example` の「今後の多Provider対応（#1〜#7）用」は [issue #1](https://github.com/jPurin-gg/fitlog/issues/1) の設定契約を記載した予約項目です。現在はxAIだけが実装されており、コメントを外しても新Providerやフォールバックは有効になりません。将来の既定順序はCerebras → Groq → OpenRouter Freeで、複数ProviderモードでxAIを利用するには `AI_PROVIDER_ORDER` に `xai` を明示します。モデル・無料枠・有料化条件は導入時に公式情報で確認してください。
+
+設定後に起動します。初回やソース・ビルド時設定を変更した場合は、先にビルドします。
 
 ```sh
-docker compose -f compose.prod.yml --env-file .env.prod up -d --build
+docker compose -f compose.prod.yml build
+docker compose -f compose.prod.yml up -d
 ```
+
+ルートの `.env` は自動で読み込まれます。既存の `.env.prod` を使い続ける場合は両コマンドに `--env-file .env.prod` を指定し、バックエンド用リンクもそのファイルを指すようにしてください。これらの実値ファイルは `.gitignore` で除外済みです。
 
 本番Composeは、デフォルトではフロントエンドとバックエンドを `127.0.0.1` にのみ公開し、PostgreSQLはホストへ公開しません。外部公開にはリバースプロキシやトンネルを前段に配置してください。
