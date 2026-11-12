@@ -38,7 +38,8 @@ type Repository interface {
 	FindByNickname(ctx context.Context, nickname string) (StoredUser, error)
 	FindByID(ctx context.Context, userID int) (User, error)
 	Create(ctx context.Context, nickname, passwordHash string) (User, error)
-	SetPasswordHash(ctx context.Context, userID int, passwordHash string) error
+	// SetPasswordHashIfEmpty atomically sets an unset hash and reports whether it was updated.
+	SetPasswordHashIfEmpty(ctx context.Context, userID int, passwordHash string) (bool, error)
 }
 
 type Service struct {
@@ -83,10 +84,18 @@ func (s *Service) Login(ctx context.Context, nickname, password string) (User, b
 			if hashErr != nil {
 				return User{}, false, apperr.Internal(hashErr)
 			}
-			if updateErr := s.repository.SetPasswordHash(ctx, stored.ID, hash); updateErr != nil {
+			updated, updateErr := s.repository.SetPasswordHashIfEmpty(ctx, stored.ID, hash)
+			if updateErr != nil {
 				return User{}, false, apperr.Internal(updateErr)
 			}
-			return stored.User, false, nil
+			if updated {
+				return stored.User, false, nil
+			}
+			// Another login claimed the password; authenticate against its saved hash.
+			stored, err = s.repository.FindByNickname(ctx, nickname)
+			if err != nil {
+				return User{}, false, apperr.Internal(err)
+			}
 		}
 		valid, verifyErr := VerifyPassword(password, stored.PasswordHash)
 		if verifyErr != nil {
