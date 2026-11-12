@@ -292,6 +292,129 @@ func TestDetailDoesNotRequestAI(t *testing.T) {
 	}
 }
 
+func TestDetailReturnsSetsAsArray(t *testing.T) {
+	sets := []DetailSet{{ID: 7, ExerciseID: "bench", ExerciseName: "ベンチプレス", SetOrder: 1, Weight: 60, Reps: 8, Feeling: "重い", IsPR: true}}
+	repository := &stubRepository{detail: Detail{ID: 2, Status: "completed", Sets: sets}}
+	service := NewService(repository, nil, nil, nil, 0)
+
+	result, err := service.Detail(context.Background(), 1, 2)
+	if err != nil || len(result.Sets) != 1 || result.Sets[0] != sets[0] {
+		t.Fatalf("Detail() = %#v, %v", result, err)
+	}
+
+	// セットのない記録でも、画面がそのまま列挙できるよう null ではなく空配列にする。
+	repository.detail.Sets = nil
+	result, err = service.Detail(context.Background(), 1, 2)
+	if err != nil || result.Sets == nil || len(result.Sets) != 0 {
+		t.Fatalf("Detail() without sets = %#v, %v", result, err)
+	}
+}
+
+func TestHistoryAppliesDefaultsAndDisplayTitles(t *testing.T) {
+	repository := &stubRepository{
+		history:      []HistoryEntry{{ID: 9, Title: "Workout", TotalSets: 3}, {ID: 8, Title: "胸の日", TotalSets: 5}},
+		historyTotal: 42,
+	}
+	service := NewService(repository, nil, nil, nil, 0)
+
+	page, err := service.History(context.Background(), 1, 0, 0)
+	if err != nil || repository.historyLimit != DefaultHistoryLimit || repository.historyOffset != 0 {
+		t.Fatalf("History() error = %v; limit = %d; offset = %d", err, repository.historyLimit, repository.historyOffset)
+	}
+	if page.Total != 42 || page.Limit != DefaultHistoryLimit || page.Offset != 0 || len(page.Workouts) != 2 || page.Workouts[0].Title != "ワークアウト" || page.Workouts[1].Title != "胸の日" {
+		t.Fatalf("History() = %#v", page)
+	}
+
+	page, err = service.History(context.Background(), 1, 5, 40)
+	if err != nil || repository.historyLimit != 5 || repository.historyOffset != 40 || page.Limit != 5 || page.Offset != 40 {
+		t.Fatalf("History(5, 40) = %#v, %v; limit = %d; offset = %d", page, err, repository.historyLimit, repository.historyOffset)
+	}
+}
+
+func TestHistoryReturnsEmptyArrayWithoutRecords(t *testing.T) {
+	service := NewService(&stubRepository{}, nil, nil, nil, 0)
+
+	page, err := service.History(context.Background(), 1, 0, 0)
+	if err != nil || page.Workouts == nil || len(page.Workouts) != 0 || page.Total != 0 {
+		t.Fatalf("History() = %#v, %v", page, err)
+	}
+}
+
+func TestHistoryValidatesRange(t *testing.T) {
+	tests := []struct {
+		name      string
+		limit     int
+		offset    int
+		wantField string
+	}{
+		{name: "limit_negative_rejected", limit: -1, wantField: "limit"},
+		{name: "limit_above_max_rejected", limit: MaxHistoryLimit + 1, wantField: "limit"},
+		{name: "limit_max_accepted", limit: MaxHistoryLimit},
+		{name: "limit_one_accepted", limit: 1},
+		{name: "offset_negative_rejected", limit: 20, offset: -1, wantField: "offset"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repository := &stubRepository{}
+			service := NewService(repository, nil, nil, nil, 0)
+			_, err := service.History(context.Background(), 1, tt.limit, tt.offset)
+			if tt.wantField != "" {
+				appErr := apperr.As(err)
+				if appErr == nil || appErr.Status != http.StatusBadRequest || appErr.Code != apperr.CodeValidation || appErr.Fields[tt.wantField] == "" || repository.historyCalls != 0 {
+					t.Fatalf("History() error = %#v; repository calls = %d", appErr, repository.historyCalls)
+				}
+				return
+			}
+			if err != nil || repository.historyCalls != 1 {
+				t.Fatalf("History() error = %v; repository calls = %d", err, repository.historyCalls)
+			}
+		})
+	}
+}
+
+func TestHistoryMapsRepositoryError(t *testing.T) {
+	service := NewService(&stubRepository{historyErr: errors.New("db down")}, nil, nil, nil, 0)
+
+	_, err := service.History(context.Background(), 1, 0, 0)
+	if appErr := apperr.As(err); appErr == nil || appErr.Status != http.StatusInternalServerError || appErr.Code != apperr.CodeInternal {
+		t.Fatalf("History() error = %#v", appErr)
+	}
+}
+
+func TestDeletePassesOwnerAndWorkoutToRepository(t *testing.T) {
+	repository := &stubRepository{}
+	service := NewService(repository, nil, nil, nil, 0)
+
+	if err := service.Delete(context.Background(), 3, 12); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if repository.deleteCalls != 1 || repository.deletedUserID != 3 || repository.deletedWorkoutID != 12 {
+		t.Fatalf("Delete() repository calls = %d; user = %d; workout = %d", repository.deleteCalls, repository.deletedUserID, repository.deletedWorkoutID)
+	}
+}
+
+func TestDeleteMapsRepositoryErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "not_found", err: ErrNotFound, wantStatus: http.StatusNotFound, wantCode: apperr.CodeNotFound},
+		{name: "wrapped_not_found", err: fmt.Errorf("delete: %w", ErrNotFound), wantStatus: http.StatusNotFound, wantCode: apperr.CodeNotFound},
+		{name: "other", err: errors.New("db down"), wantStatus: http.StatusInternalServerError, wantCode: apperr.CodeInternal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := NewService(&stubRepository{deleteErr: tt.err}, nil, nil, nil, 0)
+			err := service.Delete(context.Background(), 1, 2)
+			if appErr := apperr.As(err); appErr == nil || appErr.Status != tt.wantStatus || appErr.Code != tt.wantCode {
+				t.Fatalf("Delete() error = %#v", appErr)
+			}
+		})
+	}
+}
+
 func TestSummaryCommentReusesStoredComment(t *testing.T) {
 	repository := &stubRepository{detail: Detail{ID: 2, Status: "completed", Summary: Summary{AIComment: "  よいトレーニングでした。  "}}}
 	aiClient := &stubAIClient{}
@@ -425,6 +548,16 @@ type stubRepository struct {
 	saveSummaryErr      error
 	saveSummaryCalls    int
 	summaryCommentInput string
+	history             []HistoryEntry
+	historyTotal        int
+	historyErr          error
+	historyCalls        int
+	historyLimit        int
+	historyOffset       int
+	deleteErr           error
+	deleteCalls         int
+	deletedUserID       int
+	deletedWorkoutID    int
 }
 
 func (r *stubRepository) RecordSet(_ context.Context, _, _ int, key string, input SetInput) (Set, bool, error) {
@@ -445,6 +578,20 @@ func (r *stubRepository) Finish(context.Context, int, int) (Detail, error) {
 
 func (r *stubRepository) Detail(context.Context, int, int) (Detail, error) {
 	return r.detail, r.detailErr
+}
+
+func (r *stubRepository) History(_ context.Context, _, limit, offset int) ([]HistoryEntry, int, error) {
+	r.historyCalls++
+	r.historyLimit = limit
+	r.historyOffset = offset
+	return r.history, r.historyTotal, r.historyErr
+}
+
+func (r *stubRepository) Delete(_ context.Context, userID, workoutID int) error {
+	r.deleteCalls++
+	r.deletedUserID = userID
+	r.deletedWorkoutID = workoutID
+	return r.deleteErr
 }
 
 func (r *stubRepository) SaveSummaryComment(_ context.Context, _, _ int, comment string) (string, bool, error) {

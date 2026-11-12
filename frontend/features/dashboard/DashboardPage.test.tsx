@@ -101,6 +101,31 @@ it("今月のプランがあるときは自動で案内しない", async () => {
   await screen.findByRole("dialog");
 });
 
+it("最近のワークアウトに日付と時刻を表示し、履歴一覧へ進める", async () => {
+  // ブラウザのタイムゾーンで8月24日(月) 19:30になる日時をAPIが返す。
+  const startedAt = new Date(2026, 7, 24, 19, 30);
+  const endedAt = new Date(2026, 7, 24, 20, 15);
+  server.use(
+    http.get("http://localhost:3000/api/dashboard", () => HttpResponse.json({
+      recent_workouts: [{
+        id: 7,
+        title: "胸の日の記録",
+        type: "胸の日",
+        duration: "45分",
+        calories: "225 kcal",
+        started_at: startedAt.toISOString(),
+        ended_at: endedAt.toISOString(),
+      }],
+    })),
+    http.get("http://localhost:3000/api/monthly-plans/:month", () => HttpResponse.json({ recommended_days: [], weekly_routine: [] })),
+  );
+  show();
+  const card = await screen.findByRole("link", { name: /胸の日の記録/ });
+  expect(card).toHaveAttribute("href", "/workouts/7");
+  expect(within(card).getByText(/8月24日\(月\)\s*19:30/)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "すべての履歴" })).toHaveAttribute("href", "/workouts");
+});
+
 it("プランの読み込み失敗を未作成と誤認して案内しない", async () => {
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
   server.use(http.get("http://localhost:3000/api/monthly-plans/:month", () => HttpResponse.json({ error: "unavailable" }, { status: 500 })));

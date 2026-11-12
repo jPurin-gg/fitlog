@@ -516,6 +516,8 @@ export function CalendarWorkoutEditor({
       const payload = {
         title,
         sets: sets.map((set, i) => ({
+          // 保存済みセットはIDを送り、記録時刻を保ったまま同じセットとして更新してもらう。
+          ...(set.id ? { id: set.id } : {}),
           exercise_id: set.exercise_id,
           weight: Number(set.weight) || 0,
           reps: Number(set.reps) || 0,
@@ -651,6 +653,12 @@ export function CalendarWorkoutEditor({
                     </div>
                   ))}
                 </div>
+              )}
+
+              {Boolean(workout?.workout_id) && sets.length === 0 && (
+                <p className="text-xs text-white/50 leading-relaxed">
+                  セットが0件のままでは保存できません。この日の記録ごと消す場合は、「詳細」の画面から削除してください。
+                </p>
               )}
 
               {error && (

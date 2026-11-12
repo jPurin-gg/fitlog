@@ -16,13 +16,15 @@ type Stat struct {
 	Trend string `json:"trend"`
 }
 
+// RecentWorkout の日時はRFC 3339で返し、日付や時刻の表示形式は画面側で決める。
 type RecentWorkout struct {
-	ID       int    `json:"id"`
-	Title    string `json:"title"`
-	Type     string `json:"type"`
-	Duration string `json:"duration"`
-	Calories string `json:"calories"`
-	Time     string `json:"time"`
+	ID        int    `json:"id"`
+	Title     string `json:"title"`
+	Type      string `json:"type"`
+	Duration  string `json:"duration"`
+	Calories  string `json:"calories"`
+	StartedAt string `json:"started_at"`
+	EndedAt   string `json:"ended_at"`
 }
 
 type Dashboard struct {
@@ -99,7 +101,15 @@ func (s *Service) Dashboard(ctx context.Context, userID int) (Dashboard, error) 
 			duration = 1
 		}
 		workoutType := DisplayWorkoutType(row.Notes)
-		recent = append(recent, RecentWorkout{ID: row.ID, Title: workoutType + "の記録", Type: workoutType, Duration: fmt.Sprintf("%.0f分", duration), Calories: fmt.Sprintf("%.0f kcal", duration*5), Time: row.Started.In(now.Location()).Format("15:04")})
+		recent = append(recent, RecentWorkout{
+			ID:        row.ID,
+			Title:     workoutType + "の記録",
+			Type:      workoutType,
+			Duration:  fmt.Sprintf("%.0f分", duration),
+			Calories:  fmt.Sprintf("%.0f kcal", duration*5),
+			StartedAt: row.Started.In(now.Location()).Format(time.RFC3339),
+			EndedAt:   row.Ended.In(now.Location()).Format(time.RFC3339),
+		})
 	}
 	return Dashboard{
 		Stats: []Stat{

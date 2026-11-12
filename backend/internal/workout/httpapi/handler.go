@@ -72,6 +72,30 @@ func (h *Handler) Detail(w http.ResponseWriter, r *http.Request) {
 	httpx.Respond(w, r, http.StatusOK, result, err)
 }
 
+func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
+	limit, err := optionalQueryInt(r, "limit")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	offset, err := optionalQueryInt(r, "offset")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	result, err := h.service.History(r.Context(), authhttp.UserID(r.Context()), limit, offset)
+	httpx.Respond(w, r, http.StatusOK, result, err)
+}
+
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	workoutID, err := positivePathID(r, "workoutID")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.RespondNoContent(w, r, h.service.Delete(r.Context(), authhttp.UserID(r.Context()), workoutID))
+}
+
 func (h *Handler) SummaryComment(w http.ResponseWriter, r *http.Request) {
 	workoutID, err := positivePathID(r, "workoutID")
 	if err != nil {
@@ -91,6 +115,19 @@ func (h *Handler) PutCalendarWorkout(w http.ResponseWriter, r *http.Request) {
 	httpx.DecodeAndRespond(w, r, http.StatusOK, func(request workout.CalendarWorkoutInput) (workout.CalendarWorkout, error) {
 		return h.service.SaveCalendarWorkout(r.Context(), authhttp.UserID(r.Context()), r.PathValue("date"), request)
 	})
+}
+
+// optionalQueryInt は未指定を0として返し、整数でない値は検証エラーにする。
+func optionalQueryInt(r *http.Request, name string) (int, error) {
+	text := r.URL.Query().Get(name)
+	if text == "" {
+		return 0, nil
+	}
+	value, err := strconv.Atoi(text)
+	if err != nil {
+		return 0, apperr.Validation("履歴の取得範囲を確認してください。", map[string]string{name: "must be an integer"})
+	}
+	return value, nil
 }
 
 func positivePathID(r *http.Request, name string) (int, error) {

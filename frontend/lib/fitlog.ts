@@ -6,6 +6,23 @@ export function formatPlanMonth(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
+// APIが返すRFC 3339の日時を、ブラウザのタイムゾーンで「8月24日(月) 19:30」のように表示する。
+// 年をまたいで並ぶ一覧では withYear を指定する。
+export function formatWorkoutDateTime(value?: string, options: { withYear?: boolean } = {}): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const format: Intl.DateTimeFormatOptions = {
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  };
+  if (options.withYear) format.year = "numeric";
+  return date.toLocaleString("ja-JP", format);
+}
+
 export function displayPlanText(text?: string): string {
   if (!text) return "";
   return text

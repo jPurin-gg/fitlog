@@ -23,7 +23,7 @@ import { LogoutButton, useAuth } from "@/components/AuthGate";
 import { AIToggle, useAISettings } from "@/components/AISettings";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
-import { displayPlanText, formatPlanMonth } from "@/lib/fitlog";
+import { displayPlanText, formatPlanMonth, formatWorkoutDateTime } from "@/lib/fitlog";
 import { useMonthlyPromptDismissal } from "./useMonthlyPromptDismissal";
 
 const WEEKDAY_OPTIONS = [
@@ -340,6 +340,9 @@ export default function DashboardPage() {
             <h2 className="text-xl font-bold flex items-center gap-2">
               <Activity className="w-5 h-5 text-secondary" /> 最近のワークアウト
             </h2>
+            <Link href="/workouts" className="text-sm font-bold text-primary hover:text-white transition-colors flex items-center gap-1">
+              すべての履歴 <ChevronRight className="w-4 h-4" />
+            </Link>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {dashboardData?.recent_workouts?.length > 0 ? dashboardData.recent_workouts.map((w: any) => (
@@ -348,7 +351,7 @@ export default function DashboardPage() {
                   <h4 className="font-bold truncate">{w.title}</h4>
                   <ChevronRight className="w-4 h-4 text-white/25 group-hover:text-primary transition-colors flex-shrink-0 mt-0.5" />
                 </div>
-                <p className="text-xs text-white/40 mb-4">{w.time}</p>
+                <p className="text-xs text-white/40 mb-4">{formatWorkoutDateTime(w.started_at)}</p>
                 <div>
                   <span className="text-[10px] font-bold text-white/30 block mb-1">時間</span>
                   <span className="font-medium text-sm">{w.duration}</span>
