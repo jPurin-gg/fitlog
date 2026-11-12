@@ -51,6 +51,18 @@ export interface WorkoutSummary {
   exercises: WorkoutSummaryExercise[];
 }
 
+export interface WorkoutDetailSet {
+  id: number;
+  exercise_id: string;
+  exercise_name: string;
+  set_order: number;
+  weight: number;
+  reps: number;
+  feeling: string;
+  is_pr: boolean;
+  created_at: string;
+}
+
 export interface WorkoutDetail {
   id: number;
   title: string;
@@ -58,6 +70,24 @@ export interface WorkoutDetail {
   ended_at: string;
   status: string;
   summary: WorkoutSummary;
+  sets: WorkoutDetailSet[];
+}
+
+export interface WorkoutHistoryEntry {
+  id: number;
+  title: string;
+  started_at: string;
+  ended_at: string;
+  duration_min: number;
+  total_sets: number;
+  total_volume: number;
+}
+
+export interface WorkoutHistoryPage {
+  workouts: WorkoutHistoryEntry[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface SetInput {
