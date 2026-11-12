@@ -7,6 +7,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/jPurin-gg/myfitlog-backend/internal/planning"
 )
 
@@ -138,7 +140,7 @@ func (r *Repository) SaveDaily(ctx context.Context, userID int, date time.Time, 
 	err = r.db.QueryRowContext(ctx, `
 		INSERT INTO workout_plans (workout_id,user_id,plan_date,title,estimated_duration_min,status,plan)
 		VALUES (NULL,$1,$2::date,$3,$4,'active',$5::jsonb)
-		ON CONFLICT (user_id,plan_date,status) DO UPDATE SET
+		ON CONFLICT (user_id,plan_date) WHERE status='active' DO UPDATE SET
 			title=EXCLUDED.title, estimated_duration_min=EXCLUDED.estimated_duration_min,
 			plan=EXCLUDED.plan, updated_at=CURRENT_TIMESTAMP
 		RETURNING id,workout_id,plan_date::text,status,plan
@@ -165,7 +167,7 @@ func (r *Repository) CreateDailyIfMissing(ctx context.Context, userID int, date 
 	result, err := r.db.ExecContext(ctx, `
 		INSERT INTO workout_plans (workout_id,user_id,plan_date,title,estimated_duration_min,status,plan)
 		VALUES (NULL,$1,$2::date,$3,$4,'active',$5::jsonb)
-		ON CONFLICT (user_id,plan_date,status) DO NOTHING
+		ON CONFLICT (user_id,plan_date) WHERE status='active' DO NOTHING
 	`, userID, date, plan.WorkoutTitle, plan.EstimatedDurationMin, string(encoded))
 	if err != nil {
 		return false, err
@@ -174,12 +176,98 @@ func (r *Repository) CreateDailyIfMissing(ctx context.Context, userID int, date 
 	return count == 1, err
 }
 
+// ResumeDaily reopens the plan the user already finished on this date together
+// with its workout, so a same-day restart appends to that record instead of
+// creating a second plan and workout. It reports false when nothing was resumed.
+func (r *Repository) ResumeDaily(ctx context.Context, userID int, date time.Time) (bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	var planID int
+	var workoutID sql.NullInt64
+	err = tx.QueryRowContext(ctx, `
+		SELECT id, workout_id
+		FROM workout_plans
+		WHERE user_id=$1 AND plan_date=$2::date AND status='completed'
+		ORDER BY updated_at DESC, id DESC LIMIT 1
+	`, userID, date).Scan(&planID, &workoutID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if workoutID.Valid {
+		// Finish locks the workout before its plan; use the same order here.
+		var lockedID int
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM workouts WHERE id=$1 AND user_id=$2 FOR UPDATE`, workoutID.Int64, userID).Scan(&lockedID); err != nil {
+			return false, err
+		}
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE workout_plans SET status='active',updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND status='completed'`, planID)
+	if err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" && pqErr.Constraint == "workout_plans_user_date_active_unique" {
+			// A concurrent edit made another plan active for this date; the start reuses that one.
+			return false, nil
+		}
+		return false, err
+	}
+	if count, err := result.RowsAffected(); err != nil || count == 0 {
+		return false, err
+	}
+	if workoutID.Valid {
+		// The summary comment described the workout as it was finished, so it is cleared with the end time.
+		if _, err := tx.ExecContext(ctx, `UPDATE workouts SET ended_at=NULL,summary_comment=NULL WHERE id=$1 AND user_id=$2`, workoutID.Int64, userID); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+var errWorkoutBindingChanged = errors.New("workout binding changed")
+
 func (r *Repository) AttachWorkout(ctx context.Context, userID int, date time.Time) (planning.PlanSession, error) {
+	for {
+		session, err := r.attachWorkout(ctx, userID, date)
+		if !errors.Is(err, errWorkoutBindingChanged) {
+			return session, err
+		}
+	}
+}
+
+func (r *Repository) attachWorkout(ctx context.Context, userID int, date time.Time) (planning.PlanSession, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return planning.PlanSession{}, err
 	}
 	defer tx.Rollback()
+
+	var observedPlanID int
+	var observedWorkoutID sql.NullInt64
+	err = tx.QueryRowContext(ctx, `
+		SELECT id, workout_id FROM workout_plans
+		WHERE user_id=$1 AND plan_date=$2::date AND status='active'
+	`, userID, date).Scan(&observedPlanID, &observedWorkoutID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return planning.PlanSession{}, planning.ErrNotFound
+	}
+	if err != nil {
+		return planning.PlanSession{}, err
+	}
+	if observedWorkoutID.Valid {
+		// Finish and ResumeDaily also lock the workout before its plan.
+		var lockedID int
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM workouts WHERE id=$1 AND user_id=$2 FOR UPDATE`, observedWorkoutID.Int64, userID).Scan(&lockedID); err != nil {
+			return planning.PlanSession{}, err
+		}
+	}
 
 	var session planning.PlanSession
 	var planJSON []byte
@@ -195,6 +283,11 @@ func (r *Repository) AttachWorkout(ctx context.Context, userID int, date time.Ti
 	}
 	if err != nil {
 		return planning.PlanSession{}, err
+	}
+	if session.ID != observedPlanID || workoutID != observedWorkoutID {
+		// Another start attached a workout while this transaction waited for the
+		// plan. Release the plan and acquire the new workout first on the retry.
+		return planning.PlanSession{}, errWorkoutBindingChanged
 	}
 	if err := json.Unmarshal(planJSON, &session.Plan); err != nil {
 		return planning.PlanSession{}, err

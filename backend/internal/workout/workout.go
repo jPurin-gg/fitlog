@@ -72,12 +72,13 @@ type RecommendationContext struct {
 }
 
 type SummaryExercise struct {
-	ExerciseID  string  `json:"exercise_id"`
-	Name        string  `json:"name"`
-	Sets        int     `json:"sets"`
-	TotalReps   int     `json:"total_reps"`
-	BestWeight  float64 `json:"best_weight"`
-	TotalVolume float64 `json:"total_volume"`
+	ExerciseID   string  `json:"exercise_id"`
+	Name         string  `json:"name"`
+	Sets         int     `json:"sets"`
+	LastSetOrder int     `json:"last_set_order"`
+	TotalReps    int     `json:"total_reps"`
+	BestWeight   float64 `json:"best_weight"`
+	TotalVolume  float64 `json:"total_volume"`
 }
 
 type Summary struct {

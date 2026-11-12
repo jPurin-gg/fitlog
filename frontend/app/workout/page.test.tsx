@@ -67,9 +67,121 @@ afterAll(() => server.close());
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  server.use(http.get(`${apiOrigin}/api/workouts/42`, () => HttpResponse.json({
+    id: 42, status: "active",
+    summary: { total_sets: 0, total_reps: 0, total_volume: 0, duration_min: 0, pr_count: 0, exercises: [] },
+  })));
 });
 
 describe("WorkoutPage record-first flow", () => {
+  it("終了確認をキャンセルすると記録を続けられる", async () => {
+    useCommonHandlers();
+    let finishes = 0;
+    server.use(http.post(`${apiOrigin}/api/workouts/42/finish`, () => {
+      finishes++;
+      return HttpResponse.json({ summary: { total_sets: 0, total_reps: 0, total_volume: 0, duration_min: 1, pr_count: 0, exercises: [] } });
+    }));
+    const user = userEvent.setup();
+    await startWorkout(user);
+    vi.mocked(window.confirm).mockReturnValueOnce(false);
+    await user.click(screen.getByRole("button", { name: "終了" }));
+    expect(window.confirm).toHaveBeenCalledWith("ワークアウトを終了しますか？保存済みのセットで集計します。");
+    expect(finishes).toBe(0);
+    expect(screen.getByRole("heading", { name: "ワークアウト中" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "セットを保存" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "終了" }));
+    await screen.findByRole("heading", { name: "今日のまとめ" });
+    expect(finishes).toBe(1);
+  });
+
+  it("終了後に新しく始めても同じ記録へ次のセットを追記し、再度終了できる", async () => {
+    useCommonHandlers();
+    const sets: { exercise_id: string; set_order: number; weight: number; reps: number }[] = [];
+    let starts = 0;
+    let finishes = 0;
+    const summary = () => ({
+      total_sets: sets.length, total_reps: sets.length * 8, total_volume: sets.length * 480, duration_min: 4, pr_count: 0,
+      exercises: sets.length ? [{ exercise_id: "bench_press", name: "ベンチプレス", sets: sets.length, last_set_order: sets.length, total_reps: sets.length * 8, best_weight: 60, total_volume: sets.length * 480 }] : [],
+    });
+    server.use(
+      http.post(new RegExp(`${apiOrigin}/api/workout-plans/[^/]+/start`), () => {
+        starts++;
+        return HttpResponse.json({ ...startedPlan, resumed: starts > 1, ai_status: "not_requested" });
+      }),
+      http.get(`${apiOrigin}/api/workouts/42`, () => HttpResponse.json({ id: 42, status: "active", summary: summary() })),
+      http.post(`${apiOrigin}/api/workouts/42/sets`, async ({ request }) => {
+        sets.push(await request.json() as typeof sets[number]);
+        return HttpResponse.json({ id: 100 + sets.length, workout_id: 42 });
+      }),
+      http.post(`${apiOrigin}/api/workouts/42/finish`, () => {
+        finishes++;
+        return HttpResponse.json({ workout_id: 42, status: "completed", summary: summary() });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWorkout(false);
+    await user.click(screen.getByRole("button", { name: /ワークアウトを開始/ }));
+    await screen.findByRole("heading", { name: "ワークアウト中" });
+    await user.click(screen.getByRole("button", { name: "セットを保存" }));
+    await screen.findByText(/セットは保存済みです/);
+    await user.click(screen.getByRole("button", { name: "終了" }));
+    await screen.findByRole("heading", { name: "今日のまとめ" });
+    expect(screen.getByText("480", { exact: true })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "新しく始める" }));
+    await user.click(screen.getByRole("button", { name: /ワークアウトを開始/ }));
+    await screen.findByRole("heading", { name: "ワークアウト中" });
+    expect(screen.getByText("セット 2 / 3")).toBeInTheDocument();
+    expect(screen.getByText(/今日のワークアウトを再開しました/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "セットを保存" }));
+    await screen.findByText(/セットは保存済みです/);
+    await user.click(screen.getByRole("button", { name: "ワークアウト終了" }));
+    await screen.findByRole("heading", { name: "今日のまとめ" });
+    expect(screen.getByText("960", { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("2セット")).toBeInTheDocument();
+    expect(sets.map(set => set.set_order)).toEqual([1, 2]);
+    expect(starts).toBe(2);
+    expect(finishes).toBe(2);
+    expect(window.confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it("再開済み記録の取得に失敗したら保存画面へ進まず、再試行で選択種目のセット番号を復元する", async () => {
+    useCommonHandlers();
+    let reads = 0;
+    const inputs: unknown[] = [];
+    server.use(
+      http.get(`${apiOrigin}/api/workouts/42`, () => {
+        reads++;
+        if (reads === 1) return HttpResponse.json({ detail: "記録を取得できませんでした。" }, { status: 404 });
+        return HttpResponse.json({ id: 42, status: "active", summary: {
+          total_sets: 2, total_reps: 16, total_volume: 960, duration_min: 4, pr_count: 0,
+          exercises: [{ exercise_id: "squat", name: "スクワット", sets: 2, last_set_order: 7, total_reps: 16, best_weight: 60, total_volume: 960 }],
+        } });
+      }),
+      http.post(new RegExp(`${apiOrigin}/api/workout-plans/[^/]+/start`), async ({ request }) => {
+        inputs.push(await request.json());
+        // 別の開始が先に再開を完了していても、既存セットは復元する。
+        return HttpResponse.json({ ...startedPlan, resumed: false, ai_status: "not_requested" });
+      }),
+      http.get(`${apiOrigin}/api/exercises/favorites`, () => HttpResponse.json([])),
+      http.get(`${apiOrigin}/api/exercises/recent`, () => HttpResponse.json([])),
+      http.get(`${apiOrigin}/api/exercises`, () => HttpResponse.json([{ id: "squat", name: "スクワット", category: "strength" }])),
+    );
+    const user = userEvent.setup();
+    renderWorkout(false);
+    await user.click(screen.getByRole("button", { name: /ワークアウトを開始/ }));
+    await screen.findByText("記録を取得できませんでした。");
+    expect(screen.queryByRole("button", { name: "セットを保存" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "自分で種目を選んで始める" }));
+    await user.type(screen.getByPlaceholderText("種目名で検索..."), "スクワット");
+    await user.click(await screen.findByRole("button", { name: /^スクワット/ }));
+    await screen.findByRole("heading", { name: "ワークアウト中" });
+    expect(screen.getByRole("heading", { name: "スクワット" })).toBeInTheDocument();
+    expect(screen.getByText("セット 8 / 3")).toBeInTheDocument();
+    expect(inputs).toEqual([{ use_ai: false }, { use_ai: false, exercise_id: "squat" }]);
+  });
+
   it("セット保存を先に確定し、AIを待たずに次セットへ進める", async () => {
     useCommonHandlers();
     const recommendation = deferred<Response>();

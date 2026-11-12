@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("ブラウザでワークアウトを開始し、AI障害中も記録を完了できる", async ({ page }) => {
+  page.on("dialog", dialog => dialog.accept());
   await page.route("**/api/**", async route => {
     const request = route.request();
     const url = new URL(request.url());
@@ -15,6 +16,9 @@ test("ブラウザでワークアウトを開始し、AI障害中も記録を完
     }
     if (request.method() === "GET" && /\/api\/exercises\/[^/]+\/settings$/.test(url.pathname)) {
       return respond(200, { target_sets: 3 });
+    }
+    if (request.method() === "GET" && url.pathname === "/api/workouts/42") {
+      return respond(200, { id: 42, status: "active", summary: { total_sets: 0, total_reps: 0, total_volume: 0, duration_min: 0, pr_count: 0, exercises: [] } });
     }
     if (request.method() === "POST" && /\/api\/workout-plans\/\d{4}-\d{2}-\d{2}\/start$/.test(url.pathname)) {
       return respond(200, {

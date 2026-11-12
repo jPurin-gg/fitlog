@@ -46,6 +46,6 @@ export function finishWorkoutSession(workoutID: number) {
   return apiFetch<{ summary: WorkoutSummary }>(`/api/workouts/${workoutID}/finish`, { method: "POST" });
 }
 
-export function getWorkoutDetail(workoutID: string) {
-  return apiFetch<WorkoutDetail>(`/api/workouts/${encodeURIComponent(workoutID)}`);
+export function getWorkoutDetail(workoutID: string, signal?: AbortSignal) {
+  return apiFetch<WorkoutDetail>(`/api/workouts/${encodeURIComponent(workoutID)}`, { signal });
 }

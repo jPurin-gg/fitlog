@@ -10,6 +10,14 @@ async function mockAPI(page: Page) {
   const unexpected: string[] = [];
   const keys = new Set<string>();
   let finishes = 0;
+  const summary = () => ({
+    total_sets: saved.length, total_reps: saved.reduce((n, set) => n + set.reps, 0),
+    total_volume: saved.reduce((n, set) => n + set.weight * set.reps, 0), duration_min: 5, pr_count: 0,
+    exercises: exercises.map(exercise => {
+      const sets = saved.filter(set => set.exercise_id === exercise.id);
+      return { exercise_id: exercise.id, name: exercise.name, sets: sets.length, last_set_order: Math.max(0, ...sets.map(set => set.set_order)), total_reps: sets.reduce((n, set) => n + set.reps, 0), best_weight: Math.max(0, ...sets.map(set => set.weight)), total_volume: sets.reduce((n, set) => n + set.weight * set.reps, 0) };
+    }).filter(exercise => exercise.sets > 0),
+  });
   await page.route("**/api/**", async route => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -18,6 +26,7 @@ async function mockAPI(page: Page) {
     if (method === "GET") {
       if (path === "/api/auth/me") return respond(200, { id: 1, nickname: "E2E user" });
       if (path === "/api/dashboard") return respond(200, { recent_workouts: [] });
+      if (path === "/api/workouts/42") return respond(200, { id: 42, status: "active", summary: summary() });
       if (path === "/api/preferences") return respond(200, {});
       if (/^\/api\/monthly-plans\/\d{4}-\d{2}$/.test(path)) return respond(404, { detail: "月間プランはありません。" });
       if (["/api/exercises", "/api/exercises/favorites"].includes(path)) return respond(200, exercises);
@@ -27,9 +36,9 @@ async function mockAPI(page: Page) {
     if (method === "POST" && /^\/api\/workout-plans\/[^/]+\/start$/.test(path)) {
       const input = request.postDataJSON();
       starts.push(input);
-      expect(input).toEqual({ use_ai: false, exercise_id: "bench" });
+      expect(input).toEqual(starts.length === 1 ? { use_ai: false, exercise_id: "bench" } : { use_ai: false });
       return respond(200, {
-        workout_id: 42, status: "active", ai_status: "not_requested",
+        workout_id: 42, status: "active", ai_status: "not_requested", resumed: starts.length > 1,
         plan: {
           workout_title: "フリーワークアウト", target: "自分で選んだ種目", estimated_duration_min: 15,
           exercises: [{ exercise_id: "bench", name: "ベンチプレス", planned_sets: 3, target_weight: 0, target_reps: 10, last_max_weight: 0 }],
@@ -46,15 +55,7 @@ async function mockAPI(page: Page) {
     }
     if (method === "POST" && path === "/api/workouts/42/finish") {
       finishes++;
-      const summary = {
-        total_sets: saved.length, total_reps: saved.reduce((n, set) => n + set.reps, 0),
-        total_volume: saved.reduce((n, set) => n + set.weight * set.reps, 0), duration_min: 5, pr_count: 0,
-        exercises: exercises.map(exercise => {
-          const sets = saved.filter(set => set.exercise_id === exercise.id);
-          return { exercise_id: exercise.id, name: exercise.name, sets: sets.length, total_reps: sets.reduce((n, set) => n + set.reps, 0), best_weight: Math.max(0, ...sets.map(set => set.weight)), total_volume: sets.reduce((n, set) => n + set.weight * set.reps, 0) };
-        }).filter(exercise => exercise.sets > 0),
-      };
-      return respond(200, { workout_id: 42, status: "completed", summary });
+      return respond(200, { workout_id: 42, status: "completed", summary: summary() });
     }
     if (/\/(generate|recommendation|summary-comment|alternatives)$/.test(path)) {
       aiCalls.push(path);
@@ -67,6 +68,7 @@ async function mockAPI(page: Page) {
 }
 
 test("月間プランなし・AI OFFで複数セットと種目変更を記録し、終了できる", async ({ page }, testInfo) => {
+  page.on("dialog", dialog => dialog.accept());
   const api = await mockAPI(page);
   await page.goto("/workout");
   await expect(page.getByRole("switch", { name: "AIを使う" })).not.toBeChecked();
@@ -107,6 +109,43 @@ test("月間プランなし・AI OFFで複数セットと種目変更を記録�
   ]);
   expect(api.starts).toHaveLength(1);
   expect(api.finishes()).toBe(1);
+  expect(api.aiCalls).toEqual([]);
+  expect(api.unexpected).toEqual([]);
+});
+
+test("終了を確認してから同日の記録を再開し、追記したセットも含めて終了できる", async ({ page }) => {
+  const api = await mockAPI(page);
+  await page.goto("/workout");
+  await page.getByRole("button", { name: "自分で種目を選んで始める" }).click();
+  await page.getByRole("button", { name: "ベンチプレス", exact: true }).click();
+  await page.getByPlaceholder("80", { exact: true }).fill("60");
+  await page.getByRole("button", { name: "セットを保存", exact: true }).click();
+  await expect(page.getByText(/セットは保存済みです/)).toBeVisible();
+
+  page.once("dialog", dialog => dialog.dismiss());
+  await page.getByRole("button", { name: "終了", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "ワークアウト中" })).toBeVisible();
+  expect(api.finishes()).toBe(0);
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "終了", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "今日のまとめ" })).toBeVisible();
+  await expect(page.getByText("600", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "新しく始める" }).click();
+  await page.getByRole("button", { name: /ワークアウトを開始/ }).click();
+  await expect(page.getByText(/今日のワークアウトを再開しました/)).toBeVisible();
+  await expect(page.getByText("セット 2 / 3")).toBeVisible();
+  await page.getByPlaceholder("80", { exact: true }).fill("60");
+  await page.getByRole("button", { name: "セットを保存", exact: true }).click();
+  await expect(page.getByText(/セットは保存済みです/)).toBeVisible();
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "ワークアウト終了", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "今日のまとめ" })).toBeVisible();
+  await expect(page.getByText("1,200", { exact: true })).toBeVisible();
+  await expect(page.getByText("2セット", { exact: true })).toBeVisible();
+  expect(api.saved.map(set => set.set_order)).toEqual([1, 2]);
+  expect(api.starts).toHaveLength(2);
+  expect(api.finishes()).toBe(2);
   expect(api.aiCalls).toEqual([]);
   expect(api.unexpected).toEqual([]);
 });
