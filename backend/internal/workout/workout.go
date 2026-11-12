@@ -421,6 +421,9 @@ func (s *Service) SaveCalendarWorkout(ctx context.Context, userID int, dateText 
 		}
 	}
 	result, err := s.repository.SaveCalendarWorkout(ctx, userID, date, input)
+	if errors.Is(err, ErrConflict) {
+		return CalendarWorkout{}, apperr.Conflict("記録中のワークアウトは日付指定で保存できません。ワークアウトを終了してから編集してください。")
+	}
 	if errors.Is(err, ErrNotFound) {
 		return CalendarWorkout{}, apperr.NotFound("セット内の種目が見つかりません。")
 	}

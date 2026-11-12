@@ -294,7 +294,18 @@ func (r *Repository) SaveCalendarWorkout(ctx context.Context, userID int, date t
 	}
 	start, end := date, date.AddDate(0, 0, 1)
 	var workoutID int
-	err = tx.QueryRowContext(ctx, `SELECT id FROM workouts WHERE user_id=$1 AND started_at >= $2 AND started_at < $3 ORDER BY started_at DESC,id DESC LIMIT 1`, userID, start, end).Scan(&workoutID)
+	var existingEndedAt sql.NullTime
+	// An unfinished workout must not be hidden by a newer completed record.
+	// Lock the workout as RecordSet and Finish do before checking its state.
+	err = tx.QueryRowContext(ctx, `
+		SELECT id,ended_at FROM workouts
+		WHERE user_id=$1 AND started_at >= $2 AND started_at < $3
+		ORDER BY (ended_at IS NULL) DESC,started_at DESC,id DESC LIMIT 1
+		FOR UPDATE
+	`, userID, start, end).Scan(&workoutID, &existingEndedAt)
+	if err == nil && !existingEndedAt.Valid {
+		return workout.CalendarWorkout{}, workout.ErrConflict
+	}
 	startedAt := date.Add(12 * time.Hour)
 	endedAt := startedAt.Add(time.Duration(15+len(input.Sets)*3) * time.Minute)
 	if errors.Is(err, sql.ErrNoRows) {

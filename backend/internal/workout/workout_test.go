@@ -11,6 +11,7 @@ import (
 
 	"github.com/jPurin-gg/myfitlog-backend/internal/ai"
 	"github.com/jPurin-gg/myfitlog-backend/internal/apperr"
+	"github.com/jPurin-gg/myfitlog-backend/internal/clock"
 )
 
 func TestRecordSetRequiresIdempotencyKey(t *testing.T) {
@@ -102,6 +103,33 @@ func TestRecordSetMapsRepositoryErrors(t *testing.T) {
 			appErr := apperr.As(err)
 			if appErr == nil || appErr.Status != tt.wantStatus || appErr.Code != tt.wantCode || repository.recordCalls != 1 {
 				t.Fatalf("RecordSet() error = %#v; repository calls = %d", appErr, repository.recordCalls)
+			}
+		})
+	}
+}
+
+func TestSaveCalendarWorkoutMapsRepositoryErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "conflict", err: ErrConflict, wantStatus: http.StatusConflict, wantCode: apperr.CodeConflict},
+		{name: "wrapped_conflict", err: fmt.Errorf("save: %w", ErrConflict), wantStatus: http.StatusConflict, wantCode: apperr.CodeConflict},
+		{name: "not_found", err: ErrNotFound, wantStatus: http.StatusNotFound, wantCode: apperr.CodeNotFound},
+		{name: "other", err: errors.New("db down"), wantStatus: http.StatusInternalServerError, wantCode: apperr.CodeInternal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repository := &stubRepository{saveCalendarErr: tt.err}
+			service := NewService(repository, nil, nil, clock.Fixed{Time: time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)}, 0)
+			_, err := service.SaveCalendarWorkout(context.Background(), 1, "2026-08-24", CalendarWorkoutInput{
+				Title: "筋トレ", Sets: []CalendarSet{{ExerciseID: "bench", SetOrder: 1, Weight: 80, Reps: 10}},
+			})
+			appErr := apperr.As(err)
+			if appErr == nil || appErr.Status != tt.wantStatus || appErr.Code != tt.wantCode {
+				t.Fatalf("SaveCalendarWorkout() error = %#v, want status %d and code %s", appErr, tt.wantStatus, tt.wantCode)
 			}
 		})
 	}
@@ -425,6 +453,7 @@ type stubRepository struct {
 	saveSummaryErr      error
 	saveSummaryCalls    int
 	summaryCommentInput string
+	saveCalendarErr     error
 }
 
 func (r *stubRepository) RecordSet(_ context.Context, _, _ int, key string, input SetInput) (Set, bool, error) {
@@ -460,8 +489,8 @@ func (*stubRepository) CalendarWorkout(context.Context, int, time.Time) (Calenda
 	return CalendarWorkout{}, nil
 }
 
-func (*stubRepository) SaveCalendarWorkout(context.Context, int, time.Time, CalendarWorkoutInput) (CalendarWorkout, error) {
-	return CalendarWorkout{}, nil
+func (r *stubRepository) SaveCalendarWorkout(context.Context, int, time.Time, CalendarWorkoutInput) (CalendarWorkout, error) {
+	return CalendarWorkout{}, r.saveCalendarErr
 }
 
 type stubAIClient struct {
