@@ -19,6 +19,10 @@ async function mockAPI(page: Page) {
       if (path === "/api/auth/me") return respond(200, { id: 1, nickname: "E2E user" });
       if (path === "/api/dashboard") return respond(200, { recent_workouts: [] });
       if (path === "/api/preferences") return respond(200, {});
+      if (/^\/api\/workouts\/by-date\//.test(path)) return starts.length > 0
+        ? respond(200, { workout_id: 42, sets: saved.map((set, index) => ({ ...set, id: 101 + index, exercise_name: exercises.find(exercise => exercise.id === set.exercise_id)?.name })) })
+        : respond(404, { detail: "記録はありません。" });
+      if (path === "/api/workouts/42") return respond(200, { id: 42, status: finishes > 0 ? "completed" : "active" });
       if (/^\/api\/monthly-plans\/\d{4}-\d{2}$/.test(path)) return respond(404, { detail: "月間プランはありません。" });
       if (["/api/exercises", "/api/exercises/favorites"].includes(path)) return respond(200, exercises);
       if (path === "/api/exercises/recent") return respond(200, []);

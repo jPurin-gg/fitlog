@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("ブラウザでワークアウトを開始し、AI障害中も記録を完了できる", async ({ page }) => {
+  let started = false;
   await page.route("**/api/**", async route => {
     const request = route.request();
     const url = new URL(request.url());
@@ -16,7 +17,13 @@ test("ブラウザでワークアウトを開始し、AI障害中も記録を完
     if (request.method() === "GET" && /\/api\/exercises\/[^/]+\/settings$/.test(url.pathname)) {
       return respond(200, { target_sets: 3 });
     }
+    if (request.method() === "GET" && /^\/api\/workouts\/by-date\//.test(url.pathname)) {
+      return started
+        ? respond(200, { workout_id: 42, sets: [] })
+        : respond(404, { status: 404, detail: "記録はありません。" });
+    }
     if (request.method() === "POST" && /\/api\/workout-plans\/\d{4}-\d{2}-\d{2}\/start$/.test(url.pathname)) {
+      started = true;
       return respond(200, {
         id: 10,
         workout_id: 42,

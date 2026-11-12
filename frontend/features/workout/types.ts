@@ -67,3 +67,24 @@ export interface SetInput {
   reps: number;
   feeling: string;
 }
+
+export interface RecordedSet {
+  id?: number;
+  exercise_id: string;
+  exercise_name?: string;
+  set_order: number;
+  weight: number;
+  reps: number;
+}
+
+export interface DatedWorkout {
+  workout_id: number;
+  date: string;
+  title: string;
+  sets: RecordedSet[];
+}
+
+export type TodayWorkoutStatus =
+  | { state: "none" }
+  | { state: "active"; workoutID: number; setCount: number }
+  | { state: "completed"; workoutID: number };

@@ -14,6 +14,7 @@ let monthlyCalls = 0;
 const server = setupServer(
   http.get("http://localhost:3000/api/dashboard", () => HttpResponse.json({ recent_workouts: [] })),
   http.get("http://localhost:3000/api/preferences", () => HttpResponse.json({})),
+  http.get("http://localhost:3000/api/workouts/by-date/:date", () => HttpResponse.json({ detail: "指定日のワークアウトがありません。" }, { status: 404 })),
   http.get("http://localhost:3000/api/monthly-plans/:month", () => {
     monthlyCalls++;
     return HttpResponse.json({ error: "not found" }, { status: 404 });
@@ -108,4 +109,54 @@ it("プランの読み込み失敗を未作成と誤認して案内しない", a
   await waitFor(() => expect(error).toHaveBeenCalled());
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "プランなしで記録を始める" })).toHaveAttribute("href", "/workout");
+});
+
+function useTodayWorkout(status: "active" | "completed", setCount: number) {
+  server.use(
+    http.get("http://localhost:3000/api/workouts/by-date/:date", () => HttpResponse.json({
+      workout_id: 42,
+      date: "2026-10-01",
+      title: "今日の記録",
+      sets: Array.from({ length: setCount }, (_, index) => ({ id: index + 1, exercise_id: "bench_press", set_order: index + 1, weight: 60, reps: 8 })),
+    })),
+    http.get("http://localhost:3000/api/workouts/42", () => HttpResponse.json({ id: 42, status })),
+  );
+}
+
+it.each([0, 2])("進行中なら保存済み%dセットの再開を案内し、開始導線を置き換える", async setCount => {
+  useTodayWorkout("active", setCount);
+  window.localStorage.setItem("fitlog:monthly-prompt-dismissed:1", "2026-10");
+  show();
+  await screen.findByRole("heading", { name: "記録の途中です" });
+  const resumeLinks = screen.getAllByRole("link", { name: "記録を再開" });
+  expect(resumeLinks).toHaveLength(2);
+  for (const link of resumeLinks) expect(link).toHaveAttribute("href", "/workout");
+  expect(screen.getByText(setCount > 0
+    ? `今日は${setCount}セットを保存済みです。続きから再開できます。`
+    : "今日のワークアウトを開始済みです。続きから再開できます。")).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /記録を始める|筋トレを開始/ })).not.toBeInTheDocument();
+});
+
+it("月間プランがあっても進行中なら筋トレ開始を再開に置き換える", async () => {
+  useTodayWorkout("active", 2);
+  server.use(http.get("http://localhost:3000/api/monthly-plans/:month", () => HttpResponse.json({
+    recommended_days: [4],
+    weekly_routine: [{ day_name: "木曜メニュー", target: "胸", example_exercises: ["ベンチプレス"] }],
+  })));
+  show();
+  await screen.findByText("木曜メニュー");
+  await screen.findByRole("heading", { name: "記録の途中です" });
+  expect(screen.getAllByRole("link", { name: "記録を再開" })).toHaveLength(2);
+  expect(screen.queryByRole("link", { name: "筋トレを開始" })).not.toBeInTheDocument();
+});
+
+it("完了済みならホームの開始導線を今日の結果へのリンクに置き換える", async () => {
+  useTodayWorkout("completed", 3);
+  window.localStorage.setItem("fitlog:monthly-prompt-dismissed:1", "2026-10");
+  show();
+  await screen.findByRole("heading", { name: "今日のワークアウトは完了しています" });
+  const resultLinks = screen.getAllByRole("link", { name: "今日の結果を見る" });
+  expect(resultLinks).toHaveLength(2);
+  for (const link of resultLinks) expect(link).toHaveAttribute("href", "/workouts/42");
+  expect(screen.queryByRole("link", { name: /記録を始める|筋トレを開始|記録を再開/ })).not.toBeInTheDocument();
 });

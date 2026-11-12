@@ -1,7 +1,7 @@
 import React from "react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -41,13 +41,63 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function useCommonHandlers(aiStatus: "applied" | "fallback" | "not_requested" = "applied") {
+interface SavedSetMock {
+  id: number;
+  exercise_id: string;
+  exercise_name: string;
+  set_order: number;
+  weight: number;
+  reps: number;
+}
+
+interface TodayWorkoutMock {
+  started: boolean;
+  sets: SavedSetMock[];
+}
+
+function newTodayWorkout(sets: SavedSetMock[] = [], started = false): TodayWorkoutMock {
+  return { started, sets };
+}
+
+function benchSet(setOrder: number, weight = 60, reps = 8): SavedSetMock {
+  return { id: 200 + setOrder, exercise_id: "bench_press", exercise_name: "ベンチプレス", set_order: setOrder, weight, reps };
+}
+
+const emptySummary = { total_sets: 0, total_reps: 0, total_volume: 0, duration_min: 1, pr_count: 0, exercises: [] };
+
+function workoutDetail(id: number, status: "active" | "completed", summary: Record<string, unknown> = emptySummary) {
+  return { id, title: "今日のプラン", started_at: "2026-08-24T09:00:00+09:00", ended_at: "", status, summary };
+}
+
+function noWorkoutResponse() {
+  return HttpResponse.json(
+    { status: 404, detail: "指定日のワークアウトがありません。" },
+    { status: 404, headers: { "Content-Type": "application/problem+json" } },
+  );
+}
+
+// 当日の記録は開始APIが呼ばれるまで存在しない。開始後は進行中のワークアウト42と保存済みセットを返す。
+function todayWorkoutHandlers(today: TodayWorkoutMock) {
+  return [
+    http.get(`${apiOrigin}/api/workouts/by-date/:date`, ({ params }) => (
+      today.started
+        ? HttpResponse.json({ workout_id: 42, date: params.date, title: "今日のプラン", sets: today.sets })
+        : noWorkoutResponse()
+    )),
+    http.get(`${apiOrigin}/api/workouts/42`, () => HttpResponse.json(workoutDetail(42, "active"))),
+  ];
+}
+
+function useCommonHandlers(aiStatus: "applied" | "fallback" | "not_requested" = "applied", today = newTodayWorkout()) {
   server.use(
     http.get(`${apiOrigin}/api/exercises/:exerciseID/settings`, () => HttpResponse.json({ target_sets: 3 })),
-    http.post(new RegExp(`${apiOrigin}/api/workout-plans/\\d{4}-\\d{2}-\\d{2}/start`), () => (
-      HttpResponse.json({ ...startedPlan, ai_status: aiStatus })
-    )),
+    http.post(new RegExp(`${apiOrigin}/api/workout-plans/\\d{4}-\\d{2}-\\d{2}/start`), () => {
+      today.started = true;
+      return HttpResponse.json({ ...startedPlan, ai_status: aiStatus });
+    }),
+    ...todayWorkoutHandlers(today),
   );
+  return today;
 }
 
 function renderWorkout(aiEnabled = true) {
@@ -67,9 +117,105 @@ afterAll(() => server.close());
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
+  server.use(...todayWorkoutHandlers(newTodayWorkout()));
 });
 
 describe("WorkoutPage record-first flow", () => {
+  it("2セット保存後の再訪でセット3と記録一覧を復元し、重複せず保存する", async () => {
+    const today = useCommonHandlers("not_requested");
+    const orders: number[] = [];
+    server.use(http.post(`${apiOrigin}/api/workouts/42/sets`, async ({ request }) => {
+      const input = await request.json() as { set_order: number; weight: number; reps: number };
+      orders.push(input.set_order);
+      const saved = benchSet(input.set_order, input.weight, input.reps);
+      today.sets.push(saved);
+      return HttpResponse.json({ id: saved.id, workout_id: 42 });
+    }));
+    const user = userEvent.setup();
+    const first = renderWorkout(false);
+    await user.click(screen.getByRole("button", { name: /ワークアウトを開始/ }));
+    await screen.findByRole("heading", { name: "ワークアウト中" });
+    await user.click(screen.getByRole("button", { name: "セットを保存" }));
+    await user.click(await screen.findByRole("button", { name: "同じ内容で次へ" }));
+    await user.click(screen.getByRole("button", { name: "セットを保存" }));
+    await screen.findByText("2セット保存済み");
+    first.unmount();
+
+    renderWorkout(false);
+    await user.click(await screen.findByRole("button", { name: "記録を再開" }));
+    expect(await screen.findByText("セット 3 / 3")).toBeInTheDocument();
+    const records = screen.getByRole("region", { name: "今日ここまでの記録" });
+    expect(within(records).getByText("1セット目 60kg × 8回")).toBeInTheDocument();
+    expect(within(records).getByText("2セット目 60kg × 8回")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "セットを保存" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "セットを保存" }));
+    await screen.findByText("3セット保存済み");
+    expect(orders).toEqual([1, 2, 3]);
+  });
+
+  it("計画外の直近種目と種目別の次セット番号を復元する", async () => {
+    useCommonHandlers("not_requested", newTodayWorkout([
+      benchSet(1), benchSet(4),
+      { id: 300, exercise_id: "squat", exercise_name: "スクワット", set_order: 2, weight: 80, reps: 10 },
+    ], true));
+    const user = userEvent.setup();
+    renderWorkout(false);
+    await user.click(await screen.findByRole("button", { name: "記録を再開" }));
+    await screen.findByRole("heading", { name: "スクワット" });
+    expect(screen.getByText("セット 3 / 3")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("80")).toHaveValue(80);
+    expect(screen.getByPlaceholderText("10")).toHaveValue(10);
+    await user.click(screen.getByRole("button", { name: /^ベンチプレス/ }));
+    expect(screen.getByText("セット 5 / 3")).toBeInTheDocument();
+    expect(screen.getByText("2セット保存済み")).toBeInTheDocument();
+  });
+
+  it("セット未保存でも開始済みなら再開を案内する", async () => {
+    useCommonHandlers("not_requested", newTodayWorkout([], true));
+    renderWorkout(false);
+    expect(await screen.findByRole("button", { name: "記録を再開" })).toBeEnabled();
+    expect(screen.getByRole("heading", { name: "記録を再開しますか？" })).toBeInTheDocument();
+  });
+
+  it("記録の復元に失敗したときはセット1へ戻さず、再試行で復元する", async () => {
+    const today = useCommonHandlers("not_requested", newTodayWorkout([benchSet(1), benchSet(2)], true));
+    const user = userEvent.setup();
+    renderWorkout(false);
+    await screen.findByRole("button", { name: "記録を再開" });
+    server.use(http.get(`${apiOrigin}/api/workouts/by-date/:date`, () => HttpResponse.json({}, { status: 503 })));
+    await user.click(screen.getByRole("button", { name: "記録を再開" }));
+    await screen.findByText(/記録済みのセットを確認できなかったため/);
+    expect(screen.queryByRole("heading", { name: "ワークアウト中" })).not.toBeInTheDocument();
+    server.use(...todayWorkoutHandlers(today));
+    await user.click(screen.getByRole("button", { name: "もう一度試す" }));
+    expect(await screen.findByText("セット 3 / 3")).toBeInTheDocument();
+  });
+
+  it("完了済みなら開始画面に今日の結果へのリンクを表示する", async () => {
+    useCommonHandlers("not_requested", newTodayWorkout([benchSet(1)], true));
+    server.use(http.get(`${apiOrigin}/api/workouts/42`, () => HttpResponse.json(workoutDetail(42, "completed"))));
+    renderWorkout(false);
+    expect(await screen.findByRole("link", { name: "今日の結果を見る" })).toHaveAttribute("href", "/workouts/42");
+    expect(screen.queryByRole("button", { name: "記録を再開" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /ワークアウトを開始|自分で種目を選んで始める/ })).not.toBeInTheDocument();
+  });
+
+  it("入力変更後は再読み込みを確認し、保存成功後は確認を解除する", async () => {
+    useCommonHandlers("not_requested");
+    server.use(http.post(`${apiOrigin}/api/workouts/42/sets`, () => HttpResponse.json({ id: 100 })));
+    const user = userEvent.setup();
+    renderWorkout(false);
+    await user.click(screen.getByRole("button", { name: /ワークアウトを開始/ }));
+    await screen.findByRole("heading", { name: "ワークアウト中" });
+    const unload = () => window.dispatchEvent(new Event("beforeunload", { cancelable: true }));
+    expect(unload()).toBe(true);
+    await user.type(screen.getByPlaceholderText("80"), "5");
+    expect(unload()).toBe(false);
+    await user.click(screen.getByRole("button", { name: "セットを保存" }));
+    await screen.findByText(/セットは保存済みです/);
+    expect(unload()).toBe(true);
+  });
+
   it("セット保存を先に確定し、AIを待たずに次セットへ進める", async () => {
     useCommonHandlers();
     const recommendation = deferred<Response>();

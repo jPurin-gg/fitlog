@@ -21,12 +21,15 @@ import { AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { AlternativeCoachModal } from "@/features/exercises/components/AlternativeCoachModal";
 import { ExerciseSelectorModal } from "@/features/exercises/components/ExerciseSelectorModal";
+import { RecordedSetsList } from "./components/RecordedSetsList";
 import { WorkoutSummaryView, type WorkoutSummary } from "./components/WorkoutSummaryView";
 import { ApiError, apiErrorMessage } from "@/lib/api";
 import { displayPlanText, formatLocalDate } from "@/lib/fitlog";
 import { initialRecordFlowState, recordFlowReducer } from "./workoutFlow";
-import { finishWorkoutSession, getSetRecommendation, getSummaryComment, getTargetSets, recordWorkoutSet, startWorkoutPlan, updateTargetSets } from "./api";
-import type { SetRecommendation, WorkoutPlanSession } from "./types";
+import { addRecordedSet, emptyRecordedProgress, nextSetNumbers, resumePlanIndex, type RecordedExercise, type RecordedProgress } from "./recordedProgress";
+import { finishWorkoutSession, getRecordedProgress, getSetRecommendation, getSummaryComment, getTargetSets, getTodayWorkoutStatus, recordWorkoutSet, startWorkoutPlan, updateTargetSets } from "./api";
+import { useLeaveConfirmation } from "./useLeaveConfirmation";
+import type { SetRecommendation, TodayWorkoutStatus, WorkoutPlanSession } from "./types";
 
 type SummaryCommentState = "idle" | "loading" | "ready" | "unavailable";
 
@@ -76,6 +79,9 @@ export default function WorkoutPage() {
   const [finishedSummary, setFinishedSummary] = React.useState<WorkoutSummary | null>(null);
   const [finishedWorkoutID, setFinishedWorkoutID] = React.useState<number | null>(null);
   const [recordedSetID, setRecordedSetID] = React.useState<number | null>(null);
+  const [recordedProgress, setRecordedProgress] = React.useState<RecordedProgress>(emptyRecordedProgress);
+  const [todayStatus, setTodayStatus] = React.useState<TodayWorkoutStatus | null>(null);
+  const [formDirty, setFormDirty] = React.useState(false);
   const startInFlightRef = React.useRef(false);
   const startAbortRef = React.useRef<AbortController | null>(null);
   const startRequestRef = React.useRef(0);
@@ -91,12 +97,28 @@ export default function WorkoutPage() {
   const summaryCommentRequestRef = React.useRef(0);
   const nextSetByExerciseRef = React.useRef<Record<string, number>>({});
   const recordTransitionLocked = saveState === "saving" || saveRetryLocked;
+  const startScreenVisible = !workoutStarted && !finishedSummary;
+  const hasUnsavedInput = workoutStarted && (saveState === "saving" || saveState === "failed" || (saveState === "editing" && formDirty));
+
+  useLeaveConfirmation(hasUnsavedInput);
 
   React.useEffect(() => () => {
     startAbortRef.current?.abort();
     recommendationAbortRef.current?.abort();
     summaryCommentAbortRef.current?.abort();
   }, []);
+
+  // 開始画面を表示するたびに、今日の記録が進行中か完了済みかを確認する。
+  // 判定できなくても開始は妨げず、記録済みセットは開始（再開）時に改めて復元する。
+  React.useEffect(() => {
+    if (!startScreenVisible) return;
+    const controller = new AbortController();
+    setTodayStatus(null);
+    getTodayWorkoutStatus(formatLocalDate(new Date()), controller.signal)
+      .then(status => { if (!controller.signal.aborted) setTodayStatus(status); })
+      .catch(error => { if (!controller.signal.aborted) console.error(error); });
+    return () => controller.abort();
+  }, [startScreenVisible]);
 
   React.useEffect(() => {
     if (!aiEnabled) startWithoutAIRef.current?.();
@@ -155,25 +177,39 @@ export default function WorkoutPage() {
     setRecordedSetID(null);
   };
 
-  const activatePlanExercise = (plan: WorkoutPlanSession, index: number) => {
+  // 利用者が入力欄を変更したことを記録し、未保存のまま離れるときの確認に使う。
+  const editForm = (patch: Partial<typeof formData>) => {
+    setFormData({ ...formData, ...patch });
+    setFormDirty(true);
+  };
+
+  // resumed を渡すと、直近に記録した種目を最後に保存した重量・回数で再開する。
+  // 記録中に計画外の種目へ変更していた場合も、その種目のまま再開する。
+  const activatePlanExercise = (plan: WorkoutPlanSession, index: number, resumed?: RecordedExercise) => {
     if (saveInFlightRef.current || saveRetryLocked || finishInFlightRef.current) return;
     const ex = plan.plan.exercises[index];
     if (!ex) return;
-    if (workoutPlan && index === currentExerciseIndex && ex.exercise_id === currentExercise.id) return;
+    const exercise = resumed && resumed.exerciseID !== ex.exercise_id
+      ? { id: resumed.exerciseID, name: resumed.name }
+      : { id: ex.exercise_id, name: ex.name };
+    if (workoutPlan && index === currentExerciseIndex && exercise.id === currentExercise.id) return;
+    const planned = exercise.id === ex.exercise_id ? ex : undefined;
+    const lastSet = resumed ? resumed.sets[resumed.sets.length - 1] : undefined;
     setCurrentExerciseIndex(index);
-    setCurrentExercise({ id: ex.exercise_id, name: ex.name });
+    setCurrentExercise(exercise);
     setTargetSets(ex.planned_sets || 3);
     setTempTargetSets(ex.planned_sets || 3);
-    setCurrentSet(nextSetByExerciseRef.current[ex.exercise_id] || 1);
+    setCurrentSet(nextSetByExerciseRef.current[exercise.id] || 1);
     resetSetFlow();
+    setFormDirty(false);
     setFormData({
-      weight: ex.target_weight ? String(ex.target_weight) : '',
-      reps: ex.target_reps ? String(ex.target_reps) : '',
+      weight: lastSet ? String(lastSet.weight) : planned?.target_weight ? String(planned.target_weight) : '',
+      reps: lastSet ? String(lastSet.reps) : planned?.target_reps ? String(planned.target_reps) : '',
       feeling: ''
     });
   };
 
-  const applyStartedWorkout = (data: WorkoutPlanSession, selected?: { id: string; name: string }) => {
+  const applyStartedWorkout = (data: WorkoutPlanSession, progress: RecordedProgress, selected?: { id: string; name: string }) => {
     let index = selected ? data.plan.exercises.findIndex(ex => ex.exercise_id === selected.id) : 0;
     if (selected && index < 0) {
       // 記録画面だけに選択種目を追加し、保存済みの日次予定は変更しない。
@@ -185,13 +221,17 @@ export default function WorkoutPage() {
     if (!data.plan.exercises.length) {
       throw new Error("開始できる種目がありません。");
     }
+    // 種目を指定せずに開始（再開）したときは、直近に記録した種目の続きから始める。
+    const resumed = selected ? undefined : progress.exercises.find(exercise => exercise.exerciseID === progress.lastExerciseID);
+    if (resumed) index = resumePlanIndex(data.plan.exercises.map(ex => ex.exercise_id), progress);
     setWorkoutPlan(data);
     setWorkoutStarted(true);
-    nextSetByExerciseRef.current = {};
+    nextSetByExerciseRef.current = nextSetNumbers(progress);
+    setRecordedProgress(progress);
     setStartNotice(isEnabled() && data.ai_status === "fallback"
       ? "AI調整は利用できませんでしたが、記録できるメニューで開始しました。"
       : null);
-    activatePlanExercise(data, index);
+    activatePlanExercise(data, index, resumed);
   };
 
   const beginWorkout = async (exercise?: { id: string; name: string }, useAI = isEnabled()) => {
@@ -216,7 +256,8 @@ export default function WorkoutPage() {
     setSummaryCommentState("idle");
     setSummaryCommentError(null);
     try {
-      const data = await startWorkoutPlan(formatLocalDate(new Date()), {
+      const date = formatLocalDate(new Date());
+      const data = await startWorkoutPlan(date, {
         use_ai: exercise ? false : useAI,
         ...(exercise ? { exercise_id: exercise.id } : {}),
       }, controller.signal);
@@ -225,7 +266,21 @@ export default function WorkoutPage() {
         restartWithoutAI();
         return;
       }
-      applyStartedWorkout(data, exercise);
+      // AI調整の待機はここで終わるため、以降にAIをOFFにしても開始をやり直さない。
+      startWithoutAIRef.current = null;
+      let progress: RecordedProgress;
+      try {
+        // 開始APIは進行中のワークアウトを再利用する。保存済みのセットを復元してから記録画面へ進み、
+        // 同じセット番号をもう一度保存しないようにする。
+        progress = await getRecordedProgress(data.workout_id, date, controller.signal);
+      } catch (e) {
+        if (controller.signal.aborted || startRequestRef.current !== requestID) return;
+        console.error(e);
+        setStartError("記録済みのセットを確認できなかったため、開始を中断しました。もう一度お試しください。");
+        return;
+      }
+      if (controller.signal.aborted || startRequestRef.current !== requestID) return;
+      applyStartedWorkout(data, progress, exercise);
     } catch (e) {
       if (controller.signal.aborted || startRequestRef.current !== requestID) return;
       if (!exercise && e instanceof ApiError && e.status === 404) {
@@ -314,6 +369,15 @@ export default function WorkoutPage() {
         nextSetByExerciseRef.current[currentExercise.id] || 1,
         currentSet + 1,
       );
+      setRecordedProgress(previous => addRecordedSet(previous, {
+        id: recorded.id,
+        exercise_id: setInput.exercise_id,
+        exercise_name: currentExercise.name,
+        set_order: setInput.set_order,
+        weight: setInput.weight,
+        reps: setInput.reps,
+      }));
+      setFormDirty(false);
       setSaveRetryLocked(false);
       dispatchRecordFlow({ type: "SAVE_SUCCEEDED" });
       void fetchRecommendation(workoutID, recorded.id);
@@ -347,6 +411,7 @@ export default function WorkoutPage() {
     } else {
       setFormData({ ...formData, feeling: '' });
     }
+    setFormDirty(false);
     resetSetFlow();
   };
 
@@ -402,8 +467,10 @@ export default function WorkoutPage() {
       dispatchRecordFlow({ type: "RESET" });
       setCurrentSet(1);
       nextSetByExerciseRef.current = {};
+      setRecordedProgress(emptyRecordedProgress);
       setCurrentExerciseIndex(0);
       setFormData({ weight: '', reps: '', feeling: '' });
+      setFormDirty(false);
       setRequestRef.current = null;
       setRecordedSetID(null);
     } catch (e) {
@@ -502,7 +569,7 @@ export default function WorkoutPage() {
               onClick={resetFinishedView}
               className="py-4 bg-primary text-black font-black rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2"
             >
-              <RotateCcw className="w-5 h-5" /> 新しく始める
+              <RotateCcw className="w-5 h-5" /> 開始画面へ戻る
             </button>
             <Link
               href="/"
@@ -517,6 +584,8 @@ export default function WorkoutPage() {
   }
 
   if (!workoutStarted) {
+    const activeWorkout = todayStatus?.state === "active" ? todayStatus : null;
+    const completedWorkout = todayStatus?.state === "completed" ? todayStatus : null;
     return (
       <div className="min-h-screen bg-[#0a0a0a] text-white p-4 md:p-8 flex flex-col items-center justify-center relative overflow-hidden">
         <div className="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/10 blur-[120px] rounded-full pointer-events-none" />
@@ -534,30 +603,56 @@ export default function WorkoutPage() {
             <div className="absolute inset-0 bg-primary/20 rounded-full animate-ping" />
             <Play className="w-10 h-10 text-primary ml-2" />
           </div>
-          <h1 className="text-3xl font-bold mb-4">今日の筋トレを始めますか？</h1>
+          <h1 className="text-3xl font-bold mb-4">{completedWorkout ? "今日のワークアウトは完了しています" : activeWorkout ? "記録を再開しますか？" : "今日の筋トレを始めますか？"}</h1>
           <div className="mb-5"><AIToggle /></div>
-          <p className="text-white/50 mb-10">今日のメニューを開始します。AIが使えないときも記録は続けられます。</p>
-          <button 
-            onClick={startWorkout}
-            disabled={starting}
-            className="w-full py-5 bg-primary text-black font-black rounded-2xl shadow-[0_0_30px_rgba(255,170,0,0.5)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 text-xl tracking-wider group relative overflow-hidden disabled:opacity-50 disabled:pointer-events-none"
-          >
-            <div className="absolute inset-0 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/30 to-transparent skew-x-12" />
-            <span className="relative z-10 flex items-center justify-center gap-2">
-              {starting ? <Loader2 className="w-6 h-6 animate-spin" /> : <>ワークアウトを開始 <Sparkles className="w-5 h-5" /></>}
-            </span>
-          </button>
-            <div className="mt-3">
-              <button
-                type="button"
-                onClick={() => setShowManualExerciseSelector(true)}
-                disabled={starting}
-                className="w-full rounded-2xl border border-white/10 bg-white/5 py-4 text-sm font-bold text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-40"
+          <p className="text-white/50 mb-10">
+            {completedWorkout
+              ? "おつかれさまでした。今日の結果を見返せます。"
+              : activeWorkout
+                ? activeWorkout.setCount > 0
+                  ? `進行中のワークアウトがあります。保存済みの${activeWorkout.setCount}セットの続きから再開できます。`
+                  : "進行中のワークアウトがあります。続きから再開できます。"
+                : "今日のメニューを開始します。AIが使えないときも記録は続けられます。"}
+          </p>
+          {completedWorkout && (
+            <div className="mb-5 rounded-2xl border border-green-500/25 bg-green-500/10 p-4 text-left">
+              <Link
+                href={`/workouts/${completedWorkout.workoutID}`}
+                className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-green-200 underline transition-colors hover:text-green-100"
               >
-                自分で種目を選んで始める
-              </button>
-              <p className="mt-2 text-[11px] text-white/30">月間プランがなくても、好きな種目から記録できます。</p>
+                <CheckCircle2 className="h-3.5 w-3.5" /> 今日の結果を見る
+              </Link>
             </div>
+          )}
+          {!completedWorkout && (
+            <>
+              <button
+                onClick={startWorkout}
+                disabled={starting}
+                className="w-full py-5 bg-primary text-black font-black rounded-2xl shadow-[0_0_30px_rgba(255,170,0,0.5)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 text-xl tracking-wider group relative overflow-hidden disabled:opacity-50 disabled:pointer-events-none"
+              >
+                <div className="absolute inset-0 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/30 to-transparent skew-x-12" />
+                <span className="relative z-10 flex items-center justify-center gap-2">
+                  {starting
+                    ? <Loader2 className="w-6 h-6 animate-spin" />
+                    : activeWorkout
+                      ? <>記録を再開 <RotateCcw className="w-5 h-5" /></>
+                      : <>ワークアウトを開始 <Sparkles className="w-5 h-5" /></>}
+                </span>
+              </button>
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowManualExerciseSelector(true)}
+                  disabled={starting}
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 py-4 text-sm font-bold text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-40"
+                >
+                  自分で種目を選んで始める
+                </button>
+                <p className="mt-2 text-[11px] text-white/30">月間プランがなくても、好きな種目から記録できます。</p>
+              </div>
+            </>
+          )}
           {startError && (
             <div className="mt-5 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-left">
               <p className="text-red-300 font-bold text-sm">エラーが発生しました</p>
@@ -751,7 +846,7 @@ export default function WorkoutPage() {
                   <input 
                     type="number" 
                     value={formData.weight}
-                    onChange={(e) => setFormData({...formData, weight: e.target.value})}
+                    onChange={(e) => editForm({ weight: e.target.value })}
                     disabled={recordTransitionLocked || saveState === "saved" || finishing}
                     className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-primary/50 text-2xl font-bold disabled:opacity-60"
                     placeholder="80"
@@ -762,7 +857,7 @@ export default function WorkoutPage() {
                   <input 
                     type="number" 
                     value={formData.reps}
-                    onChange={(e) => setFormData({...formData, reps: e.target.value})}
+                    onChange={(e) => editForm({ reps: e.target.value })}
                     disabled={recordTransitionLocked || saveState === "saved" || finishing}
                     className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-secondary/50 text-2xl font-bold disabled:opacity-60"
                     placeholder="10"
@@ -773,7 +868,7 @@ export default function WorkoutPage() {
                 <label className="text-[10px] font-black text-white/40 ml-1">セット後の感想</label>
                 <textarea 
                   value={formData.feeling}
-                  onChange={(e) => setFormData({...formData, feeling: e.target.value})}
+                  onChange={(e) => editForm({ feeling: e.target.value })}
                   disabled={recordTransitionLocked || saveState === "saved" || finishing}
                   className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-accent/50 text-sm min-h-[100px] disabled:opacity-60"
                   placeholder="例: きつかった、まだ余裕がある、肩に違和感..."
@@ -994,6 +1089,8 @@ export default function WorkoutPage() {
                 </div>
               </div>
             )}
+
+            <RecordedSetsList exercises={recordedProgress.exercises} />
           </div>
         </section>
       </main>

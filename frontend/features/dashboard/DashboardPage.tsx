@@ -19,11 +19,13 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlternativeCoachModal } from "@/features/exercises/components/AlternativeCoachModal";
+import { getTodayWorkoutStatus } from "@/features/workout/api";
+import type { TodayWorkoutStatus } from "@/features/workout/types";
 import { LogoutButton, useAuth } from "@/components/AuthGate";
 import { AIToggle, useAISettings } from "@/components/AISettings";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
-import { displayPlanText, formatPlanMonth } from "@/lib/fitlog";
+import { displayPlanText, formatLocalDate, formatPlanMonth } from "@/lib/fitlog";
 import { useMonthlyPromptDismissal } from "./useMonthlyPromptDismissal";
 
 const WEEKDAY_OPTIONS = [
@@ -56,6 +58,10 @@ export default function DashboardPage() {
   const [dashboardData, setDashboardData] = React.useState<any>(null);
   const [altModalData, setAltModalData] = React.useState<{dayIdx: number, exIdx: number, exName: string, exId?: string} | null>(null);
   const [today, setToday] = React.useState<Date | null>(null);
+  const [todayWorkout, setTodayWorkout] = React.useState<TodayWorkoutStatus | null>(null);
+  const todayKey = today ? formatLocalDate(today) : "";
+  const activeWorkout = todayWorkout?.state === "active" ? todayWorkout : null;
+  const completedWorkout = todayWorkout?.state === "completed" ? todayWorkout : null;
   const [currentMonth, setCurrentMonth] = React.useState(() => formatPlanMonth(new Date()));
   const promptScope = `${user.id}:${currentMonth}`;
   const [monthlyLoad, setMonthlyLoad] = React.useState({ scope: "", missing: false });
@@ -118,6 +124,17 @@ export default function DashboardPage() {
       .catch(err => { if (!controller.signal.aborted) console.error(err); });
     return () => controller.abort();
   }, [user.id]);
+
+  // 今日の記録が進行中か完了済みかを確認し、開始の導線を「再開」や結果表示へ切り替える。
+  React.useEffect(() => {
+    if (!todayKey) return;
+    const controller = new AbortController();
+    setTodayWorkout(null);
+    getTodayWorkoutStatus(todayKey, controller.signal)
+      .then(status => { if (!controller.signal.aborted) setTodayWorkout(status); })
+      .catch(err => { if (!controller.signal.aborted) console.error("Failed to fetch today's workout:", err); });
+    return () => controller.abort();
+  }, [todayKey, user.id]);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -222,9 +239,9 @@ export default function DashboardPage() {
               <Settings className="w-5 h-5 text-white/70" />
             </button>
             <LogoutButton />
-            <Link href="/workout" className="w-full sm:w-auto px-6 py-3 bg-primary text-black font-bold rounded-2xl glow-primary hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 justify-center">
+            <Link href={completedWorkout ? `/workouts/${completedWorkout.workoutID}` : "/workout"} className="w-full sm:w-auto px-6 py-3 bg-primary text-black font-bold rounded-2xl glow-primary hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 justify-center">
               <Plus className="w-5 h-5" />
-              <span>記録を始める</span>
+              <span>{completedWorkout ? "今日の結果を見る" : activeWorkout ? "記録を再開" : "記録を始める"}</span>
             </Link>
           </div>
         </header>
@@ -256,7 +273,36 @@ export default function DashboardPage() {
                 </div>
               </div>
 
+              {activeWorkout && (
+                <div className="mb-6 flex flex-col gap-4 rounded-3xl border border-primary/30 bg-primary/10 p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold text-white">記録の途中です</h3>
+                    <p className="mt-1 text-sm text-white/60">
+                      {activeWorkout.setCount > 0
+                        ? `今日は${activeWorkout.setCount}セットを保存済みです。続きから再開できます。`
+                        : "今日のワークアウトを開始済みです。続きから再開できます。"}
+                    </p>
+                  </div>
+                  <Link href="/workout" className="inline-flex items-center justify-center rounded-2xl bg-primary px-6 py-3 font-black text-black transition-transform hover:scale-105">
+                    記録を再開
+                  </Link>
+                </div>
+              )}
+              {completedWorkout && (
+                <div className="mb-6 flex flex-col gap-4 rounded-3xl border border-green-500/25 bg-green-500/10 p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold text-green-300">今日のワークアウトは完了しています</h3>
+                    <p className="mt-1 text-sm text-white/60">おつかれさまでした。今日の結果を見返せます。</p>
+                  </div>
+                  <Link href={`/workouts/${completedWorkout.workoutID}`} className="inline-flex items-center justify-center rounded-2xl bg-white/10 px-6 py-3 font-bold text-white transition-colors hover:bg-white/15">
+                    今日の結果を見る
+                  </Link>
+                </div>
+              )}
+
               {(() => {
+                // 進行中・完了済みのときは上の案内を導線にし、新しく始めるボタンは重ねて出さない。
+                const showStartAction = !activeWorkout && !completedWorkout;
                 if (!monthlyPlan) {
                   return (
                     <div className="text-center py-12">
@@ -265,9 +311,11 @@ export default function DashboardPage() {
                       </div>
                       <h3 className="text-lg font-bold mb-2">月間プランは任意です</h3>
                       <p className="text-white/50 text-sm mb-6">種目を選べば、AIや月間プランなしですぐに記録できます。</p>
-                      <Link href="/workout" className="inline-flex px-6 py-3 bg-primary text-black font-bold rounded-2xl">
-                        プランなしで記録を始める
-                      </Link>
+                      {showStartAction && (
+                        <Link href="/workout" className="inline-flex px-6 py-3 bg-primary text-black font-bold rounded-2xl">
+                          プランなしで記録を始める
+                        </Link>
+                      )}
                     </div>
                   );
                 }
@@ -301,9 +349,11 @@ export default function DashboardPage() {
                           {monthlyPlan.rest_days?.length > 0 ? ` / 休息日: ${weekdayLabels(monthlyPlan.rest_days)}` : ""}
                         </p>
                       </div>
-                      <Link href="/workout" className="w-full md:w-auto px-8 py-4 bg-primary text-black font-black rounded-2xl hover:scale-105 transition-transform flex justify-center items-center gap-2 shadow-[0_0_20px_rgba(255,170,0,0.3)]">
-                        <Plus className="w-5 h-5" /> 筋トレを開始
-                      </Link>
+                      {showStartAction && (
+                        <Link href="/workout" className="w-full md:w-auto px-8 py-4 bg-primary text-black font-black rounded-2xl hover:scale-105 transition-transform flex justify-center items-center gap-2 shadow-[0_0_20px_rgba(255,170,0,0.3)]">
+                          <Plus className="w-5 h-5" /> 筋トレを開始
+                        </Link>
+                      )}
                     </div>
                     
                     <div className="space-y-3">
