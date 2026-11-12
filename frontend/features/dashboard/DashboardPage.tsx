@@ -121,6 +121,7 @@ export default function DashboardPage() {
 
   React.useEffect(() => {
     const controller = new AbortController();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 対象月の変更時は前の月のプランと案内をクリアする。
     setMonthlyPlan(null);
     setShowMonthlyModal(false);
     apiFetch<any>(`/api/monthly-plans/${currentMonth}`, { signal: controller.signal })
@@ -145,6 +146,7 @@ export default function DashboardPage() {
     if (!dismissalReady || monthlyLoad.scope !== promptScope || !monthlyLoad.missing) return;
     if (promptHandledRef.current === promptScope) return;
     promptHandledRef.current = promptScope;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- プラン取得と保存設定の読み込み後に一度だけ案内を開く。
     if (!dismissed) setShowMonthlyModal(true);
   }, [dismissalReady, dismissed, monthlyLoad, promptScope]);
 
@@ -559,6 +561,7 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, mon
     generateAbortRef.current?.abort();
     generateRequestRef.current++;
     generateInFlightRef.current = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- AI OFFで通信を中断した直後に待機表示も解除する。
     setLoading(false);
     setError("");
   }, [aiEnabled]);
