@@ -18,6 +18,7 @@ import (
 var (
 	ErrNotFound         = errors.New("plan not found")
 	ErrExerciseNotFound = errors.New("exercise not found")
+	ErrWorkoutCompleted = errors.New("workout already completed")
 )
 
 const (
@@ -350,6 +351,9 @@ func (s *Service) StartDaily(ctx context.Context, userID int, dateText string, i
 		return PlanSession{}, apperr.Internal(err)
 	}
 	session, err := s.repository.AttachWorkout(ctx, userID, date)
+	if errors.Is(err, ErrWorkoutCompleted) {
+		return PlanSession{}, apperr.Conflict("指定日のワークアウトは完了済みです。記録の編集はカレンダーから行ってください。")
+	}
 	if err != nil {
 		return PlanSession{}, apperr.Internal(err)
 	}

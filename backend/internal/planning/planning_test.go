@@ -354,6 +354,31 @@ func TestStartDailyDoesNotRequestAIForStoredPlan(t *testing.T) {
 	}
 }
 
+func TestStartDailyMapsAttachWorkoutErrors(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name   string
+		err    error
+		code   string
+		status int
+	}{
+		{name: "completed workout", err: fmt.Errorf("attach: %w", ErrWorkoutCompleted), code: apperr.CodeConflict, status: 409},
+		{name: "storage failure", err: errors.New("database unavailable"), code: apperr.CodeInternal, status: 500},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repository := newStartDailyRepository(now)
+			repository.dailyErr = nil
+			repository.attachErr = test.err
+			service := NewService(repository, nil, nil, nil, clock.Fixed{Time: now}, time.Second)
+
+			_, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{})
+			if err == nil || apperr.As(err).Status != test.status || apperr.As(err).Code != test.code {
+				t.Fatalf("StartDaily() error = %#v, want status %d and code %s", apperr.As(err), test.status, test.code)
+			}
+		})
+	}
+}
+
 func TestDailyAndSaveDailyMarkAINotRequested(t *testing.T) {
 	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
 	repository := newStartDailyRepository(now)
@@ -387,6 +412,7 @@ type startDailyRepository struct {
 	saveCalls        int
 	saveContextErr   error
 	attachResult     PlanSession
+	attachErr        error
 }
 
 func newStartDailyRepository(now time.Time) *startDailyRepository {
@@ -444,6 +470,9 @@ func (r *startDailyRepository) SaveDaily(ctx context.Context, _ int, date time.T
 }
 
 func (r *startDailyRepository) AttachWorkout(context.Context, int, time.Time) (PlanSession, error) {
+	if r.attachErr != nil {
+		return PlanSession{}, r.attachErr
+	}
 	if r.attachResult.ID != 0 {
 		return r.attachResult, nil
 	}

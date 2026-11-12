@@ -204,7 +204,7 @@ func newManualAPIFixture(t *testing.T, aiHandler http.HandlerFunc) *manualAPIFix
 			t.Errorf("clean up isolated test schema: %v", err)
 		}
 	})
-	db, err := sql.Open("postgres", dsn+" search_path="+schema)
+	db, err := sql.Open("postgres", dsn+" search_path="+schema+" application_name="+schema)
 	if err != nil {
 		t.Fatal(err)
 	}
