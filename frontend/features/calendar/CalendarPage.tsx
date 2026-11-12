@@ -465,6 +465,7 @@ export function CalendarWorkoutEditor({
   const [showExerciseSelector, setShowExerciseSelector] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 日付変更時は取得前に読み込み表示へ戻す。
     setLoading(true);
     setError("");
     apiFetch<CalendarWorkout>(`/api/workouts/by-date/${date}`)
@@ -713,6 +714,7 @@ export function CalendarPlanEditor({
   const [showExerciseSelector, setShowExerciseSelector] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 日付変更時は取得前に読み込み表示へ戻す。
     setLoading(true);
     setError("");
     apiFetch<CalendarPlan>(`/api/workout-plans/${date}`)

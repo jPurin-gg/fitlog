@@ -10,6 +10,7 @@ export function useMonthlyPromptDismissal(userID: number, month: string) {
   useEffect(() => {
     let dismissed = false;
     try { dismissed = window.localStorage.getItem(storageKey) === month; } catch { /* 案内は利用できる状態を維持 */ }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- ユーザーと月が変わったらlocalStorageの保存設定と同期する。
     setState({ scope, dismissed });
     const sync = (event: StorageEvent) => {
       if (event.key !== storageKey && event.key !== null) return;

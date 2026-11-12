@@ -106,6 +106,7 @@ export default function WorkoutPage() {
     if (aiEnabled) return;
     recommendationAbortRef.current?.abort();
     recommendationRequestRef.current += 1;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- AI OFFで通信を中断した直後に提案表示をクリアする。
     setRecommendation(null);
     setRecommendationError(null);
     dispatchRecordFlow({ type: "RECOMMENDATION_CANCELED" });
@@ -115,6 +116,7 @@ export default function WorkoutPage() {
     if (aiEnabled) return;
     summaryCommentAbortRef.current?.abort();
     summaryCommentRequestRef.current += 1;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- AI OFFで通信を中断した直後に総評の待機表示を解除する。
     setSummaryCommentState("idle");
     setSummaryCommentError(null);
   }, [aiEnabled]);
@@ -590,7 +592,9 @@ export default function WorkoutPage() {
             onReplace={(newExercise: string | { id?: string; name?: string }) => {
               if (recordTransitionLocked || finishing) return;
               const nextExercise = typeof newExercise === "string"
+                // eslint-disable-next-line react-hooks/purity -- 種目の置換イベント時にだけIDを生成し、レンダー中には実行しない。
                 ? { id: `custom_${Date.now()}`, name: newExercise }
+                // eslint-disable-next-line react-hooks/purity -- 種目の置換イベント時にだけIDを生成し、レンダー中には実行しない。
                 : { id: newExercise.id || `custom_${Date.now()}`, name: newExercise.name || currentExercise.name };
               setCurrentExercise({ id: nextExercise.id, name: nextExercise.name });
               setCurrentSet(nextSetByExerciseRef.current[nextExercise.id] || 1);

@@ -25,6 +25,7 @@ function UserAISettings({ userID, children }: { userID: number; children: React.
     let saved = false;
     try { saved = window.localStorage.getItem(storageKey) === "true"; } catch { /* OFFで利用を継続 */ }
     enabledRef.current = saved;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- マウント後にユーザー別のlocalStorageと同期し、初期OFFを維持する。
     updateEnabled(saved);
     setReady(true);
 

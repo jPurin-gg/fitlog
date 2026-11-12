@@ -76,6 +76,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- stateはAPI応答後に更新し、ここでは非同期の取得処理を起動する。
     fetchFavorites();
   }, [fetchFavorites]);
 

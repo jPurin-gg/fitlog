@@ -27,6 +27,7 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
     abortRef.current?.abort();
     requestRef.current += 1;
     inFlightRef.current = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- AI OFFで通信を中断した直後に待機表示と候補をクリアする。
     setLoading(false);
     setResult(null);
     setAIError("");
