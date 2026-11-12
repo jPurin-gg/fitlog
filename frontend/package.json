@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "framer-motion": "^12.34.3",
@@ -19,6 +20,7 @@
     "react-dom": "19.1.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@eslint/eslintrc": "^3",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
@@ -29,6 +31,8 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.1.0",
+    "@vitest/coverage-v8": "^4.1.11",
+    "axe-core": "^4.14.0",
     "eslint": "^9",
     "eslint-config-next": "15.5.22",
     "jsdom": "^30.0.1",

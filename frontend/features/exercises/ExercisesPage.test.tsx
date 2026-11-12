@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
+import { expectAccessible } from "@/test/a11y";
 import ExercisesPage from "./ExercisesPage";
 
 const endpoint = "http://localhost:3000/api/exercises";
@@ -42,10 +43,40 @@ it("検索条件を変えた後に以前の検索結果を表示しない", asyn
   }));
   render(<ExercisesPage />);
   await waitFor(() => expect(names).toHaveLength(1));
-  await userEvent.type(screen.getByPlaceholderText("種目名や器具で検索..."), "スクワット");
+  await userEvent.type(screen.getByRole("textbox", { name: "種目名や器具で検索" }), "スクワット");
   expect(await screen.findByRole("heading", { name: "スクワット" })).toBeInTheDocument();
   await act(async () => { resolvePrevious(HttpResponse.json([{ id: "bench", name: "ベンチプレス" }])); });
   expect(screen.queryByRole("heading", { name: "ベンチプレス" })).not.toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "スクワット" })).toBeInTheDocument();
   expect(names).toEqual([null, "スクワット"]);
+});
+
+it("部位・難易度・器具の選択条件をAPIに送る", async () => {
+  let query = new URLSearchParams();
+  server.use(http.get(endpoint, ({ request }) => {
+    query = new URL(request.url).searchParams;
+    return HttpResponse.json([]);
+  }));
+  render(<ExercisesPage />);
+  await userEvent.click(screen.getByRole("button", { name: "大胸筋" }));
+  await userEvent.click(screen.getByRole("button", { name: "初級" }));
+  await userEvent.click(screen.getByRole("button", { name: "ダンベル" }));
+  await waitFor(() => expect(Object.fromEntries(query)).toEqual({ muscle: "大胸筋", level: "初級", equipment: "ダンベル" }));
+});
+
+it("種目詳細と追加フォームを名前付きdialogで開き、Escapeで元のボタンに戻る", async () => {
+  server.use(http.get(endpoint, () => HttpResponse.json([{ id: "bench", name: "ベンチプレス", instructions: ["胸を張る"] }])));
+  render(<ExercisesPage />);
+  const details = await screen.findByRole("button", { name: "詳細を見る" });
+  await userEvent.click(details);
+  const dialog = screen.getByRole("dialog", { name: "ベンチプレスの詳細" });
+  expect(within(dialog).getByText("胸を張る")).toBeInTheDocument();
+  await expectAccessible(dialog);
+  await userEvent.keyboard("{Escape}");
+  expect(details).toHaveFocus();
+  const add = screen.getByRole("button", { name: "種目を追加" });
+  await userEvent.click(add);
+  await expectAccessible(screen.getByRole("dialog", { name: "種目を追加" }));
+  await userEvent.keyboard("{Escape}");
+  expect(add).toHaveFocus();
 });

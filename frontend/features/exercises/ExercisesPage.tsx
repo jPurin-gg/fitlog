@@ -1,9 +1,10 @@
 "use client"
 
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { Search, Filter, Dumbbell, Activity, Shield, Plus, Loader2 } from 'lucide-react'
 import { apiErrorMessage, apiFetch } from '@/lib/api'
 import { ErrorMessage } from '@/components/ErrorMessage'
+import { Modal } from '@/components/Modal'
 import { useApiQuery } from '@/hooks/useApiQuery'
 import type { Exercise } from './types'
 
@@ -92,18 +93,6 @@ export default function ExercisesPage() {
   const exercisesQuery = useApiQuery<Exercise[]>(`/api/exercises${qs ? '?' + qs : ''}`, '種目の取得に失敗しました。', { delay: 300 })
   const exercises = exercisesQuery.data || []
 
-  // モーダルが開いている間は背景のスクロールを無効化する（UX改善）
-  useEffect(() => {
-    if (selectedExercise) {
-      document.body.style.overflow = 'hidden'
-    } else {
-      document.body.style.overflow = 'unset'
-    }
-    return () => {
-      document.body.style.overflow = 'unset'
-    }
-  }, [selectedExercise])
-
   const resetAddForm = () => {
     setNewExercise({
       name: '',
@@ -181,9 +170,10 @@ export default function ExercisesPage() {
         {/* 検索・フィルターバー */}
         <div className="bg-[#111] border border-white/10 rounded-2xl shadow-xl p-4 md:p-6 mb-8 flex flex-col gap-4">
           <div className="relative w-full">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 w-5 h-5" />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/60 w-5 h-5" />
             <input 
               type="text" 
+              aria-label="種目名や器具で検索"
               placeholder="種目名や器具で検索..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -199,7 +189,7 @@ export default function ExercisesPage() {
           </button>
           
           <div className="flex overflow-x-auto pb-2 gap-2 hide-scrollbar">
-            <div className="flex items-center text-white/40 text-xs font-bold whitespace-nowrap mr-2"><Activity className="w-4 h-4 mr-1"/> 部位:</div>
+            <div className="flex items-center text-white/60 text-xs font-bold whitespace-nowrap mr-2"><Activity className="w-4 h-4 mr-1"/> 部位:</div>
             {MUSCLE_GROUPS.map(m => (
               <button
                 key={m}
@@ -216,7 +206,7 @@ export default function ExercisesPage() {
           </div>
 
           <div className="flex overflow-x-auto pb-2 gap-2 hide-scrollbar">
-            <div className="flex items-center text-white/40 text-xs font-bold whitespace-nowrap mr-2"><Shield className="w-4 h-4 mr-1"/> 難易度:</div>
+            <div className="flex items-center text-white/60 text-xs font-bold whitespace-nowrap mr-2"><Shield className="w-4 h-4 mr-1"/> 難易度:</div>
             {DIFFICULTY_OPTIONS.map(option => (
               <button
                 key={option.value}
@@ -233,7 +223,7 @@ export default function ExercisesPage() {
           </div>
 
           <div className="flex overflow-x-auto pb-2 gap-2 hide-scrollbar">
-            <div className="flex items-center text-white/40 text-xs font-bold whitespace-nowrap mr-2"><Dumbbell className="w-4 h-4 mr-1"/> 器具:</div>
+            <div className="flex items-center text-white/60 text-xs font-bold whitespace-nowrap mr-2"><Dumbbell className="w-4 h-4 mr-1"/> 器具:</div>
             {EQUIPMENTS.map(eq => (
               <button
                 key={eq}
@@ -261,7 +251,7 @@ export default function ExercisesPage() {
           <div className="text-center py-20 bg-[#111] rounded-3xl shadow-sm border border-white/10">
             <Activity className="w-16 h-16 mx-auto text-white/20 mb-4" />
             <h3 className="text-xl font-semibold text-white/80 mb-2">見つかりませんでした</h3>
-            <p className="text-white/40">検索条件を変えてみてください。</p>
+            <p className="text-white/60">検索条件を変えてみてください。</p>
           </div>
         ) : (
           <>
@@ -272,7 +262,7 @@ export default function ExercisesPage() {
 
               {/* アクティブな検索条件の表示 */}
               <div className="flex flex-wrap items-center gap-2 bg-[#111] px-4 py-2 rounded-lg border border-white/10">
-                <Filter className="w-4 h-4 text-white/40 mr-1" />
+                <Filter className="w-4 h-4 text-white/60 mr-1" />
                 <span className="text-sm text-white/50 mr-2">現在の条件:</span>
                 
                 {muscle !== 'すべて' && (
@@ -312,7 +302,7 @@ export default function ExercisesPage() {
                 )}
 
                 {muscle === 'すべて' && difficulty === 'すべて' && selectedEquipments.length === 0 && !searchQuery && (
-                  <span className="text-sm text-white/40 italic">絞り込みなし（全件表示）</span>
+                  <span className="text-sm text-white/60 italic">絞り込みなし（全件表示）</span>
                 )}
               </div>
             </div>
@@ -341,7 +331,7 @@ export default function ExercisesPage() {
                     )}
                     {ex.equipment && (
                       <div className="flex items-center text-sm text-white/60">
-                        <Dumbbell className="w-4 h-4 mr-2 text-white/40" />
+                        <Dumbbell className="w-4 h-4 mr-2 text-white/60" />
                         <span className="font-medium mr-2">器具:</span>
                         {ex.equipment}
                       </div>
@@ -370,11 +360,10 @@ export default function ExercisesPage() {
 
       {/* 種目詳細モーダル */}
       {selectedExercise && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md transition-opacity" onClick={() => setSelectedExercise(null)}>
-          <div className="bg-[#111] border border-white/10 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] max-w-2xl w-full max-h-[85vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+        <Modal label={`${selectedExercise.name}の詳細`} onClose={() => setSelectedExercise(null)} className="bg-[#111] border border-white/10 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] max-w-2xl w-full max-h-[85vh] overflow-y-auto">
             <div className="sticky top-0 bg-[#111]/90 backdrop-blur-xl p-6 border-b border-white/10 flex justify-between items-center z-10">
               <h2 className="text-2xl font-bold text-white pr-4">{selectedExercise.name}</h2>
-              <button onClick={() => setSelectedExercise(null)} className="text-white/50 hover:text-white focus:outline-none bg-white/5 hover:bg-white/10 rounded-full w-8 h-8 flex items-center justify-center transition-colors flex-shrink-0">
+              <button aria-label="閉じる" onClick={() => setSelectedExercise(null)} className="text-white/50 hover:text-white focus:outline-none bg-white/5 hover:bg-white/10 rounded-full w-8 h-8 flex items-center justify-center transition-colors flex-shrink-0">
                 <span className="text-xl leading-none">&times;</span>
               </button>
             </div>
@@ -411,33 +400,32 @@ export default function ExercisesPage() {
                     </div>
                   ))
                 ) : (
-                  <p className="text-white/40 italic bg-black/40 p-4 rounded-xl text-center border border-white/5">手順の詳細はありません。</p>
+                  <p className="text-white/60 italic bg-black/40 p-4 rounded-xl text-center border border-white/5">手順の詳細はありません。</p>
                 )}
               </div>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* 種目追加モーダル */}
       {showAddModal && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md" onClick={closeAddModal}>
-          <div className="bg-[#111] border border-white/10 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] max-w-2xl w-full max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <Modal label="種目を追加" onClose={closeAddModal} className="bg-[#111] border border-white/10 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] max-w-2xl w-full max-h-[85vh] overflow-y-auto">
             <div className="sticky top-0 bg-[#111]/90 backdrop-blur-xl p-6 border-b border-white/10 flex justify-between items-center z-10">
               <div>
                 <h2 className="text-2xl font-bold text-white">種目を追加</h2>
-                <p className="text-sm text-white/45 mt-1">辞書にない種目を保存して、ワークアウト記録で使えるようにします。</p>
+                <p className="text-sm text-white/60 mt-1">辞書にない種目を保存して、ワークアウト記録で使えるようにします。</p>
               </div>
-              <button onClick={closeAddModal} className="text-white/50 hover:text-white bg-white/5 hover:bg-white/10 rounded-full w-9 h-9 flex items-center justify-center transition-colors flex-shrink-0">
+              <button aria-label="閉じる" onClick={closeAddModal} className="text-white/50 hover:text-white bg-white/5 hover:bg-white/10 rounded-full w-9 h-9 flex items-center justify-center transition-colors flex-shrink-0">
                 <span className="text-xl leading-none">&times;</span>
               </button>
             </div>
 
             <div className="p-6 space-y-5">
               <div className="space-y-2">
-                <label className="text-xs font-black text-white/40">種目名 <span className="text-red-400">*</span></label>
+                <label htmlFor="exercise-name" className="text-xs font-black text-white/60">種目名 <span className="text-red-400">*</span></label>
                 <input
                   type="text"
+                  id="exercise-name"
                   value={newExercise.name}
                   onChange={(e) => setNewExercise({ ...newExercise, name: e.target.value })}
                   placeholder="例: インクラインダンベルプレス"
@@ -447,8 +435,9 @@ export default function ExercisesPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div className="space-y-2">
-                  <label className="text-xs font-black text-white/40">メイン部位</label>
+                  <label htmlFor="exercise-primaryMuscle" className="text-xs font-black text-white/60">メイン部位</label>
                   <select
+                    id="exercise-primaryMuscle"
                     value={newExercise.primaryMuscle}
                     onChange={(e) => setNewExercise({ ...newExercise, primaryMuscle: e.target.value })}
                     className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
@@ -457,8 +446,9 @@ export default function ExercisesPage() {
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-black text-white/40">器具</label>
+                  <label htmlFor="exercise-equipment" className="text-xs font-black text-white/60">器具</label>
                   <select
+                    id="exercise-equipment"
                     value={newExercise.equipment}
                     onChange={(e) => setNewExercise({ ...newExercise, equipment: e.target.value })}
                     className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
@@ -467,8 +457,9 @@ export default function ExercisesPage() {
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-black text-white/40">分類</label>
+                  <label htmlFor="exercise-category" className="text-xs font-black text-white/60">分類</label>
                   <select
+                    id="exercise-category"
                     value={newExercise.category}
                     onChange={(e) => setNewExercise({ ...newExercise, category: e.target.value })}
                     className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
@@ -477,8 +468,9 @@ export default function ExercisesPage() {
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-black text-white/40">難易度</label>
+                  <label htmlFor="exercise-level" className="text-xs font-black text-white/60">難易度</label>
                   <select
+                    id="exercise-level"
                     value={newExercise.level}
                     onChange={(e) => setNewExercise({ ...newExercise, level: e.target.value })}
                     className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
@@ -491,9 +483,10 @@ export default function ExercisesPage() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-black text-white/40">サブ部位（任意・カンマ区切り）</label>
+                <label htmlFor="exercise-secondaryMuscles" className="text-xs font-black text-white/60">サブ部位（任意・カンマ区切り）</label>
                 <input
                   type="text"
+                  id="exercise-secondaryMuscles"
                   value={newExercise.secondaryMuscles}
                   onChange={(e) => setNewExercise({ ...newExercise, secondaryMuscles: e.target.value })}
                   placeholder="例: 肩, 上腕三頭筋"
@@ -502,8 +495,9 @@ export default function ExercisesPage() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-black text-white/40">手順メモ（任意・1行ずつ）</label>
+                <label htmlFor="exercise-instructions" className="text-xs font-black text-white/60">手順メモ（任意・1行ずつ）</label>
                 <textarea
+                  id="exercise-instructions"
                   value={newExercise.instructions}
                   onChange={(e) => setNewExercise({ ...newExercise, instructions: e.target.value })}
                   placeholder={"例:\nベンチを30度くらいにする\n胸を張って肩をすくめない\n最後までフォーム優先"}
@@ -534,8 +528,7 @@ export default function ExercisesPage() {
                 </button>
               </div>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
     </div>

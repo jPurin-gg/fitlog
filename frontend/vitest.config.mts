@@ -22,5 +22,11 @@ export default defineConfig({
     include: ["app/**/*.test.{ts,tsx}", "components/**/*.test.{ts,tsx}", "features/**/*.test.{ts,tsx}", "lib/**/*.test.{ts,tsx}"],
     setupFiles: ["./vitest.setup.ts"],
     restoreMocks: true,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "html", "lcov"],
+      include: ["components/**/*.{ts,tsx}", "features/**/*.{ts,tsx}", "hooks/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}"],
+      exclude: ["**/*.test.{ts,tsx}"],
+    },
   },
 });

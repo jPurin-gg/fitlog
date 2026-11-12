@@ -21,7 +21,7 @@ it("OFFでAI相談をせず、手動で種目を登録できる", async () => {
   server.use(http.post("http://localhost:3000/api/exercises", () => HttpResponse.json({ id: "manual", name: "自重スクワット" })));
   show(onReplace);
   expect(screen.getByRole("button", { name: "AIに代替種目を相談する" })).toBeDisabled();
-  await userEvent.type(screen.getByPlaceholderText("好きな種目名を入力"), "自重スクワット");
+  await userEvent.type(screen.getByRole("textbox", { name: "変更する種目名" }), "自重スクワット");
   await userEvent.click(screen.getByRole("button", { name: "決定" }));
   await waitFor(() => expect(onReplace).toHaveBeenCalledWith({ id: "manual", name: "自重スクワット" }));
 });

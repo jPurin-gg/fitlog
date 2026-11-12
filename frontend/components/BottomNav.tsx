@@ -33,7 +33,7 @@ export function BottomNav() {
                 className={`relative flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-[24px] transition-all duration-300 ${
                   isActive 
                     ? "text-primary bg-primary/10" 
-                    : "text-white/40 hover:text-white/70 hover:bg-white/5"
+                    : "text-white/60 hover:text-white/70 hover:bg-white/5"
                 }`}
               >
                 {isActive && (

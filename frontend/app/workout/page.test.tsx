@@ -97,8 +97,8 @@ describe("WorkoutPage record-first flow", () => {
 
     await user.click(screen.getByRole("button", { name: "AIを待たず次セットへ" }));
     expect(await screen.findByText("セット 2 / 3")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("80")).toHaveValue(60);
-    expect(screen.getByPlaceholderText("10")).toHaveValue(8);
+    expect(screen.getByRole("spinbutton", { name: "重量（kg）" })).toHaveValue(60);
+    expect(screen.getByRole("spinbutton", { name: "回数" })).toHaveValue(8);
 
     await act(async () => {
       recommendation.resolve(HttpResponse.json({
@@ -132,10 +132,10 @@ describe("WorkoutPage record-first flow", () => {
     await act(async () => { saved.resolve(HttpResponse.json({ id: 100 })); await saved.promise; });
     await screen.findByText(/セットは保存済みです/);
     expect(aiCalls).toBe(0);
-    expect(screen.getByPlaceholderText("80")).toHaveValue(60);
+    expect(screen.getByRole("spinbutton", { name: "重量（kg）" })).toHaveValue(60);
     await user.click(screen.getByRole("button", { name: "同じ内容で次へ" }));
     expect(screen.getByText("セット 2 / 3")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("80")).toHaveValue(60);
+    expect(screen.getByRole("spinbutton", { name: "重量（kg）" })).toHaveValue(60);
     await user.click(screen.getByRole("switch"));
     expect(requests).toBe(1);
     expect(aiCalls).toBe(0);
@@ -234,10 +234,10 @@ describe("WorkoutPage record-first flow", () => {
 
     await user.click(screen.getByRole("button", { name: "セットを保存" }));
     expect(await screen.findByText("セットを保存できませんでした")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("80")).toHaveValue(60);
-    expect(screen.getByPlaceholderText("80")).toBeDisabled();
-    expect(screen.getByPlaceholderText("10")).toHaveValue(8);
-    expect(screen.getByPlaceholderText("10")).toBeDisabled();
+    expect(screen.getByRole("spinbutton", { name: "重量（kg）" })).toHaveValue(60);
+    expect(screen.getByRole("spinbutton", { name: "重量（kg）" })).toBeDisabled();
+    expect(screen.getByRole("spinbutton", { name: "回数" })).toHaveValue(8);
+    expect(screen.getByRole("spinbutton", { name: "回数" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "終了" })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "セットの保存を再試行" }));
@@ -395,7 +395,7 @@ describe("WorkoutPage record-first flow", () => {
     const user = userEvent.setup();
     renderWorkout(false);
     await user.click(screen.getByRole("button", { name: "自分で種目を選んで始める" }));
-    await user.type(screen.getByPlaceholderText("種目名で検索..."), "スクワット");
+    await user.type(screen.getByRole("textbox", { name: "種目名で検索" }), "スクワット");
     await user.click(await screen.findByRole("button", { name: /^スクワット/ }));
     await screen.findByRole("heading", { name: "ワークアウト中" });
     expect(screen.getByRole("heading", { name: "スクワット" })).toBeInTheDocument();

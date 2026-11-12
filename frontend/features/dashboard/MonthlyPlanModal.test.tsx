@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { AISettingsProvider } from "@/components/AISettings";
+import { expectAccessible } from "@/test/a11y";
 import { MonthlyPlanModal } from "./DashboardPage";
 
 const server = setupServer();
@@ -25,6 +26,7 @@ it("案内を開くだけでは生成せず、ONにして明示的に作成で�
     return HttpResponse.json(plan);
   }));
   show(onPlanGenerated);
+  await expectAccessible(screen.getByRole("dialog", { name: "月間プラン" }));
   expect(screen.getByRole("button", { name: "決定してプランを作成" })).toBeDisabled();
   expect(calls).toBe(0);
   await userEvent.click(screen.getByRole("switch"));

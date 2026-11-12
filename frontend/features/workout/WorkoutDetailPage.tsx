@@ -50,7 +50,7 @@ export default function WorkoutDetailPage() {
 
       <main className="max-w-3xl mx-auto relative z-10">
         <header className="mb-8">
-          <Link href="/" className="w-11 h-11 glass rounded-2xl hover:bg-white/10 transition-colors flex items-center justify-center mb-5">
+          <Link aria-label="ホームへ戻る" href="/" className="w-11 h-11 glass rounded-2xl hover:bg-white/10 transition-colors flex items-center justify-center mb-5">
             <ArrowLeft className="w-5 h-5" />
           </Link>
           <p className="text-primary text-xs font-black tracking-widest mb-2">ワークアウト履歴</p>
@@ -72,12 +72,12 @@ export default function WorkoutDetailPage() {
         </header>
 
         {loading ? (
-          <div className="glass rounded-[32px] p-10 text-center text-white/45">
+          <div className="glass rounded-[32px] p-10 text-center text-white/60">
             <Loader2 className="w-7 h-7 animate-spin mx-auto mb-3" />
             履歴を読み込み中...
           </div>
         ) : error ? (
-          <div className="glass rounded-[32px] p-8 border border-red-500/20 bg-red-500/10">
+          <div role="alert" className="glass rounded-[32px] p-8 border border-red-500/20 bg-red-500/10">
             <p className="text-red-300 font-bold mb-2">エラーが発生しました</p>
             <p className="text-red-200/70 text-sm">{error}</p>
           </div>

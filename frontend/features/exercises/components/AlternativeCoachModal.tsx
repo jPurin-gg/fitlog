@@ -3,9 +3,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
 import { AIToggle, useAISettings } from "@/components/AISettings";
-import { motion } from "framer-motion";
 import { Loader2, X, MessageSquare, BrainCircuit, ArrowRight, AlertCircle } from "lucide-react";
-import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { Modal } from "@/components/Modal";
 import { apiErrorMessage, apiFetch } from "@/lib/api";
 
 export function AlternativeCoachModal({ exerciseId, exerciseName, scopeNote, onClose, onReplace }: any) {
@@ -31,8 +30,6 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, scopeNote, onC
     setResult(null);
     setAIError("");
   }, [aiEnabled]);
-
-  useBodyScrollLock();
 
   const fetchAlternatives = async () => {
     if (!isEnabled() || inFlightRef.current) return;
@@ -85,19 +82,11 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, scopeNote, onC
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center p-4 overflow-hidden overscroll-none">
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={onClose} />
-      
-      <motion.div 
-        role="dialog"
-        aria-modal="true"
-        aria-label="種目を変更"
-        initial={{ opacity: 0, y: 20, scale: 0.95 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+    <Modal label="種目を変更" onClose={onClose}
         className="w-full max-w-lg bg-[#111] border border-white/10 rounded-[32px] p-6 pb-24 lg:p-10 lg:pb-10 relative z-10 shadow-2xl max-h-[85vh] overflow-y-auto overscroll-contain"
       >
         <button 
+          aria-label="閉じる"
           onClick={onClose}
           className="absolute top-6 right-6 p-2 bg-white/5 rounded-full hover:bg-white/10 transition-colors"
         >
@@ -117,15 +106,16 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, scopeNote, onC
         {error && <p role="alert" className="mb-4 text-sm text-red-300">{error}</p>}
 
         <div className="bg-white/5 rounded-2xl p-4 mb-6 border border-white/5 flex items-center justify-between">
-          <div className="text-sm font-medium text-white/40">変更対象</div>
+          <div className="text-sm font-medium text-white/60">変更対象</div>
           <div className="text-lg font-black text-white">{exerciseName}</div>
         </div>
 
         {!aiEnabled || !result ? (
           <div className="space-y-6">
             <div className="space-y-3">
-              <label className="text-[12px] font-black text-white/40 ml-1">マシンが空いていないですか？</label>
+              <label htmlFor="replacement-reason" className="text-[12px] font-black text-white/60 ml-1">マシンが空いていないですか？</label>
               <textarea 
+                id="replacement-reason"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-primary/50 text-sm min-h-[100px]"
@@ -163,13 +153,14 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, scopeNote, onC
                 <div className="w-full border-t border-white/10"></div>
               </div>
               <div className="relative flex justify-center text-xs">
-                <span className="bg-[#111] px-2 text-white/40 font-bold tracking-widest">手動で変更する</span>
+                <span className="bg-[#111] px-2 text-white/60 font-bold tracking-widest">手動で変更する</span>
               </div>
             </div>
 
             <div className="flex gap-2">
               <input 
                 type="text" 
+                aria-label="変更する種目名"
                 value={customName}
                 onChange={(e) => setCustomName(e.target.value)}
                 className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-white/30 text-sm"
@@ -191,7 +182,7 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, scopeNote, onC
             </div>
 
             <div className="space-y-3">
-              <h4 className="text-[10px] font-black text-white/40 tracking-widest pl-1">候補種目</h4>
+              <h4 className="text-[10px] font-black text-white/60 tracking-widest pl-1">候補種目</h4>
               {result.alternatives.map((alt: any, idx: number) => (
                 <button 
                   key={idx}
@@ -210,6 +201,7 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, scopeNote, onC
             <div className="flex gap-2 mt-4">
               <input 
                 type="text" 
+                aria-label="変更する種目名"
                 value={customName}
                 onChange={(e) => setCustomName(e.target.value)}
                 className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-white/30 text-sm"
@@ -225,7 +217,6 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, scopeNote, onC
             </div>
           </div>
         )}
-      </motion.div>
-    </div>
+    </Modal>
   );
 }
