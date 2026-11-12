@@ -97,6 +97,9 @@ func validateSavedPlan(plan MonthlyPlan) error {
 	if len(plan.RecommendedDays) != len(plan.WeeklyRoutine) {
 		return apperr.Validation("実施曜日とルーティンの数を合わせてください。", map[string]string{"recommended_days": "must match weekly_routine"})
 	}
+	if len(NormalizeWeekdays(plan.RecommendedDays)) != len(plan.RecommendedDays) {
+		return apperr.Validation("実施曜日は0（日曜）から6（土曜）の重複しない値で指定してください。", map[string]string{"recommended_days": "must contain unique weekdays between 0 and 6"})
+	}
 	restDays := stringSetInts(plan.RestDays)
 	for _, day := range plan.RecommendedDays {
 		if restDays[day] {
@@ -109,6 +112,19 @@ func validateSavedPlan(plan MonthlyPlan) error {
 		}
 	}
 	return nil
+}
+
+// validateSavedPlanで検証した曜日とルーティンの対応を保ち、入力スライスを変更せず昇順にする。
+func normalizeMonthlySchedule(plan *MonthlyPlan) {
+	routinesByDay := make(map[int]DayRoutine, len(plan.RecommendedDays))
+	for index, day := range plan.RecommendedDays {
+		routinesByDay[day] = plan.WeeklyRoutine[index]
+	}
+	plan.RecommendedDays = NormalizeWeekdays(plan.RecommendedDays)
+	plan.WeeklyRoutine = make([]DayRoutine, len(plan.RecommendedDays))
+	for index, day := range plan.RecommendedDays {
+		plan.WeeklyRoutine[index] = routinesByDay[day]
+	}
 }
 
 func applyRestDays(plan *MonthlyPlan, restDays []int) {

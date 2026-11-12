@@ -19,6 +19,158 @@ import (
 	"github.com/jPurin-gg/myfitlog-backend/internal/requestctx"
 )
 
+func TestSaveMonthlyPreservesWeekdayRoutinePairs(t *testing.T) {
+	legs := DayRoutine{DayName: "脚の日", Target: "脚", ExampleExercises: []string{"スクワット"}, ExerciseIDs: []string{"squat"}}
+	chest := DayRoutine{DayName: "胸の日", Target: "胸", ExampleExercises: []string{"ベンチプレス"}, ExerciseIDs: []string{"bench"}}
+	fullBody := DayRoutine{DayName: "全身の日", Target: "全身", ExampleExercises: []string{"スクワット", "ベンチプレス"}, ExerciseIDs: []string{"squat", "bench"}}
+	tests := []struct {
+		name         string
+		days         []int
+		routines     []DayRoutine
+		wantDays     []int
+		wantRoutines []DayRoutine
+	}{
+		{name: "unsorted weekdays", days: []int{5, 1}, routines: []DayRoutine{legs, chest}, wantDays: []int{1, 5}, wantRoutines: []DayRoutine{chest, legs}},
+		{name: "already sorted weekdays", days: []int{1, 5}, routines: []DayRoutine{chest, legs}, wantDays: []int{1, 5}, wantRoutines: []DayRoutine{chest, legs}},
+		{name: "Sunday sorts before Monday", days: []int{5, 0, 1}, routines: []DayRoutine{legs, fullBody, chest}, wantDays: []int{0, 1, 5}, wantRoutines: []DayRoutine{fullBody, chest, legs}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+			repository := &monthlyRoutineRepository{newStartDailyRepository(now)}
+			service := NewService(repository, nil, nil, nil, clock.Fixed{Time: now}, time.Second)
+			input := MonthlyPlanInput{PlanName: "週のプラン", RecommendedDays: test.days, WeeklyRoutine: test.routines}
+			before, err := json.Marshal(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			result, err := service.SaveMonthly(context.Background(), 1, "2026-08", input)
+			if err != nil {
+				t.Fatalf("SaveMonthly() error = %v", err)
+			}
+			after, err := json.Marshal(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatalf("SaveMonthly() changed input: before = %s; after = %s", before, after)
+			}
+			assertMonthlyWeekdayRoutines(t, service, repository, result, test.wantDays, test.wantRoutines)
+		})
+	}
+}
+
+func TestSaveMonthlyRejectsAmbiguousWeekdays(t *testing.T) {
+	routine := DayRoutine{DayName: "胸の日", Target: "胸", ExampleExercises: []string{"ベンチプレス"}, ExerciseIDs: []string{"bench"}}
+	tests := []struct {
+		name         string
+		days         []int
+		routineCount int
+	}{
+		{name: "duplicate weekday", days: []int{1, 1}, routineCount: 2},
+		{name: "duplicate weekday with fewer routines", days: []int{1, 1}, routineCount: 1},
+		{name: "negative weekday", days: []int{-1}, routineCount: 1},
+		{name: "weekday above six", days: []int{7}, routineCount: 1},
+		{name: "invalid weekday with fewer routines", days: []int{7, 1}, routineCount: 1},
+		{name: "more weekdays than routines", days: []int{1, 5}, routineCount: 1},
+		{name: "more routines than weekdays", days: []int{1}, routineCount: 2},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+			repository := newStartDailyRepository(now)
+			service := NewService(repository, nil, nil, nil, clock.Fixed{Time: now}, time.Second)
+			routines := make([]DayRoutine, test.routineCount)
+			for index := range routines {
+				routines[index] = routine
+			}
+			_, err := service.SaveMonthly(context.Background(), 1, "2026-08", MonthlyPlanInput{PlanName: "週のプラン", RecommendedDays: test.days, WeeklyRoutine: routines})
+			if err == nil || apperr.As(err).Status != 400 || apperr.As(err).Code != apperr.CodeValidation {
+				t.Fatalf("SaveMonthly() error = %#v, want validation error", err)
+			}
+			if repository.saveMonthlyCalls != 0 {
+				t.Fatalf("SaveMonthly() stored invalid input %d times", repository.saveMonthlyCalls)
+			}
+		})
+	}
+}
+
+func TestGenerateMonthlyPreservesWeekdayRoutinePairs(t *testing.T) {
+	legs := DayRoutine{DayName: "脚の日", Target: "脚", ExampleExercises: []string{"スクワット"}, ExerciseIDs: []string{"squat"}}
+	chest := DayRoutine{DayName: "胸の日", Target: "胸", ExampleExercises: []string{"ベンチプレス"}, ExerciseIDs: []string{"bench"}}
+	encoded, err := json.Marshal(MonthlyPlan{
+		PlanName: "週のプラン", Description: "説明", Rationale: "理由",
+		RecommendedDays: []int{5, 1}, WeeklyRoutine: []DayRoutine{legs, chest},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	repository := &monthlyRoutineRepository{newStartDailyRepository(now)}
+	repository.candidates = []Candidate{
+		{ID: "bench", Name: "ベンチプレス", PrimaryMuscles: []string{"胸"}},
+		{ID: "squat", Name: "スクワット", PrimaryMuscles: []string{"脚"}},
+	}
+	aiClient := &stubPlanningAI{complete: func(context.Context, ai.Request) (string, error) { return string(encoded), nil }}
+	service := NewService(repository, stubPlanningPreferences{}, aiClient, stubPlanningPrompts{}, clock.Fixed{Time: now}, time.Second)
+
+	result, err := service.GenerateMonthly(context.Background(), 1, "2026-08", GenerateMonthlyInput{Frequency: "週2回"})
+	if err != nil {
+		t.Fatalf("GenerateMonthly() error = %v", err)
+	}
+	assertMonthlyWeekdayRoutines(t, service, repository, result, []int{1, 5}, []DayRoutine{chest, legs})
+}
+
+type monthlyRoutineRepository struct{ *startDailyRepository }
+
+func (r *monthlyRoutineRepository) Monthly(context.Context, int, string) (MonthlyPlan, error) {
+	return r.savedMonthly, nil
+}
+
+func (*monthlyRoutineRepository) ResolveExercise(_ context.Context, _ int, exerciseID, _ string) (ExerciseStats, string, error) {
+	names := map[string]string{"bench": "ベンチプレス", "squat": "スクワット"}
+	name, exists := names[exerciseID]
+	if !exists {
+		return ExerciseStats{}, "", ErrExerciseNotFound
+	}
+	return ExerciseStats{Name: name, TargetSets: 3, TargetWeight: 40, TargetReps: 10}, exerciseID, nil
+}
+
+func assertMonthlyWeekdayRoutines(t *testing.T, service *Service, repository *monthlyRoutineRepository, result MonthlyPlan, wantDays []int, wantRoutines []DayRoutine) {
+	t.Helper()
+	if repository.saveMonthlyCalls != 1 {
+		t.Fatalf("SaveMonthly() calls = %d, want 1", repository.saveMonthlyCalls)
+	}
+	monthly, err := service.Monthly(context.Background(), 1, "2026-08")
+	if err != nil {
+		t.Fatalf("Monthly() error = %v", err)
+	}
+	for name, plan := range map[string]MonthlyPlan{"returned": result, "stored": repository.savedMonthly, "reloaded": monthly} {
+		if !slices.Equal(plan.RecommendedDays, wantDays) || !reflect.DeepEqual(plan.WeeklyRoutine, wantRoutines) {
+			t.Errorf("%s monthly schedule = %v, %#v; want %v, %#v", name, plan.RecommendedDays, plan.WeeklyRoutine, wantDays, wantRoutines)
+		}
+	}
+	dates := map[int]string{0: "2026-08-23", 1: "2026-08-24", 5: "2026-08-28"}
+	for index, weekday := range wantDays {
+		daily, err := service.Daily(context.Background(), 1, dates[weekday])
+		if err != nil {
+			t.Fatalf("Daily(%s) error = %v", dates[weekday], err)
+		}
+		want := wantRoutines[index]
+		if daily.Status != "draft" || daily.Plan.Target != want.Target || daily.Plan.WorkoutTitle != want.Target {
+			t.Errorf("Daily(%s) = %#v, want draft for %q", dates[weekday], daily, want.Target)
+		}
+		ids := make([]string, len(daily.Plan.Exercises))
+		for index, exercise := range daily.Plan.Exercises {
+			ids[index] = exercise.ExerciseID
+		}
+		if !slices.Equal(ids, want.ExerciseIDs) {
+			t.Errorf("Daily(%s) exercise IDs = %v, want %v", dates[weekday], ids, want.ExerciseIDs)
+		}
+	}
+}
+
 func TestGenerateMonthlyLogsFinalFeatureOutcome(t *testing.T) {
 	validPlan := MonthlyPlan{
 		PlanName:        "週1回プラン",
