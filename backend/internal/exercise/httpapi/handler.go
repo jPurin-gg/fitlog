@@ -2,8 +2,11 @@ package httpapi
 
 import (
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
+	"github.com/jPurin-gg/myfitlog-backend/internal/apperr"
 	authhttp "github.com/jPurin-gg/myfitlog-backend/internal/auth/httpapi"
 	"github.com/jPurin-gg/myfitlog-backend/internal/exercise"
 	"github.com/jPurin-gg/myfitlog-backend/internal/httpx"
@@ -18,13 +21,35 @@ type alternativesRequest struct {
 func NewHandler(service *exercise.Service) *Handler { return &Handler{service: service} }
 
 func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	limit, err := nonNegativeQueryInt(query, "limit")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	offset, err := nonNegativeQueryInt(query, "offset")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	filters := exercise.Filters{
-		Name:      strings.TrimSpace(r.URL.Query().Get("name")),
-		Muscle:    strings.TrimSpace(r.URL.Query().Get("muscle")),
-		Equipment: splitCSV(r.URL.Query().Get("equipment")),
-		Level:     strings.TrimSpace(r.URL.Query().Get("level")),
+		Name:      strings.TrimSpace(query.Get("name")),
+		Muscles:   splitCSV(query.Get("muscle")),
+		Equipment: splitCSV(query.Get("equipment")),
+		Level:     strings.TrimSpace(query.Get("level")),
+		Limit:     limit,
+		Offset:    offset,
 	}
 	result, err := h.service.Search(r.Context(), filters)
+	httpx.Respond(w, r, http.StatusOK, result, err)
+}
+
+func (h *Handler) FilterOptions(w http.ResponseWriter, _ *http.Request) {
+	httpx.WriteJSON(w, http.StatusOK, h.service.FilterOptions())
+}
+
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	result, err := h.service.Get(r.Context(), r.PathValue("exerciseID"))
 	httpx.Respond(w, r, http.StatusOK, result, err)
 }
 
@@ -77,4 +102,18 @@ func splitCSV(value string) []string {
 		}
 	}
 	return result
+}
+
+// nonNegativeQueryInt returns 0 for an absent parameter so that the service
+// can apply its default.
+func nonNegativeQueryInt(query url.Values, name string) (int, error) {
+	raw := strings.TrimSpace(query.Get(name))
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return 0, apperr.Validation("limitとoffsetは0以上の整数で指定してください。", map[string]string{name: "must be a non-negative integer"})
+	}
+	return value, nil
 }
