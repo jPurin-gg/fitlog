@@ -1,5 +1,5 @@
 import React from "react";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -178,4 +178,63 @@ it("日付別APIが別のワークアウトを返してもそのセットを混�
   await screen.findByText("セット 3 / 3");
   expect(screen.getByRole("alert")).toHaveTextContent("当日の記録とワークアウトが一致しません。");
   expect(within(screen.getByRole("region", { name: "今日ここまでの記録" })).queryByRole("listitem")).not.toBeInTheDocument();
+});
+
+it("未保存の編集に離脱確認を出し、保存後と次セットの初期値には出さない", async () => {
+  const user = userEvent.setup();
+  const view = show();
+  await user.click(await screen.findByRole("button", { name: "ワークアウトを再開" }));
+  await screen.findByText("セット 3 / 3");
+  expect(fireEvent(window, new Event("beforeunload", { cancelable: true }))).toBe(true);
+  await user.type(screen.getByPlaceholderText("例: きつかった、まだ余裕がある、肩に違和感..."), "きつい");
+  expect(fireEvent(window, new Event("beforeunload", { cancelable: true }))).toBe(false);
+  expect(fireEvent.click(screen.getByRole("link", { name: "辞書へ" }))).toBe(false);
+  expect(window.confirm).toHaveBeenCalledOnce();
+  await user.click(screen.getByRole("button", { name: "セットを保存" }));
+  await screen.findByText(/セットは保存済みです/);
+  expect(fireEvent(window, new Event("beforeunload", { cancelable: true }))).toBe(true);
+  await user.click(screen.getByRole("button", { name: "同じ内容で次へ" }));
+  expect(fireEvent(window, new Event("beforeunload", { cancelable: true }))).toBe(true);
+  view.unmount();
+  expect(fireEvent(window, new Event("beforeunload", { cancelable: true }))).toBe(true);
+});
+
+it("保存の成否が不明なときは初期値のままでも離脱確認を維持する", async () => {
+  server.use(http.post(`${origin}/api/workouts/42/sets`, () => HttpResponse.error()));
+  const user = userEvent.setup();
+  show();
+  await user.click(await screen.findByRole("button", { name: "ワークアウトを再開" }));
+  await user.click(await screen.findByRole("button", { name: "セットを保存" }));
+  await screen.findByRole("button", { name: "セットの保存を再試行" });
+  expect(fireEvent(window, new Event("beforeunload", { cancelable: true }))).toBe(false);
+  expect(fireEvent.click(screen.getByRole("link", { name: "辞書へ" }))).toBe(false);
+  expect(screen.getByRole("button", { name: "終了" })).toBeDisabled();
+});
+
+it("種目検索で変更しても引き継いだ未保存入力の離脱確認を維持する", async () => {
+  server.use(
+    http.get(`${origin}/api/exercises/favorites`, () => HttpResponse.json([])),
+    http.get(`${origin}/api/exercises/recent`, () => HttpResponse.json([])),
+    http.get(`${origin}/api/exercises`, () => HttpResponse.json([{ id: "squat", name: "スクワット", category: "strength" }])),
+  );
+  const user = userEvent.setup();
+  show();
+  await user.click(await screen.findByRole("button", { name: "ワークアウトを再開" }));
+  await user.type(await screen.findByPlaceholderText("例: きつかった、まだ余裕がある、肩に違和感..."), "きつい");
+  await user.click(screen.getByRole("button", { name: "種目を検索して変更" }));
+  await user.type(screen.getByPlaceholderText("種目名で検索..."), "スクワット");
+  await user.click(await screen.findByRole("button", { name: /^スクワット/ }));
+  expect(screen.getByPlaceholderText("例: きつかった、まだ余裕がある、肩に違和感...")).toHaveValue("きつい");
+  expect(fireEvent(window, new Event("beforeunload", { cancelable: true }))).toBe(false);
+});
+
+it("未保存の入力を残した終了をキャンセルできる", async () => {
+  const user = userEvent.setup();
+  show();
+  await user.click(await screen.findByRole("button", { name: "ワークアウトを再開" }));
+  await user.type(await screen.findByPlaceholderText("例: きつかった、まだ余裕がある、肩に違和感..."), "きつい");
+  await user.click(screen.getByRole("button", { name: "終了" }));
+  expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("未保存の入力があります。"));
+  expect(screen.getByRole("heading", { name: "ワークアウト中" })).toBeInTheDocument();
+  expect(screen.getByPlaceholderText("例: きつかった、まだ余裕がある、肩に違和感...")).toHaveValue("きつい");
 });

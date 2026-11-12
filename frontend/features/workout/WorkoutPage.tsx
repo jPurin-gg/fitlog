@@ -24,6 +24,7 @@ import { ExerciseSelectorModal } from "@/features/exercises/components/ExerciseS
 import { WorkoutSummaryView, type WorkoutSummary } from "./components/WorkoutSummaryView";
 import { ApiError, apiErrorMessage } from "@/lib/api";
 import { displayPlanText, formatLocalDate } from "@/lib/fitlog";
+import { useUnsavedWorkoutWarning } from "@/hooks/useUnsavedWorkoutWarning";
 import { useTodayWorkout } from "./useTodayWorkout";
 import { initialRecordFlowState, recordFlowReducer } from "./workoutFlow";
 import { finishWorkoutSession, getSetRecommendation, getSummaryComment, getTargetSets, getWorkoutByDate, getWorkoutDetail, recordWorkoutSet, startWorkoutPlan, updateTargetSets } from "./api";
@@ -62,6 +63,7 @@ export default function WorkoutPage() {
   const [summaryCommentError, setSummaryCommentError] = React.useState<string | null>(null);
   const [currentSet, setCurrentSet] = React.useState(1);
   const [formData, setFormData] = React.useState({ weight: '', reps: '', feeling: '' });
+  const [inputChanged, setInputChanged] = React.useState(false);
   const [savedSets, setSavedSets] = React.useState<SavedWorkoutSet[]>([]);
   const [savedSetsError, setSavedSetsError] = React.useState<string | null>(null);
   const [workoutStarted, setWorkoutStarted] = React.useState(false);
@@ -96,6 +98,7 @@ export default function WorkoutPage() {
   const nextSetByExerciseRef = React.useRef<Record<string, number>>({});
   const savedSetsByExerciseRef = React.useRef<Record<string, number>>({});
   const recordTransitionLocked = saveState === "saving" || saveRetryLocked;
+  useUnsavedWorkoutWarning(workoutStarted && (inputChanged || recordTransitionLocked));
 
   React.useEffect(() => () => {
     startAbortRef.current?.abort();
@@ -171,6 +174,7 @@ export default function WorkoutPage() {
     setTempTargetSets(ex.planned_sets || 3);
     setCurrentSet(nextSetByExerciseRef.current[ex.exercise_id] || 1);
     resetSetFlow();
+    setInputChanged(false);
     setFormData({
       weight: ex.target_weight ? String(ex.target_weight) : '',
       reps: ex.target_reps ? String(ex.target_reps) : '',
@@ -339,6 +343,7 @@ export default function WorkoutPage() {
     }
 
     saveInFlightRef.current = true;
+    setInputChanged(true);
     dispatchRecordFlow({ type: "SAVE_STARTED" });
     setSaveError(null);
     setRecommendation(null);
@@ -354,6 +359,7 @@ export default function WorkoutPage() {
       );
       savedSetsByExerciseRef.current[currentExercise.id] = (savedSetsByExerciseRef.current[currentExercise.id] || 0) + 1;
       setSavedSets(previous => [...previous, { ...setInput, id: recorded.id, exercise_name: currentExercise.name }]);
+      setInputChanged(false);
       setSaveRetryLocked(false);
       dispatchRecordFlow({ type: "SAVE_SUCCEEDED" });
       void fetchRecommendation(workoutID, recorded.id);
@@ -388,6 +394,7 @@ export default function WorkoutPage() {
       setFormData({ ...formData, feeling: '' });
     }
     resetSetFlow();
+    setInputChanged(false);
   };
 
   const fetchSummaryComment = async (workoutID: number) => {
@@ -414,7 +421,9 @@ export default function WorkoutPage() {
 
   const finishWorkout = async () => {
     if (finishInFlightRef.current || saveInFlightRef.current || saveRetryLocked) return;
-    if (!window.confirm("ワークアウトを終了しますか？保存済みのセットで集計します。")) return;
+    if (!window.confirm(inputChanged
+      ? "未保存の入力があります。入力を破棄してワークアウトを終了しますか？保存済みのセットで集計します。"
+      : "ワークアウトを終了しますか？保存済みのセットで集計します。")) return;
     finishInFlightRef.current = true;
     setFinishing(true);
     setFinishError(null);
@@ -438,6 +447,7 @@ export default function WorkoutPage() {
         setSummaryCommentState("idle");
       }
       setWorkoutStarted(false);
+      setInputChanged(false);
       refreshTodayWorkout();
       setWorkoutPlan(null);
       setRecommendation(null);
@@ -815,7 +825,7 @@ export default function WorkoutPage() {
                   <input 
                     type="number" 
                     value={formData.weight}
-                    onChange={(e) => setFormData({...formData, weight: e.target.value})}
+                    onChange={(e) => { setFormData({...formData, weight: e.target.value}); setInputChanged(true); }}
                     disabled={recordTransitionLocked || saveState === "saved" || finishing}
                     className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-primary/50 text-2xl font-bold disabled:opacity-60"
                     placeholder="80"
@@ -826,7 +836,7 @@ export default function WorkoutPage() {
                   <input 
                     type="number" 
                     value={formData.reps}
-                    onChange={(e) => setFormData({...formData, reps: e.target.value})}
+                    onChange={(e) => { setFormData({...formData, reps: e.target.value}); setInputChanged(true); }}
                     disabled={recordTransitionLocked || saveState === "saved" || finishing}
                     className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-secondary/50 text-2xl font-bold disabled:opacity-60"
                     placeholder="10"
@@ -837,7 +847,7 @@ export default function WorkoutPage() {
                 <label className="text-[10px] font-black text-white/40 ml-1">セット後の感想</label>
                 <textarea 
                   value={formData.feeling}
-                  onChange={(e) => setFormData({...formData, feeling: e.target.value})}
+                  onChange={(e) => { setFormData({...formData, feeling: e.target.value}); setInputChanged(true); }}
                   disabled={recordTransitionLocked || saveState === "saved" || finishing}
                   className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-accent/50 text-sm min-h-[100px] disabled:opacity-60"
                   placeholder="例: きつかった、まだ余裕がある、肩に違和感..."
