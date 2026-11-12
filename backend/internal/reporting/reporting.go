@@ -3,6 +3,9 @@ package reporting
 import (
 	"context"
 	"fmt"
+	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jPurin-gg/myfitlog-backend/internal/apperr"
@@ -56,10 +59,21 @@ type Calendar struct {
 	PlannedDays    []PlannedDay   `json:"planned_days"`
 }
 
+// BodySummary carries the newest body measurements known for a user.
+// Pointers are nil when the user has not recorded that metric yet.
+type BodySummary struct {
+	WeightKg      *float64
+	PrevWeightKg  *float64
+	HeartRate     *int
+	PrevHeartRate *int
+}
+
 type Repository interface {
 	CloseStaleWorkouts(ctx context.Context, userID int, today time.Time) error
 	SetCounts(ctx context.Context, userID int, start, end time.Time) (map[string]int, error)
 	RecentWorkouts(ctx context.Context, userID int, limit int) ([]WorkoutRow, error)
+	WorkoutMinutes(ctx context.Context, userID int, start, end time.Time) (float64, error)
+	BodySummary(ctx context.Context, userID int) (BodySummary, error)
 	Calendar(ctx context.Context, userID, year, month int, timezone string) (Calendar, error)
 }
 
@@ -101,15 +115,108 @@ func (s *Service) Dashboard(ctx context.Context, userID int) (Dashboard, error) 
 		workoutType := DisplayWorkoutType(row.Notes)
 		recent = append(recent, RecentWorkout{ID: row.ID, Title: workoutType + "の記録", Type: workoutType, Duration: fmt.Sprintf("%.0f分", duration), Calories: fmt.Sprintf("%.0f kcal", duration*5), Time: row.Started.In(now.Location()).Format("15:04")})
 	}
+	stats, err := s.buildStats(ctx, userID, start, end)
+	if err != nil {
+		return Dashboard{}, apperr.Internal(err)
+	}
 	return Dashboard{
-		Stats: []Stat{
-			{Label: "消費カロリー", Value: "2,450", Unit: "kcal", Trend: "+12%"},
-			{Label: "心拍数", Value: "72", Unit: "bpm", Trend: "-2%"},
-			{Label: "活動時間", Value: "45", Unit: "分", Trend: "+5分"},
-			{Label: "体重", Value: "68.5", Unit: "kg", Trend: "-0.5kg"},
-		},
-		ChartData: chart, RecentWorkouts: recent,
+		Stats:          stats,
+		ChartData:      chart,
+		RecentWorkouts: recent,
 	}, nil
+}
+
+// buildStats derives every dashboard number from recorded data: workout
+// durations stored in the workouts table and body measurements the user
+// entered. Nothing here is a placeholder or a fixed constant. Metrics the
+// user has never recorded are omitted instead of being faked.
+func (s *Service) buildStats(ctx context.Context, userID int, start, end time.Time) ([]Stat, error) {
+	prevStart := start.AddDate(0, 0, -7)
+	minutes, err := s.repository.WorkoutMinutes(ctx, userID, start, end)
+	if err != nil {
+		return nil, err
+	}
+	prevMinutes, err := s.repository.WorkoutMinutes(ctx, userID, prevStart, start)
+	if err != nil {
+		return nil, err
+	}
+	stats := []Stat{
+		{Label: "消費カロリー", Value: formatThousands(int64(math.Round(minutes * 5))), Unit: "kcal", Trend: percentTrend(minutes, prevMinutes)},
+		{Label: "活動時間", Value: fmt.Sprintf("%.0f", minutes), Unit: "分", Trend: minutesTrend(minutes, prevMinutes)},
+	}
+	summary, err := s.repository.BodySummary(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if summary.WeightKg != nil {
+		trend := ""
+		if summary.PrevWeightKg != nil {
+			trend = kgTrend(*summary.WeightKg, *summary.PrevWeightKg)
+		}
+		stats = append(stats, Stat{Label: "体重", Value: strconv.FormatFloat(*summary.WeightKg, 'f', -1, 64), Unit: "kg", Trend: trend})
+	}
+	if summary.HeartRate != nil {
+		trend := ""
+		if summary.PrevHeartRate != nil {
+			trend = bpmTrend(*summary.HeartRate, *summary.PrevHeartRate)
+		}
+		stats = append(stats, Stat{Label: "心拍数", Value: strconv.Itoa(*summary.HeartRate), Unit: "bpm", Trend: trend})
+	}
+	return stats, nil
+}
+
+func formatThousands(value int64) string {
+	text := strconv.FormatInt(value, 10)
+	negative := strings.HasPrefix(text, "-")
+	if negative {
+		text = text[1:]
+	}
+	var grouped []string
+	for len(text) > 3 {
+		grouped = append([]string{text[len(text)-3:]}, grouped...)
+		text = text[:len(text)-3]
+	}
+	grouped = append([]string{text}, grouped...)
+	result := strings.Join(grouped, ",")
+	if negative {
+		return "-" + result
+	}
+	return result
+}
+
+func percentTrend(current, previous float64) string {
+	if previous <= 0 {
+		return ""
+	}
+	change := int64(math.Round((current - previous) / previous * 100))
+	if change == 0 {
+		return "±0%"
+	}
+	return fmt.Sprintf("%+d%%", change)
+}
+
+func minutesTrend(current, previous float64) string {
+	diff := int64(math.Round(current - previous))
+	if diff == 0 {
+		return "±0分"
+	}
+	return fmt.Sprintf("%+d分", diff)
+}
+
+func kgTrend(current, previous float64) string {
+	diff := math.Round((current-previous)*10) / 10
+	if diff == 0 {
+		return "±0.0kg"
+	}
+	return fmt.Sprintf("%+.1fkg", diff)
+}
+
+func bpmTrend(current, previous int) string {
+	diff := current - previous
+	if diff == 0 {
+		return "±0bpm"
+	}
+	return fmt.Sprintf("%+dbpm", diff)
 }
 
 func (s *Service) Calendar(ctx context.Context, userID, year, month int) (Calendar, error) {
