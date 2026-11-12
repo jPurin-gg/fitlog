@@ -33,6 +33,101 @@ function show() {
   return render(<AISettingsProvider userID={auth.user.id}><DashboardPage /></AISettingsProvider>);
 }
 
+function existingPlan() {
+  server.use(http.get("http://localhost:3000/api/monthly-plans/:month", () => HttpResponse.json({ recommended_days: [], weekly_routine: [] })));
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+it("記録の取得が500なら読み込みを終え、再試行で記録を表示する", async () => {
+  existingPlan();
+  const response = deferred<Response>();
+  let calls = 0;
+  server.use(http.get("http://localhost:3000/api/dashboard", () => {
+    calls++;
+    return calls === 1
+      ? HttpResponse.json({ detail: "記録を取得できませんでした。" }, { status: 500 })
+      : response.promise;
+  }));
+  show();
+  const error = await screen.findByRole("alert");
+  expect(error).toHaveTextContent("記録を取得できませんでした。");
+  expect(screen.queryByText("記録を読み込み中...")).not.toBeInTheDocument();
+  await userEvent.click(within(error).getByRole("button", { name: "再試行" }));
+  expect(await screen.findByText("記録を読み込み中...")).toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  response.resolve(HttpResponse.json({ recent_workouts: [{ id: 12, title: "胸の日", time: "昨日", duration: "30分" }] }));
+  expect(await screen.findByRole("link", { name: /胸の日/ })).toHaveAttribute("href", "/workouts/12");
+  expect(screen.queryByText("記録を読み込み中...")).not.toBeInTheDocument();
+  expect(calls).toBe(2);
+});
+
+it("設定の取得前・失敗時は保存できず、開いたまま再試行すると保存済みの値を使える", async () => {
+  existingPlan();
+  const response = deferred<Response>();
+  const savedPreferences = {
+    preferred_equipment: ["ダンベル"],
+    avoided_equipment: ["バーベル"],
+    training_environment: "家",
+    notes: "保存済みのメモ",
+  };
+  let calls = 0;
+  let savedBody: unknown;
+  server.use(
+    http.get("http://localhost:3000/api/preferences", () => {
+      calls++;
+      return calls === 1 ? response.promise : HttpResponse.json(savedPreferences);
+    }),
+    http.put("http://localhost:3000/api/preferences", async ({ request }) => {
+      savedBody = await request.json();
+      return HttpResponse.json(savedPreferences);
+    }),
+  );
+  show();
+  await userEvent.click(screen.getByRole("button", { name: "トレーニング設定" }));
+  const dialog = await screen.findByRole("dialog", { name: "トレーニング設定" });
+  expect(within(dialog).getByText("設定を読み込み中...")).toBeInTheDocument();
+  await userEvent.click(within(dialog).getByRole("button", { name: "保存する" }));
+  expect(within(dialog).getByRole("button", { name: "保存する" })).toBeDisabled();
+  expect(savedBody).toBeUndefined();
+
+  response.resolve(HttpResponse.json({ detail: "設定を取得できませんでした。" }, { status: 500 }));
+  const error = await within(dialog).findByRole("alert");
+  expect(error).toHaveTextContent("設定を取得できませんでした。");
+  expect(within(dialog).queryByText("設定を読み込み中...")).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "保存する" })).toBeDisabled();
+  await userEvent.click(within(dialog).getByRole("button", { name: "保存する" }));
+  expect(savedBody).toBeUndefined();
+
+  await userEvent.click(within(error).getByRole("button", { name: "再試行" }));
+  expect(await within(dialog).findByLabelText("メモ")).toHaveValue("保存済みのメモ");
+  expect(within(dialog).getByRole("button", { name: "家" })).toHaveAttribute("aria-pressed", "true");
+  expect(within(within(dialog).getByRole("group", { name: "優先する器具" })).getByRole("button", { name: "ダンベル" })).toHaveAttribute("aria-pressed", "true");
+  expect(within(within(dialog).getByRole("group", { name: "避けたい器具" })).getByRole("button", { name: "バーベル" })).toHaveAttribute("aria-pressed", "true");
+  expect(within(dialog).getByRole("button", { name: "保存する" })).toBeEnabled();
+  await userEvent.click(within(dialog).getByRole("button", { name: "保存する" }));
+  await waitFor(() => expect(savedBody).toEqual(savedPreferences));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
+
+it("設定を取得前に開いても、最初の取得が成功したら保存済みの値が入る", async () => {
+  existingPlan();
+  const response = deferred<Response>();
+  server.use(http.get("http://localhost:3000/api/preferences", () => response.promise));
+  show();
+  await userEvent.click(screen.getByRole("button", { name: "トレーニング設定" }));
+  const dialog = await screen.findByRole("dialog", { name: "トレーニング設定" });
+  expect(within(dialog).getByRole("button", { name: "保存する" })).toBeDisabled();
+  response.resolve(HttpResponse.json({ notes: "先に保存していた値", training_environment: "どちらも" }));
+  expect(await within(dialog).findByLabelText("メモ")).toHaveValue("先に保存していた値");
+  expect(within(dialog).getByRole("button", { name: "どちらも" })).toHaveAttribute("aria-pressed", "true");
+  expect(within(dialog).getByRole("button", { name: "保存する" })).toBeEnabled();
+});
+
 it("未作成の月の最初のホーム訪問で案内し、AI OFFのまま記録に進める", async () => {
   show();
   const dialog = await screen.findByRole("dialog", { name: "月間プラン" });

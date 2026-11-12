@@ -21,7 +21,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AlternativeCoachModal } from "@/features/exercises/components/AlternativeCoachModal";
 import { LogoutButton, useAuth } from "@/components/AuthGate";
 import { AIToggle, useAISettings } from "@/components/AISettings";
+import { ErrorMessage } from "@/components/ErrorMessage";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
 import { displayPlanText, formatPlanMonth } from "@/lib/fitlog";
 import { useMonthlyPromptDismissal } from "./useMonthlyPromptDismissal";
@@ -52,8 +54,9 @@ export default function DashboardPage() {
   const [showMonthlyModal, setShowMonthlyModal] = React.useState(false);
   const [showPreferencesModal, setShowPreferencesModal] = React.useState(false);
   const [monthlyPlan, setMonthlyPlan] = React.useState<any>(null);
-  const [preferences, setPreferences] = React.useState<any>(null);
-  const [dashboardData, setDashboardData] = React.useState<any>(null);
+  const preferencesQuery = useApiQuery<any>("/api/preferences", "設定の取得に失敗しました。", { scope: user.id });
+  const dashboardQuery = useApiQuery<any>("/api/dashboard", "記録の取得に失敗しました。", { scope: user.id });
+  const dashboardData = dashboardQuery.data;
   const [altModalData, setAltModalData] = React.useState<{dayIdx: number, exIdx: number, exName: string, exId?: string} | null>(null);
   const [today, setToday] = React.useState<Date | null>(null);
   const [currentMonth, setCurrentMonth] = React.useState(() => formatPlanMonth(new Date()));
@@ -109,18 +112,6 @@ export default function DashboardPage() {
 
   React.useEffect(() => {
     const controller = new AbortController();
-    apiFetch<any>("/api/dashboard")
-      .then(data => { if (!controller.signal.aborted) setDashboardData(data); })
-      .catch(err => { if (!controller.signal.aborted) console.error(err); });
-
-    apiFetch<any>("/api/preferences")
-      .then(data => { if (!controller.signal.aborted) setPreferences(data); })
-      .catch(err => { if (!controller.signal.aborted) console.error(err); });
-    return () => controller.abort();
-  }, [user.id]);
-
-  React.useEffect(() => {
-    const controller = new AbortController();
     setMonthlyPlan(null);
     setShowMonthlyModal(false);
     apiFetch<any>(`/api/monthly-plans/${currentMonth}`, { signal: controller.signal })
@@ -166,10 +157,11 @@ export default function DashboardPage() {
         )}
         {showPreferencesModal && (
           <TrainingPreferencesModal
-            initialPreferences={preferences}
+            key={user.id}
+            preferencesQuery={preferencesQuery}
             onClose={() => setShowPreferencesModal(false)}
             onSaved={(saved: any) => {
-              setPreferences(saved);
+              preferencesQuery.setData(saved);
               setShowPreferencesModal(false);
             }}
           />
@@ -228,6 +220,12 @@ export default function DashboardPage() {
             </Link>
           </div>
         </header>
+
+        {preferencesQuery.error && !showPreferencesModal && (
+          <div className="mb-6">
+            <ErrorMessage message={preferencesQuery.error} onRetry={preferencesQuery.retry} />
+          </div>
+        )}
 
         <div className="mb-6">
           <button
@@ -342,7 +340,15 @@ export default function DashboardPage() {
             </h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {dashboardData?.recent_workouts?.length > 0 ? dashboardData.recent_workouts.map((w: any) => (
+            {dashboardQuery.error ? (
+              <div className="col-span-full">
+                <ErrorMessage message={dashboardQuery.error} onRetry={dashboardQuery.retry} />
+              </div>
+            ) : dashboardQuery.status === "loading" ? (
+              <div role="status" className="col-span-full text-center py-6 text-white/30 text-sm flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> 記録を読み込み中...
+              </div>
+            ) : dashboardData?.recent_workouts?.length > 0 ? dashboardData.recent_workouts.map((w: any) => (
               <Link key={w.id} href={`/workouts/${w.id}`} className="bg-white/5 rounded-2xl p-5 border border-white/5 hover:bg-white/10 transition-colors group">
                 <div className="flex justify-between items-start gap-3 mb-1">
                   <h4 className="font-bold truncate">{w.title}</h4>
@@ -354,13 +360,9 @@ export default function DashboardPage() {
                   <span className="font-medium text-sm">{w.duration}</span>
                 </div>
               </Link>
-            )) : dashboardData ? (
+            )) : (
               <div className="col-span-full text-center py-8 text-white/40 text-sm bg-white/5 rounded-2xl border border-white/5">
                 まだ完了したワークアウトはありません。
-              </div>
-            ) : (
-              <div className="col-span-full text-center py-6 text-white/30 text-sm flex items-center justify-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" /> 記録を読み込み中...
               </div>
             )}
           </div>
@@ -371,9 +373,51 @@ export default function DashboardPage() {
 }
 
 
-function TrainingPreferencesModal({ initialPreferences, onClose, onSaved }: any) {
+function TrainingPreferencesModal({ preferencesQuery, onClose, onSaved }: any) {
   useBodyScrollLock();
 
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md overflow-hidden overscroll-none">
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-label="トレーニング設定"
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.9, y: 20 }}
+        className="glass border-secondary/20 w-full max-w-2xl rounded-[32px] overflow-hidden relative shadow-2xl shadow-secondary/10 max-h-[90vh] overflow-y-auto overscroll-contain"
+      >
+        <button onClick={onClose} aria-label="閉じる" className="absolute top-6 right-6 p-2 bg-white/5 rounded-full hover:bg-white/10 transition z-10 text-white/60 hover:text-white">
+          <X className="w-5 h-5" />
+        </button>
+
+        <div className="p-8 pb-28 sm:pb-8">
+          <div className="w-16 h-16 bg-secondary/20 rounded-2xl flex items-center justify-center mb-6">
+            <Settings className="w-8 h-8 text-secondary" />
+          </div>
+          <h2 className="text-2xl font-bold mb-2">トレーニング設定</h2>
+          <p className="text-white/60 text-sm mb-6 leading-relaxed">
+            AIが月間プランを作る時に参照します。よく使う器具や避けたい器具を入れておくと、現実にやりやすいメニューになります。
+          </p>
+          {preferencesQuery.status === "success" ? (
+            <TrainingPreferencesForm initialPreferences={preferencesQuery.data} onClose={onClose} onSaved={onSaved} />
+          ) : (
+            <div className="space-y-6">
+              {preferencesQuery.error ? (
+                <ErrorMessage message={preferencesQuery.error} onRetry={preferencesQuery.retry} />
+              ) : (
+                <p role="status" className="text-white/60">設定を読み込み中...</p>
+              )}
+              <button disabled className="w-full py-4 bg-secondary text-black font-black rounded-2xl opacity-50">保存する</button>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function TrainingPreferencesForm({ initialPreferences, onClose, onSaved }: any) {
   const [preferredEquipment, setPreferredEquipment] = React.useState<string[]>(initialPreferences?.preferred_equipment || []);
   const [avoidedEquipment, setAvoidedEquipment] = React.useState<string[]>(initialPreferences?.avoided_equipment || []);
   const [trainingEnvironment, setTrainingEnvironment] = React.useState(initialPreferences?.training_environment || "ジム");
@@ -422,107 +466,89 @@ function TrainingPreferencesModal({ initialPreferences, onClose, onSaved }: any)
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md overflow-hidden overscroll-none">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="glass border-secondary/20 w-full max-w-2xl rounded-[32px] overflow-hidden relative shadow-2xl shadow-secondary/10 max-h-[90vh] overflow-y-auto overscroll-contain"
-      >
-        <button onClick={onClose} className="absolute top-6 right-6 p-2 bg-white/5 rounded-full hover:bg-white/10 transition z-10 text-white/60 hover:text-white">
-          <X className="w-5 h-5" />
-        </button>
-
-        <div className="p-8 pb-28 sm:pb-8">
-          <div className="w-16 h-16 bg-secondary/20 rounded-2xl flex items-center justify-center mb-6">
-            <Settings className="w-8 h-8 text-secondary" />
-          </div>
-          <h2 className="text-2xl font-bold mb-2">トレーニング設定</h2>
-          <p className="text-white/60 text-sm mb-6 leading-relaxed">
-            AIが月間プランを作る時に参照します。よく使う器具や避けたい器具を入れておくと、現実にやりやすいメニューになります。
-          </p>
-
-          <div className="space-y-6 mb-8">
-            <div className="space-y-3">
-              <label className="text-xs font-black tracking-widest text-white/40 ml-1">トレーニング環境</label>
-              <div className="grid grid-cols-3 gap-2">
-                {ENVIRONMENT_OPTIONS.map(option => (
-                  <button
-                    key={option}
-                    onClick={() => setTrainingEnvironment(option)}
-                    className={`py-3 px-2 rounded-2xl border text-center font-bold text-sm transition-all ${
-                      trainingEnvironment === option
-                        ? 'bg-secondary/20 border-secondary text-secondary'
-                        : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'
-                    }`}
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <EquipmentPicker
-              label="優先する器具"
-              selected={preferredEquipment}
-              onToggle={togglePreferred}
-              activeClassName="bg-primary/20 border-primary text-primary"
-            />
-
-            <EquipmentPicker
-              label="避けたい器具"
-              selected={avoidedEquipment}
-              onToggle={toggleAvoided}
-              activeClassName="bg-red-500/20 border-red-500/40 text-red-200"
-            />
-
-            <div className="space-y-2">
-              <label className="text-xs font-black tracking-widest text-white/40 ml-1">メモ</label>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full min-h-[110px] bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-secondary/50 text-sm"
-                placeholder="例: スミスマシンはよく空いてる、懸垂バーなし、脚の日はマシン多めがいい"
-              />
-            </div>
-          </div>
-
-          {error && (
-            <div className="mb-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200 whitespace-pre-line">
-              {error}
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <button
-              onClick={onClose}
-              className="py-4 bg-white/10 text-white font-bold rounded-2xl hover:bg-white/15 transition-all"
-            >
-              キャンセル
-            </button>
-            <button
-              onClick={save}
-              disabled={saving}
-              className="py-4 bg-secondary text-black font-black rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
-            >
-              {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Settings className="w-5 h-5" />}
-              保存する
-            </button>
+    <>
+      <div className="space-y-6 mb-8">
+        <div className="space-y-3">
+          <label className="text-xs font-black tracking-widest text-white/40 ml-1">トレーニング環境</label>
+          <div className="grid grid-cols-3 gap-2">
+            {ENVIRONMENT_OPTIONS.map(option => (
+              <button
+                key={option}
+                aria-pressed={trainingEnvironment === option}
+                onClick={() => setTrainingEnvironment(option)}
+                className={`py-3 px-2 rounded-2xl border text-center font-bold text-sm transition-all ${
+                  trainingEnvironment === option
+                    ? 'bg-secondary/20 border-secondary text-secondary'
+                    : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'
+                }`}
+              >
+                {option}
+              </button>
+            ))}
           </div>
         </div>
-      </motion.div>
-    </div>
+
+        <EquipmentPicker
+          label="優先する器具"
+          selected={preferredEquipment}
+          onToggle={togglePreferred}
+          activeClassName="bg-primary/20 border-primary text-primary"
+        />
+
+        <EquipmentPicker
+          label="避けたい器具"
+          selected={avoidedEquipment}
+          onToggle={toggleAvoided}
+          activeClassName="bg-red-500/20 border-red-500/40 text-red-200"
+        />
+
+        <div className="space-y-2">
+          <label htmlFor="training-notes" className="text-xs font-black tracking-widest text-white/40 ml-1">メモ</label>
+          <textarea
+            id="training-notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className="w-full min-h-[110px] bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-secondary/50 text-sm"
+            placeholder="例: スミスマシンはよく空いてる、懸垂バーなし、脚の日はマシン多めがいい"
+          />
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-6">
+          <ErrorMessage message={error} />
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <button
+          onClick={onClose}
+          className="py-4 bg-white/10 text-white font-bold rounded-2xl hover:bg-white/15 transition-all"
+        >
+          キャンセル
+        </button>
+        <button
+          onClick={save}
+          disabled={saving}
+          className="py-4 bg-secondary text-black font-black rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
+        >
+          {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Settings className="w-5 h-5" />}
+          保存する
+        </button>
+      </div>
+    </>
   );
 }
 
 function EquipmentPicker({ label, selected, onToggle, activeClassName }: any) {
   return (
-    <div className="space-y-3">
+    <div role="group" aria-label={label} className="space-y-3">
       <label className="text-xs font-black tracking-widest text-white/40 ml-1">{label}</label>
       <div className="flex flex-wrap gap-2">
         {EQUIPMENT_OPTIONS.map(equipment => (
           <button
             key={equipment}
+            aria-pressed={selected.includes(equipment)}
             onClick={() => onToggle(equipment)}
             className={`px-4 py-2 rounded-xl border text-sm font-bold transition-all ${
               selected.includes(equipment)
