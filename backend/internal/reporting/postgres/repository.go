@@ -74,6 +74,73 @@ func (r *Repository) RecentWorkouts(ctx context.Context, userID int, limit int) 
 	return result, rows.Err()
 }
 
+func (r *Repository) WorkoutMinutes(ctx context.Context, userID int, start, end time.Time) (float64, error) {
+	var minutes float64
+	err := r.db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - started_at)) / 60), 0)
+		FROM workouts
+		WHERE user_id = $1 AND ended_at IS NOT NULL AND started_at >= $2 AND started_at < $3
+	`, userID, start, end).Scan(&minutes)
+	return minutes, err
+}
+
+func (r *Repository) BodySummary(ctx context.Context, userID int) (reporting.BodySummary, error) {
+	summary := reporting.BodySummary{}
+	weightRows, err := r.db.QueryContext(ctx, `
+		SELECT weight_kg FROM body_measurements
+		WHERE user_id = $1
+		ORDER BY measured_on DESC, id DESC LIMIT 2
+	`, userID)
+	if err != nil {
+		return summary, err
+	}
+	defer weightRows.Close()
+	weights := []float64{}
+	for weightRows.Next() {
+		var weight float64
+		if err := weightRows.Scan(&weight); err != nil {
+			return summary, err
+		}
+		weights = append(weights, weight)
+	}
+	if err := weightRows.Err(); err != nil {
+		return summary, err
+	}
+	if len(weights) > 0 {
+		summary.WeightKg = &weights[0]
+	}
+	if len(weights) > 1 {
+		summary.PrevWeightKg = &weights[1]
+	}
+	heartRows, err := r.db.QueryContext(ctx, `
+		SELECT resting_heart_rate FROM body_measurements
+		WHERE user_id = $1 AND resting_heart_rate IS NOT NULL
+		ORDER BY measured_on DESC, id DESC LIMIT 2
+	`, userID)
+	if err != nil {
+		return summary, err
+	}
+	defer heartRows.Close()
+	heartRates := []int{}
+	for heartRows.Next() {
+		var rate int
+		if err := heartRows.Scan(&rate); err != nil {
+			return summary, err
+		}
+		heartRates = append(heartRates, rate)
+	}
+	if err := heartRows.Err(); err != nil {
+		return summary, err
+	}
+	if len(heartRates) > 0 {
+		summary.HeartRate = &heartRates[0]
+	}
+	if len(heartRates) > 1 {
+		summary.PrevHeartRate = &heartRates[1]
+	}
+	return summary, nil
+}
+
 func (r *Repository) Calendar(ctx context.Context, userID, year, month int, timezone string) (reporting.Calendar, error) {
 	result := reporting.Calendar{WorkedOutDates: []int{}, WorkedOutDays: []reporting.WorkedOutDay{}, PlannedDays: []reporting.PlannedDay{}}
 	rows, err := r.db.QueryContext(ctx, `
