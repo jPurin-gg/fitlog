@@ -1,11 +1,11 @@
 import React from "react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 
-import { CalendarPlanEditor } from "@/features/calendar/CalendarPage";
+import { CalendarPlanEditor, CalendarWorkoutEditor } from "@/features/calendar/CalendarPage";
 
 const apiOrigin = "http://localhost:3000";
 const server = setupServer();
@@ -13,6 +13,44 @@ const server = setupServer();
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
+
+it("既存の記録を直すとき、保存済みセットのIDを付けて送る", async () => {
+  let savedBody: Record<string, unknown> | undefined;
+  const onSaved = vi.fn();
+  server.use(
+    http.get(`${apiOrigin}/api/workouts/by-date/2026-08-24`, () => HttpResponse.json({
+      workout_id: 42,
+      date: "2026-08-24",
+      title: "胸の日",
+      sets: [
+        { id: 101, exercise_id: "bench", exercise_name: "ベンチプレス", weight: 60, reps: 10, set_order: 1, feeling: "普通" },
+        { id: 102, exercise_id: "bench", exercise_name: "ベンチプレス", weight: 60, reps: 8, set_order: 2, feeling: "重い" },
+      ],
+    })),
+    http.put(`${apiOrigin}/api/workouts/by-date/2026-08-24`, async ({ request }) => {
+      savedBody = await request.json() as Record<string, unknown>;
+      return HttpResponse.json({ workout_id: 42, date: "2026-08-24", title: "胸の日", sets: [] });
+    }),
+  );
+
+  const user = userEvent.setup();
+  render(<CalendarWorkoutEditor date="2026-08-24" onClose={() => undefined} onSaved={onSaved} />);
+
+  // 2セット目の回数だけを直す。IDがあれば、サーバーは開始・終了時刻や記録時刻を保ったまま更新できる。
+  const reps = await screen.findAllByLabelText("回数");
+  await user.clear(reps[1]);
+  await user.type(reps[1], "9");
+  await user.click(screen.getByRole("button", { name: "保存" }));
+
+  await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+  expect(savedBody).toEqual({
+    title: "胸の日",
+    sets: [
+      { id: 101, exercise_id: "bench", weight: 60, reps: 10, set_order: 1, feeling: "普通" },
+      { id: 102, exercise_id: "bench", weight: 60, reps: 9, set_order: 2, feeling: "重い" },
+    ],
+  });
+});
 
 it("未来の予定を編集し、画面の値を日次プランとして保存する", async () => {
   let savedBody: Record<string, unknown> | undefined;
