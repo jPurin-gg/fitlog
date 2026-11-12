@@ -324,16 +324,11 @@ func (r *Repository) SaveCalendarWorkout(ctx context.Context, userID int, date t
 	}
 	for index, set := range input.Sets {
 		impacted[set.ExerciseID] = true
-		var maxWeight float64
-		_ = tx.QueryRowContext(ctx, `
-			SELECT COALESCE(MAX(ws.weight),0) FROM workout_sets ws JOIN workouts w ON w.id=ws.workout_id
-			WHERE w.user_id=$1 AND ws.exercise_id=$2
-		`, userID, set.ExerciseID).Scan(&maxWeight)
 		createdAt := startedAt.Add(time.Duration(index) * time.Minute)
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO workout_sets (workout_id,exercise_id,weight,reps,set_order,feeling,is_pr,created_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-		`, workoutID, set.ExerciseID, set.Weight, set.Reps, set.SetOrder, set.Feeling, set.Weight > maxWeight, createdAt); err != nil {
+			INSERT INTO workout_sets (workout_id,exercise_id,weight,reps,set_order,feeling,created_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
+		`, workoutID, set.ExerciseID, set.Weight, set.Reps, set.SetOrder, set.Feeling, createdAt); err != nil {
 			return workout.CalendarWorkout{}, err
 		}
 	}
@@ -447,6 +442,22 @@ func scanHistory(rows *sql.Rows) ([]workout.HistorySet, error) {
 }
 
 func recalculateStats(ctx context.Context, tx *sql.Tx, userID int, exerciseID string) error {
+	// A PR records an improvement at that time, so compare only with earlier sets.
+	if _, err := tx.ExecContext(ctx, `
+		WITH ordered_sets AS (
+			SELECT ws.id,ws.weight > COALESCE(MAX(ws.weight) OVER (
+				ORDER BY w.started_at,ws.created_at,ws.id
+				ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+			),0) AS is_pr
+			FROM workout_sets ws JOIN workouts w ON w.id=ws.workout_id
+			WHERE w.user_id=$1 AND ws.exercise_id=$2
+		)
+		UPDATE workout_sets ws SET is_pr=ordered_sets.is_pr
+		FROM ordered_sets WHERE ws.id=ordered_sets.id
+		  AND ws.is_pr IS DISTINCT FROM ordered_sets.is_pr
+	`, userID, exerciseID); err != nil {
+		return err
+	}
 	var latestWeight, maxWeight float64
 	err := tx.QueryRowContext(ctx, `
 		SELECT latest.weight,stats.max_weight FROM (
