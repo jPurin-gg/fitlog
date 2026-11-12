@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlternativeCoachModal } from "@/features/exercises/components/AlternativeCoachModal";
+import { useExerciseFilterOptions } from "@/features/exercises/useExerciseFilterOptions";
 import { LogoutButton, useAuth } from "@/components/AuthGate";
 import { AIToggle, useAISettings } from "@/components/AISettings";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
@@ -36,7 +37,6 @@ const WEEKDAY_OPTIONS = [
   { value: 6, label: "土" },
 ];
 
-const EQUIPMENT_OPTIONS = ["ダンベル", "バーベル", "マシン", "ケーブル", "自重", "チューブ・バンド", "ケトルベル", "メディシンボール", "EZバー", "その他"];
 const ENVIRONMENT_OPTIONS = ["ジム", "家", "どちらも"];
 
 function weekdayLabels(days?: number[]) {
@@ -380,6 +380,10 @@ function TrainingPreferencesModal({ initialPreferences, onClose, onSaved }: any)
   const [notes, setNotes] = React.useState(initialPreferences?.notes || "");
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState("");
+  // 器具は種目辞書と同じ選択肢を使う。月間プランは種目の器具名との一致で候補を絞るため、表記をそろえる必要がある。
+  const filterOptions = useExerciseFilterOptions();
+  // 選択肢にない保存済みの値も、外せるように表示する。
+  const equipmentChoices = [...new Set<string>([...filterOptions.equipment, ...preferredEquipment, ...avoidedEquipment])];
 
   const togglePreferred = (equipment: string) => {
     setPreferredEquipment(prev => (
@@ -462,8 +466,18 @@ function TrainingPreferencesModal({ initialPreferences, onClose, onSaved }: any)
               </div>
             </div>
 
+            {filterOptions.status === "error" && (
+              <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                <span>器具の選択肢を取得できませんでした。</span>
+                <button onClick={filterOptions.retry} className="font-bold underline hover:text-white">
+                  選択肢を再取得
+                </button>
+              </div>
+            )}
+
             <EquipmentPicker
               label="優先する器具"
+              options={equipmentChoices}
               selected={preferredEquipment}
               onToggle={togglePreferred}
               activeClassName="bg-primary/20 border-primary text-primary"
@@ -471,6 +485,7 @@ function TrainingPreferencesModal({ initialPreferences, onClose, onSaved }: any)
 
             <EquipmentPicker
               label="避けたい器具"
+              options={equipmentChoices}
               selected={avoidedEquipment}
               onToggle={toggleAvoided}
               activeClassName="bg-red-500/20 border-red-500/40 text-red-200"
@@ -515,12 +530,12 @@ function TrainingPreferencesModal({ initialPreferences, onClose, onSaved }: any)
   );
 }
 
-function EquipmentPicker({ label, selected, onToggle, activeClassName }: any) {
+function EquipmentPicker({ label, options, selected, onToggle, activeClassName }: any) {
   return (
     <div className="space-y-3">
       <label className="text-xs font-black tracking-widest text-white/40 ml-1">{label}</label>
       <div className="flex flex-wrap gap-2">
-        {EQUIPMENT_OPTIONS.map(equipment => (
+        {options.map((equipment: string) => (
           <button
             key={equipment}
             onClick={() => onToggle(equipment)}

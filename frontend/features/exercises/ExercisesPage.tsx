@@ -3,17 +3,10 @@
 import React, { useState, useEffect } from 'react'
 import { Search, Filter, Dumbbell, Activity, Shield, Plus, Loader2 } from 'lucide-react'
 import { apiErrorMessage, apiFetch } from '@/lib/api'
-import type { Exercise } from './types'
-
-// 今回のマスターデータ（tmpkin_jp.jsonベース）の構造
-const MUSCLE_GROUPS = [
-  "すべて", "大胸筋", "背中中部", "広背筋", "下背部", "肩", "上腕二頭筋", "上腕三頭筋", 
-  "前腕", "腹筋", "大臀筋", "大腿四頭筋", "ハムストリングス", "ふくらはぎ", "首", "僧帽筋"
-]
-
-const EQUIPMENTS = [
-  "自重", "ダンベル", "バーベル", "マシン", "ケーブル", "バンド", "ケトルベル", "メディシンボール", "バランスボール", "その他"
-]
+import { getExercise } from './api'
+import type { Exercise, ExerciseSummary } from './types'
+import { useExerciseFilterOptions } from './useExerciseFilterOptions'
+import { useExerciseSearch } from './useExerciseSearch'
 
 const CATEGORY_OPTIONS = [
   { value: "strength", label: "筋力トレーニング" },
@@ -48,23 +41,66 @@ const EXERCISE_LABELS: Record<string, string> = {
   static: "静止",
 }
 
-function displayExerciseLabel(value?: string) {
+function displayExerciseLabel(value?: string | null) {
   if (!value) return ""
   return EXERCISE_LABELS[value] || value
 }
 
+// 選択肢の取得前や取得失敗時でも、フォームの現在値を選択できる状態に保つ
+function withCurrent(options: string[], current: string) {
+  return options.includes(current) ? options : [current, ...options]
+}
+
+const DETAIL_ERROR_MESSAGE = '種目の詳細を取得できませんでした。通信状況を確認して、もう一度お試しください。'
+
+function useExerciseDetail(exerciseID: string | undefined) {
+  const [state, setState] = useState<{ id: string; exercise: Exercise | null; error: string }>({ id: '', exercise: null, error: '' })
+  const [reloadToken, setReloadToken] = useState(0)
+
+  useEffect(() => {
+    if (!exerciseID) return
+    const controller = new AbortController()
+    setState({ id: exerciseID, exercise: null, error: '' })
+    getExercise(exerciseID, controller.signal)
+      .then(exercise => {
+        if (!controller.signal.aborted) setState({ id: exerciseID, exercise, error: '' })
+      })
+      .catch(error => {
+        if (!controller.signal.aborted) setState({ id: exerciseID, exercise: null, error: apiErrorMessage(error, DETAIL_ERROR_MESSAGE) })
+      })
+    return () => controller.abort()
+  }, [exerciseID, reloadToken])
+
+  // 別の種目を開いた直後に、前の種目の詳細を表示しない
+  const current = state.id === exerciseID
+  return {
+    exercise: current ? state.exercise : null,
+    error: current ? state.error : '',
+    retry: () => setReloadToken(token => token + 1),
+  }
+}
+
 export default function ExercisesPage() {
-  const [exercises, setExercises] = useState<Exercise[]>([])
   const [muscle, setMuscle] = useState('すべて')
   const [difficulty, setDifficulty] = useState('すべて')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedEquipments, setSelectedEquipments] = useState<string[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null)
+  const [selectedExercise, setSelectedExercise] = useState<ExerciseSummary | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [isAdding, setIsAdding] = useState(false)
   const [addError, setAddError] = useState('')
-  const [reloadToken, setReloadToken] = useState(0)
+  // 器具・部位の選択肢は、種目カタログと同じ表記でAPIが返す
+  const filterOptions = useExerciseFilterOptions()
+  const muscleOptions = filterOptions.muscleCategories.flatMap(category => category.muscles)
+  const search = useExerciseSearch({
+    name: searchQuery,
+    muscles: muscle === 'すべて' ? [] : [muscle],
+    equipment: selectedEquipments,
+    level: difficulty === 'すべて' ? '' : difficulty,
+  })
+  const exercises = search.items
+  // 手順文は一覧に含まれないため、詳細を開いたときに取得する
+  const detail = useExerciseDetail(selectedExercise?.id)
   const [newExercise, setNewExercise] = useState({
     name: '',
     primaryMuscle: '大胸筋',
@@ -82,28 +118,6 @@ export default function ExercisesPage() {
       setSelectedEquipments([...selectedEquipments, eq])
     }
   }
-
-  useEffect(() => {
-    const fetchExercises = async () => {
-      setIsLoading(true)
-      try {
-        const params = new URLSearchParams()
-        if (muscle !== 'すべて') params.set('muscle', muscle)
-        if (difficulty !== 'すべて') params.set('level', difficulty)
-        if (searchQuery.trim()) params.set('name', searchQuery.trim())
-        if (selectedEquipments.length > 0) params.set('equipment', selectedEquipments.join(','))
-        const qs = params.toString()
-        const data = await apiFetch<Exercise[]>(`/api/exercises${qs ? '?' + qs : ''}`)
-        setExercises(data || [])
-      } catch (e) {
-        console.error("Failed to fetch exercises", e)
-      }
-      setIsLoading(false)
-    }
-    // 入力中に毎回叩かないよう 300ms debounce
-    const timer = setTimeout(fetchExercises, 300)
-    return () => clearTimeout(timer)
-  }, [muscle, difficulty, searchQuery, selectedEquipments, reloadToken])
 
   // モーダルが開いている間は背景のスクロールを無効化する（UX改善）
   useEffect(() => {
@@ -163,9 +177,8 @@ export default function ExercisesPage() {
           instructions,
         })
       })
-      setExercises(prev => [created, ...prev])
       setSelectedExercise(created)
-      setReloadToken(prev => prev + 1)
+      search.reload()
       closeAddModal()
     } catch (e) {
       console.error(e)
@@ -214,7 +227,7 @@ export default function ExercisesPage() {
           
           <div className="flex overflow-x-auto pb-2 gap-2 hide-scrollbar">
             <div className="flex items-center text-white/40 text-xs font-bold whitespace-nowrap mr-2"><Activity className="w-4 h-4 mr-1"/> 部位:</div>
-            {MUSCLE_GROUPS.map(m => (
+            {['すべて', ...muscleOptions].map(m => (
               <button
                 key={m}
                 onClick={() => setMuscle(m)}
@@ -248,13 +261,13 @@ export default function ExercisesPage() {
 
           <div className="flex overflow-x-auto pb-2 gap-2 hide-scrollbar">
             <div className="flex items-center text-white/40 text-xs font-bold whitespace-nowrap mr-2"><Dumbbell className="w-4 h-4 mr-1"/> 器具:</div>
-            {EQUIPMENTS.map(eq => (
+            {filterOptions.equipment.map(eq => (
               <button
                 key={eq}
                 onClick={() => toggleEquipment(eq)}
                 className={`whitespace-nowrap px-4 py-2 text-sm rounded-xl font-medium transition-all border flex-shrink-0 ${
                   selectedEquipments.includes(eq)
-                  ? 'bg-accent text-white border-accent font-bold shadow-[0_0_15px_rgba(255,50,50,0.3)]' 
+                  ? 'bg-accent text-white border-accent font-bold shadow-[0_0_15px_rgba(255,50,50,0.3)]'
                   : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10 hover:text-white'
                 }`}
               >
@@ -262,12 +275,33 @@ export default function ExercisesPage() {
               </button>
             ))}
           </div>
+
+          {filterOptions.status === 'error' && (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+              <span>部位・器具の選択肢を取得できませんでした。</span>
+              <button onClick={filterOptions.retry} className="font-bold underline hover:text-white">
+                選択肢を再取得
+              </button>
+            </div>
+          )}
         </div>
 
         {/* 種目リスト */}
-        {isLoading ? (
-          <div className="flex justify-center items-center py-20">
+        {search.status === 'loading' ? (
+          <div role="status" aria-label="種目を読み込み中" className="flex justify-center items-center py-20">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          </div>
+        ) : search.status === 'error' ? (
+          <div role="alert" className="text-center py-20 bg-[#111] rounded-3xl shadow-sm border border-red-500/30">
+            <Activity className="w-16 h-16 mx-auto text-red-300/40 mb-4" />
+            <h3 className="text-xl font-semibold text-white/80 mb-2">種目を読み込めませんでした</h3>
+            <p className="text-red-200/80 mb-6 px-6">{search.error}</p>
+            <button
+              onClick={search.reload}
+              className="px-6 py-3 bg-primary text-black font-black rounded-xl hover:scale-[1.02] active:scale-[0.98] transition-all"
+            >
+              再試行
+            </button>
           </div>
         ) : exercises.length === 0 ? (
           <div className="text-center py-20 bg-[#111] rounded-3xl shadow-sm border border-white/10">
@@ -279,7 +313,8 @@ export default function ExercisesPage() {
           <>
             <div className="sticky top-0 z-40 py-4 mb-6 flex flex-col md:flex-row items-start md:items-center justify-between text-white/60 gap-4 bg-[#0a0a0a]/90 backdrop-blur-xl border-b border-white/5">
               <span className="font-medium bg-[#111] px-4 py-2 rounded-lg border border-white/10 flex-shrink-0">
-                <span className="text-primary font-bold text-lg mr-1">{exercises.length}</span> 件の種目
+                <span className="text-primary font-bold text-lg mr-1">{search.total}</span> 件の種目
+                {search.hasMore && <span className="ml-2 text-sm text-white/40">（{exercises.length} 件を表示中）</span>}
               </span>
 
               {/* アクティブな検索条件の表示 */}
@@ -324,7 +359,7 @@ export default function ExercisesPage() {
                 )}
 
                 {muscle === 'すべて' && difficulty === 'すべて' && selectedEquipments.length === 0 && !searchQuery && (
-                  <span className="text-sm text-white/40 italic">絞り込みなし（全件表示）</span>
+                  <span className="text-sm text-white/40 italic">絞り込みなし</span>
                 )}
               </div>
             </div>
@@ -376,6 +411,24 @@ export default function ExercisesPage() {
               </div>
             ))}
           </div>
+            {/* 一覧は1ページずつ取得するため、続きがあれば取得手段を示す */}
+            {(search.hasMore || search.loadMoreError) && (
+              <div className="mt-8 flex flex-col items-center gap-3">
+                {search.loadMoreError && (
+                  <p role="alert" className="text-sm text-red-200">{search.loadMoreError}</p>
+                )}
+                {search.hasMore && (
+                  <button
+                    onClick={search.loadMore}
+                    disabled={search.loadingMore}
+                    className="px-8 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold rounded-xl transition-colors disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {search.loadingMore && <Loader2 className="w-5 h-5 animate-spin" />}
+                    {search.loadMoreError ? '続きを再試行' : 'さらに表示'}
+                  </button>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -395,8 +448,8 @@ export default function ExercisesPage() {
               <div className="flex flex-wrap gap-2 mb-6">
                 {selectedExercise.level && <span className="px-3 py-1 bg-white/5 border border-white/10 text-white/80 text-xs font-bold rounded-full">{displayExerciseLabel(selectedExercise.level)}</span>}
                 {selectedExercise.category && <span className="px-3 py-1 bg-white/5 border border-white/10 text-white/80 text-xs font-bold rounded-full">{displayExerciseLabel(selectedExercise.category)}</span>}
-                {selectedExercise.mechanic && <span className="px-3 py-1 bg-white/5 border border-white/10 text-white/80 text-xs font-bold rounded-full">{displayExerciseLabel(selectedExercise.mechanic)}</span>}
-                {selectedExercise.force && <span className="px-3 py-1 bg-white/5 border border-white/10 text-white/80 text-xs font-bold rounded-full">{displayExerciseLabel(selectedExercise.force)}</span>}
+                {detail.exercise?.mechanic && <span className="px-3 py-1 bg-white/5 border border-white/10 text-white/80 text-xs font-bold rounded-full">{displayExerciseLabel(detail.exercise.mechanic)}</span>}
+                {detail.exercise?.force && <span className="px-3 py-1 bg-white/5 border border-white/10 text-white/80 text-xs font-bold rounded-full">{displayExerciseLabel(detail.exercise.force)}</span>}
               </div>
               
               <h3 className="text-lg font-bold text-white mb-3 flex items-center">
@@ -405,7 +458,7 @@ export default function ExercisesPage() {
               </h3>
               <div className="mb-8 bg-black/40 p-4 rounded-2xl border border-white/10">
                 <div className="mb-2"><span className="font-semibold text-white/60">メイン: </span><span className="text-white">{selectedExercise.primaryMuscles?.join(', ') || 'なし'}</span></div>
-                <div><span className="font-semibold text-white/60">サブ: </span><span className="text-white">{selectedExercise.secondaryMuscles?.join(', ') || 'なし'}</span></div>
+                <div><span className="font-semibold text-white/60">サブ: </span><span className="text-white">{detail.exercise ? detail.exercise.secondaryMuscles?.join(', ') || 'なし' : detail.error ? '-' : '読み込み中...'}</span></div>
               </div>
 
               <h3 className="text-lg font-bold text-white mb-4 flex items-center">
@@ -413,8 +466,19 @@ export default function ExercisesPage() {
                 トレーニング手順
               </h3>
               <div className="space-y-5">
-                {selectedExercise.instructions && selectedExercise.instructions.length > 0 ? (
-                  selectedExercise.instructions.map((inst, idx) => (
+                {detail.error ? (
+                  <div role="alert" className="bg-red-500/10 p-4 rounded-xl text-center border border-red-500/30">
+                    <p className="text-red-200 mb-3">{detail.error}</p>
+                    <button onClick={detail.retry} className="px-5 py-2 bg-white/10 hover:bg-white/20 text-white text-sm font-bold rounded-xl transition-colors">
+                      手順を再取得
+                    </button>
+                  </div>
+                ) : !detail.exercise ? (
+                  <p role="status" className="text-white/40 bg-black/40 p-4 rounded-xl text-center border border-white/5 flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" /> 手順を読み込み中...
+                  </p>
+                ) : detail.exercise.instructions && detail.exercise.instructions.length > 0 ? (
+                  detail.exercise.instructions.map((inst, idx) => (
                     <div key={idx} className="flex">
                       <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/20 text-primary border border-primary/30 flex items-center justify-center font-bold mr-4 mt-0.5 shadow-sm">
                         {idx + 1}
@@ -465,7 +529,7 @@ export default function ExercisesPage() {
                     onChange={(e) => setNewExercise({ ...newExercise, primaryMuscle: e.target.value })}
                     className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
                   >
-                    {MUSCLE_GROUPS.filter(m => m !== 'すべて').map(m => <option key={m} value={m}>{m}</option>)}
+                    {withCurrent(muscleOptions, newExercise.primaryMuscle).map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
                 </div>
                 <div className="space-y-2">
@@ -475,7 +539,7 @@ export default function ExercisesPage() {
                     onChange={(e) => setNewExercise({ ...newExercise, equipment: e.target.value })}
                     className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
                   >
-                    {EQUIPMENTS.map(eq => <option key={eq} value={eq}>{eq}</option>)}
+                    {withCurrent(filterOptions.equipment, newExercise.equipment).map(eq => <option key={eq} value={eq}>{eq}</option>)}
                   </select>
                 </div>
                 <div className="space-y-2">
