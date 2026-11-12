@@ -63,8 +63,10 @@ func NewHandler(db *sql.DB, cfg config.Config, logger *slog.Logger) http.Handler
 
 	mux.Handle("GET /api/exercises", protected(exerciseHandler.Search))
 	mux.Handle("POST /api/exercises", protected(exerciseHandler.Create))
+	mux.Handle("GET /api/exercises/filters", protected(exerciseHandler.FilterOptions))
 	mux.Handle("GET /api/exercises/recent", protected(exerciseHandler.Recent))
 	mux.Handle("GET /api/exercises/favorites", protected(exerciseHandler.Favorites))
+	mux.Handle("GET /api/exercises/{exerciseID}", protected(exerciseHandler.Get))
 	mux.Handle("PUT /api/exercises/{exerciseID}/favorite", protected(exerciseHandler.PutFavorite))
 	mux.Handle("DELETE /api/exercises/{exerciseID}/favorite", protected(exerciseHandler.DeleteFavorite))
 	mux.Handle("GET /api/exercises/{exerciseID}/settings", protected(exerciseHandler.Settings))

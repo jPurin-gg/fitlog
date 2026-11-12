@@ -872,7 +872,7 @@
     "force": "引く(プル)",
     "level": "初級",
     "mechanic": "アイソレーション(単関節)",
-    "equipment": "exercise ball",
+    "equipment": "バランスボール",
     "primaryMuscles": [
       "ハムストリングス"
     ],
@@ -4067,7 +4067,7 @@
     "force": "静止(アイソメトリック)",
     "level": "初級",
     "mechanic": "アイソレーション(単関節)",
-    "equipment": "exercise ball",
+    "equipment": "バランスボール",
     "primaryMuscles": [
       "大胸筋"
     ],
@@ -5684,7 +5684,7 @@
     "force": "静止(アイソメトリック)",
     "level": "中級",
     "mechanic": "アイソレーション(単関節)",
-    "equipment": "exercise ball",
+    "equipment": "バランスボール",
     "primaryMuscles": [
       "大臀筋"
     ],
@@ -6780,7 +6780,7 @@
     "force": "引く(プル)",
     "level": "初級",
     "mechanic": "アイソレーション(単関節)",
-    "equipment": "exercise ball",
+    "equipment": "バランスボール",
     "primaryMuscles": [
       "腹筋"
     ],
@@ -6804,7 +6804,7 @@
     "force": "引く(プル)",
     "level": "初級",
     "mechanic": "コンパウンド(多関節)",
-    "equipment": "exercise ball",
+    "equipment": "バランスボール",
     "primaryMuscles": [
       "腹筋"
     ],
@@ -8499,7 +8499,7 @@
     "force": "静止(アイソメトリック)",
     "level": "初級",
     "mechanic": "アイソレーション(単関節)",
-    "equipment": "exercise ball",
+    "equipment": "バランスボール",
     "primaryMuscles": [
       "下背部"
     ],
@@ -13847,7 +13847,7 @@
     "force": "押す(プッシュ)",
     "level": "初級",
     "mechanic": "コンパウンド(多関節)",
-    "equipment": "exercise ball",
+    "equipment": "バランスボール",
     "primaryMuscles": [
       "大臀筋"
     ],
@@ -14607,7 +14607,7 @@
     "force": "押す(プッシュ)",
     "level": "中級",
     "mechanic": "コンパウンド(多関節)",
-    "equipment": "exercise ball",
+    "equipment": "バランスボール",
     "primaryMuscles": [
       "大胸筋"
     ],
@@ -14761,7 +14761,7 @@
     "force": "静止(アイソメトリック)",
     "level": "初級",
     "mechanic": null,
-    "equipment": "exercise ball",
+    "equipment": "バランスボール",
     "primaryMuscles": [
       "下背部"
     ],
@@ -21214,7 +21214,7 @@
     "force": "引く(プル)",
     "level": "初級",
     "mechanic": null,
-    "equipment": "exercise ball",
+    "equipment": "バランスボール",
     "primaryMuscles": [
       "腹筋"
     ],
@@ -21878,7 +21878,7 @@
     "force": "引く(プル)",
     "level": "中級",
     "mechanic": "コンパウンド(多関節)",
-    "equipment": "exercise ball",
+    "equipment": "バランスボール",
     "primaryMuscles": [
       "下背部"
     ],
@@ -21905,7 +21905,7 @@
     "force": "引く(プル)",
     "level": "中級",
     "mechanic": "アイソレーション(単関節)",
-    "equipment": "exercise ball",
+    "equipment": "バランスボール",
     "primaryMuscles": [
       "腹筋"
     ],

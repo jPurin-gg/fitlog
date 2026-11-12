@@ -390,7 +390,13 @@ describe("WorkoutPage record-first flow", () => {
       }),
       http.get(`${apiOrigin}/api/exercises/favorites`, () => HttpResponse.json([])),
       http.get(`${apiOrigin}/api/exercises/recent`, () => HttpResponse.json([])),
-      http.get(`${apiOrigin}/api/exercises`, () => HttpResponse.json([{ id: "squat", name: "スクワット", category: "strength" }])),
+      http.get(`${apiOrigin}/api/exercises/filters`, () => HttpResponse.json({ equipment: [], muscle_categories: [] })),
+      http.get(`${apiOrigin}/api/exercises`, () => HttpResponse.json({
+        items: [{ id: "squat", name: "スクワット", level: null, equipment: null, category: "strength", primaryMuscles: [] }],
+        total: 1,
+        limit: 50,
+        offset: 0,
+      })),
     );
     const user = userEvent.setup();
     renderWorkout(false);

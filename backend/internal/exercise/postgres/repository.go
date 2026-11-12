@@ -17,8 +17,44 @@ type Repository struct{ db *sql.DB }
 
 func New(db *sql.DB) *Repository { return &Repository{db: db} }
 
-func (r *Repository) Search(ctx context.Context, filters exercise.Filters) ([]exercise.Exercise, error) {
-	query := `SELECT id, name, force, level, mechanic, equipment, category, instructions, primary_muscles, secondary_muscles, images FROM exercises WHERE TRUE`
+// Search returns one page of lightweight items together with the number of
+// exercises matching the filters. The id tiebreaker keeps the order stable
+// across pages when several exercises share a name.
+func (r *Repository) Search(ctx context.Context, filters exercise.Filters) ([]exercise.Summary, int, error) {
+	conditions, args := searchConditions(filters)
+	var total int
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM exercises WHERE `+conditions, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	query := `SELECT id, name, level, equipment, category, primary_muscles FROM exercises WHERE ` + conditions +
+		` ORDER BY CASE level WHEN '初級' THEN 1 WHEN 'beginner' THEN 1 WHEN '中級' THEN 2 WHEN 'intermediate' THEN 2 WHEN '上級' THEN 3 WHEN 'expert' THEN 3 ELSE 4 END, name ASC, id ASC` +
+		fmt.Sprintf(` LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
+	pageArgs := append(append([]any{}, args...), filters.Limit, filters.Offset)
+	rows, err := r.db.QueryContext(ctx, query, pageArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	result := []exercise.Summary{}
+	for rows.Next() {
+		var item exercise.Summary
+		var primary []byte
+		if err := rows.Scan(&item.ID, &item.Name, &item.Level, &item.Equipment, &item.Category, &primary); err != nil {
+			return nil, 0, err
+		}
+		if err := json.Unmarshal(primary, &item.PrimaryMuscles); err != nil || item.PrimaryMuscles == nil {
+			item.PrimaryMuscles = []string{}
+		}
+		result = append(result, item)
+	}
+	return result, total, rows.Err()
+}
+
+// searchConditions builds the WHERE clause shared by the count and page
+// queries. Muscles are compared with the elements of the JSON arrays, so a
+// broad category can send all of its muscles at once.
+func searchConditions(filters exercise.Filters) (string, []any) {
+	conditions := `TRUE`
 	args := []any{}
 	add := func(value any) string {
 		args = append(args, value)
@@ -26,27 +62,40 @@ func (r *Repository) Search(ctx context.Context, filters exercise.Filters) ([]ex
 	}
 	if filters.Name != "" {
 		placeholder := add("%" + filters.Name + "%")
-		query += ` AND (name ILIKE ` + placeholder + ` OR id ILIKE ` + placeholder + `)`
+		conditions += ` AND (name ILIKE ` + placeholder + ` OR id ILIKE ` + placeholder + `)`
 	}
-	if filters.Muscle != "" {
-		placeholder := add("%" + filters.Muscle + "%")
-		query += ` AND (primary_muscles::text ILIKE ` + placeholder + ` OR secondary_muscles::text ILIKE ` + placeholder + `)`
+	if len(filters.Muscles) > 0 {
+		placeholder := add(pq.Array(filters.Muscles))
+		conditions += ` AND (primary_muscles ?| ` + placeholder + `::text[] OR secondary_muscles ?| ` + placeholder + `::text[])`
 	}
 	if len(filters.Equipment) == 1 {
-		query += ` AND equipment = ` + add(filters.Equipment[0])
+		conditions += ` AND equipment = ` + add(filters.Equipment[0])
 	} else if len(filters.Equipment) > 1 {
-		query += ` AND equipment = ANY(` + add(pq.Array(filters.Equipment)) + `)`
+		conditions += ` AND equipment = ANY(` + add(pq.Array(filters.Equipment)) + `)`
 	}
 	if filters.Level != "" {
-		query += ` AND level = ` + add(filters.Level)
+		conditions += ` AND level = ` + add(filters.Level)
 	}
-	query += ` ORDER BY CASE level WHEN '初級' THEN 1 WHEN 'beginner' THEN 1 WHEN '中級' THEN 2 WHEN 'intermediate' THEN 2 WHEN '上級' THEN 3 WHEN 'expert' THEN 3 ELSE 4 END, name ASC`
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	return conditions, args
+}
+
+func (r *Repository) Get(ctx context.Context, exerciseID string) (exercise.Exercise, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, name, force, level, mechanic, equipment, category, instructions, primary_muscles, secondary_muscles, images
+		FROM exercises WHERE id = $1
+	`, exerciseID)
 	if err != nil {
-		return nil, err
+		return exercise.Exercise{}, err
 	}
 	defer rows.Close()
-	return scanExercises(rows)
+	items, err := scanExercises(rows)
+	if err != nil {
+		return exercise.Exercise{}, err
+	}
+	if len(items) == 0 {
+		return exercise.Exercise{}, exercise.ErrNotFound
+	}
+	return items[0], nil
 }
 
 func (r *Repository) Create(ctx context.Context, item exercise.Exercise) error {

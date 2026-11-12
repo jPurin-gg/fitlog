@@ -20,7 +20,9 @@ async function mockAPI(page: Page) {
       if (path === "/api/dashboard") return respond(200, { recent_workouts: [] });
       if (path === "/api/preferences") return respond(200, {});
       if (/^\/api\/monthly-plans\/\d{4}-\d{2}$/.test(path)) return respond(404, { detail: "月間プランはありません。" });
-      if (["/api/exercises", "/api/exercises/favorites"].includes(path)) return respond(200, exercises);
+      if (path === "/api/exercises/favorites") return respond(200, exercises);
+      if (path === "/api/exercises") return respond(200, { items: exercises, total: exercises.length, limit: 50, offset: 0 });
+      if (path === "/api/exercises/filters") return respond(200, { equipment: [], muscle_categories: [] });
       if (path === "/api/exercises/recent") return respond(200, []);
       if (/^\/api\/exercises\/[^/]+\/settings$/.test(path)) return respond(200, { target_sets: 3 });
     }

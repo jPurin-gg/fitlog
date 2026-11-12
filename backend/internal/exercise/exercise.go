@@ -32,11 +32,40 @@ type Exercise struct {
 	Images           []string `json:"images"`
 }
 
+// Summary is the lightweight item returned by Search. It leaves out the
+// instruction text and image paths, which Get returns for a single exercise.
+type Summary struct {
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Level          *string  `json:"level"`
+	Equipment      *string  `json:"equipment"`
+	Category       *string  `json:"category"`
+	PrimaryMuscles []string `json:"primaryMuscles"`
+}
+
+const (
+	DefaultSearchLimit = 50
+	MaxSearchLimit     = 100
+)
+
+// Filters narrows Search. Muscles and Equipment each match when an exercise
+// has any one of the listed values; Limit and Offset select the page.
 type Filters struct {
 	Name      string
-	Muscle    string
+	Muscles   []string
 	Equipment []string
 	Level     string
+	Limit     int
+	Offset    int
+}
+
+// SearchResult is one page of Search. Total counts every exercise matching
+// the filters, so clients can tell whether more pages remain.
+type SearchResult struct {
+	Items  []Summary `json:"items"`
+	Total  int       `json:"total"`
+	Limit  int       `json:"limit"`
+	Offset int       `json:"offset"`
 }
 
 type CreateInput struct {
@@ -78,7 +107,8 @@ type AlternativeCandidate struct {
 }
 
 type Repository interface {
-	Search(ctx context.Context, filters Filters) ([]Exercise, error)
+	Search(ctx context.Context, filters Filters) ([]Summary, int, error)
+	Get(ctx context.Context, exerciseID string) (Exercise, error)
 	Create(ctx context.Context, exercise Exercise) error
 	Favorites(ctx context.Context, userID int) ([]Exercise, error)
 	SetFavorite(ctx context.Context, userID int, exerciseID string, favorite bool) error
@@ -108,15 +138,39 @@ func (s *Service) WithLogger(logger *slog.Logger) *Service {
 	return s
 }
 
-func (s *Service) Search(ctx context.Context, filters Filters) ([]Exercise, error) {
-	exercises, err := s.repository.Search(ctx, filters)
+func (s *Service) Search(ctx context.Context, filters Filters) (SearchResult, error) {
+	if filters.Limit <= 0 {
+		filters.Limit = DefaultSearchLimit
+	}
+	if filters.Limit > MaxSearchLimit {
+		filters.Limit = MaxSearchLimit
+	}
+	if filters.Offset < 0 {
+		filters.Offset = 0
+	}
+	items, total, err := s.repository.Search(ctx, filters)
 	if err != nil {
-		return nil, apperr.Internal(err)
+		return SearchResult{}, apperr.Internal(err)
 	}
-	if exercises == nil {
-		exercises = []Exercise{}
+	if items == nil {
+		items = []Summary{}
 	}
-	return exercises, nil
+	return SearchResult{Items: items, Total: total, Limit: filters.Limit, Offset: filters.Offset}, nil
+}
+
+func (s *Service) Get(ctx context.Context, exerciseID string) (Exercise, error) {
+	item, err := s.repository.Get(ctx, exerciseID)
+	if errors.Is(err, ErrNotFound) {
+		return Exercise{}, apperr.NotFound("種目が見つかりません。")
+	}
+	if err != nil {
+		return Exercise{}, apperr.Internal(err)
+	}
+	return item, nil
+}
+
+func (s *Service) FilterOptions() FilterOptions {
+	return AvailableFilterOptions()
 }
 
 func (s *Service) Create(ctx context.Context, input CreateInput) (Exercise, error) {

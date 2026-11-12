@@ -90,15 +90,23 @@ JSON入力は1 MiBまでで、未知フィールドと複数JSON値を拒否し�
 
 | Method | Path | 説明 |
 |---|---|---|
-| GET | `/api/exercises` | `name`、`muscle`、`equipment`、`level` で検索 |
+| GET | `/api/exercises` | `name`、`muscle`、`equipment`、`level` で検索し、1ページ分を返す |
 | POST | `/api/exercises` | カスタム種目を作成 |
+| GET | `/api/exercises/filters` | 検索に使える器具・部位の選択肢 |
 | GET | `/api/exercises/recent` | 最近使った種目 |
 | GET | `/api/exercises/favorites` | お気に入り一覧 |
+| GET | `/api/exercises/{exerciseID}` | 手順文を含む種目の詳細 |
 | PUT | `/api/exercises/{exerciseID}/favorite` | お気に入りに追加 |
 | DELETE | `/api/exercises/{exerciseID}/favorite` | お気に入りから削除 |
 | GET | `/api/exercises/{exerciseID}/settings` | 目標セット数 |
 | PUT | `/api/exercises/{exerciseID}/settings` | 目標セット数を保存 |
 | POST | `/api/exercises/{exerciseID}/alternatives` | AIによる代替種目候補 |
+
+検索は `limit`（省略時50、最大100）と `offset` でページングし、`{ "items": [...], "total": 873, "limit": 50, "offset": 0 }` を返します。`total` は条件に一致する全件数です。`items` は `id`、`name`、`level`、`equipment`、`category`、`primaryMuscles` だけを持ち、手順文と画像パスは詳細APIで取得します。`limit`・`offset` に0以上の整数以外を指定すると400です。
+
+`muscle` と `equipment` はカンマ区切りで複数指定でき、いずれかに一致する種目が対象です。`muscle` は主働筋・補助筋の要素と、`equipment` は器具名と完全一致で比較します。セレクターの大分類（例: 背中）は、その分類に属する全部位を `muscle` に指定します。
+
+器具・部位の選択肢は `internal/exercise` の `AvailableFilterOptions` だけで定義し、`/api/exercises/filters` で `{ "equipment": [...], "muscle_categories": [{ "name": "背中", "muscles": [...] }] }` として返します。種目辞書、種目セレクター、ホームの器具設定はこの応答を使い、画面ごとの一覧は持ちません。選択肢は種目カタログ（`tmpkin_jp.json`）と同じ表記である必要があり、`go test` がカタログとの過不足を検出します。
 
 ### 月間・日次プラン
 
@@ -188,7 +196,7 @@ HTTPログは `request_id`、method、生のIDを含まないroute pattern、sta
 3. 未適用ファイルを1ファイル1トランザクションで実行
 4. 適用済みファイル名を記録
 
-現在の移行では、既存テーブルをベースラインとして認識し、ユーザー名一意インデックスとセットの冪等キーを追加します。重複ユーザー名が存在するDBでは、一意化を勝手に行わずマイグレーションを停止します。
+現在の移行では、既存テーブルをベースラインとして認識し、ユーザー名一意インデックスとセットの冪等キーを追加します。重複ユーザー名が存在するDBでは、一意化を勝手に行わずマイグレーションを停止します。投入済みの種目のうち器具名が未翻訳の `exercise ball` だった行は、seedと同じ `バランスボール` に更新します。
 
 ## テスト方針
 
@@ -196,10 +204,13 @@ HTTPログは `request_id`、method、生のIDを含まないroute pattern、sta
 - `ai/openaicompat`: リクエスト形式、再試行、非再試行、レート制限、壊れたレスポンス
 - `planning`: 休息日ポリシー、AIが辞書外IDを返した場合の拒否、開始オプション、AIなしの手動開始と既存予定保持
 - `profile`: 設定正規化
+- `exercise`: 器具・部位の選択肢と種目カタログの過不足、検索のページ上限と条件の受け渡し、一覧に手順文を含めないこと
 - `prompt`: 全テンプレートの描画
 - `workout`: 冪等キー入力契約
 - 専用の一時PostgreSQLで、同一セットの同時再送、終了と保存の競合、終了後リプレイを検証
 - `app` のHTTP統合テストで認証→月間・日次プランなしの手動開始→複数セット・種目変更→終了→履歴取得を検証。ローカルのAI用サーバーで呼び出し0件を確認し、8件の並行開始と遅いAIによる上書き防止も検証
+- 同じ統合テストで、種目検索の複数部位・器具の絞り込み、ページング、詳細取得を実DBのSQLで検証
+- React Testing LibraryとMSWで種目セレクター・種目辞書の読み込み中・失敗と再試行・「さらに表示」・古い応答の破棄・大分類の全部位検索を検証
 - React Testing LibraryとMSWで保存状態とAI状態の分離、保存・提案・総評の待機中のOFF切り替え、入力保持、遅い応答の破棄を検証
 - 時刻・ストレージを制御し、月間案内の当月非表示、通常の閉じる、再訪、翌月、年越し、別ユーザー、手動表示を検証
 - PlaywrightでAI OFFの手動記録・終了とAI呼び出し0件、AI ONの障害時継続、月間案内の非表示・再表示と設定共有をブラウザ検証
