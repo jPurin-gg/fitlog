@@ -72,6 +72,7 @@ beforeEach(() => {
     id: 42, status: "active",
     summary: { total_sets: 0, total_reps: 0, total_volume: 0, duration_min: 0, pr_count: 0, exercises: [] },
   })));
+  server.use(http.get(`${apiOrigin}/api/workouts/by-date/:date`, () => HttpResponse.json({}, { status: 404 })));
 });
 
 describe("WorkoutPage record-first flow", () => {

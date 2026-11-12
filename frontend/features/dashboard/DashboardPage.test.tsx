@@ -12,6 +12,7 @@ vi.mock("@/components/AuthGate", () => ({ useAuth: () => auth, LogoutButton: () 
 
 let monthlyCalls = 0;
 const server = setupServer(
+  http.get("http://localhost:3000/api/workouts/by-date/:date", () => HttpResponse.json({}, { status: 404 })),
   http.get("http://localhost:3000/api/dashboard", () => HttpResponse.json({ recent_workouts: [] })),
   http.get("http://localhost:3000/api/preferences", () => HttpResponse.json({})),
   http.get("http://localhost:3000/api/monthly-plans/:month", () => {
@@ -108,4 +109,17 @@ it("プランの読み込み失敗を未作成と誤認して案内しない", a
   await waitFor(() => expect(error).toHaveBeenCalled());
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "プランなしで記録を始める" })).toHaveAttribute("href", "/workout");
+});
+
+it.each(["active", "completed"])("月間プランがなくても%sの記録へ再開できる", async status => {
+  server.use(
+    http.get("http://localhost:3000/api/workouts/by-date/:date", () => HttpResponse.json({ workout_id: 42, sets: [] })),
+    http.get("http://localhost:3000/api/workouts/42", () => HttpResponse.json({ id: 42, status, summary: { total_sets: 2 } })),
+  );
+  show();
+  await userEvent.click(await screen.findByRole("button", { name: "閉じる" }));
+  const link = await screen.findByRole("link", { name: status === "active" ? "記録を再開" : "記録を再開して追記" });
+  expect(link).toHaveAttribute("href", "/workout");
+  expect(screen.getByText(/保存済み 2 セット/)).toBeInTheDocument();
+  if (status === "completed") expect(screen.getByRole("link", { name: "今日の記録を見る" })).toHaveAttribute("href", "/workouts/42");
 });

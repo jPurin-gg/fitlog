@@ -24,9 +24,10 @@ import { ExerciseSelectorModal } from "@/features/exercises/components/ExerciseS
 import { WorkoutSummaryView, type WorkoutSummary } from "./components/WorkoutSummaryView";
 import { ApiError, apiErrorMessage } from "@/lib/api";
 import { displayPlanText, formatLocalDate } from "@/lib/fitlog";
+import { useTodayWorkout } from "./useTodayWorkout";
 import { initialRecordFlowState, recordFlowReducer } from "./workoutFlow";
-import { finishWorkoutSession, getSetRecommendation, getSummaryComment, getTargetSets, getWorkoutDetail, recordWorkoutSet, startWorkoutPlan, updateTargetSets } from "./api";
-import type { SetRecommendation, WorkoutPlanSession } from "./types";
+import { finishWorkoutSession, getSetRecommendation, getSummaryComment, getTargetSets, getWorkoutByDate, getWorkoutDetail, recordWorkoutSet, startWorkoutPlan, updateTargetSets } from "./api";
+import type { SavedWorkoutSet, SetRecommendation, WorkoutPlanSession } from "./types";
 
 type SummaryCommentState = "idle" | "loading" | "ready" | "unavailable";
 
@@ -44,6 +45,7 @@ function isAmbiguousSaveFailure(error: unknown) {
 
 export default function WorkoutPage() {
   const { enabled: aiEnabled, isEnabled } = useAISettings();
+  const { workout: todayWorkout, refresh: refreshTodayWorkout } = useTodayWorkout();
   const [starting, setStarting] = React.useState(false);
   const [finishing, setFinishing] = React.useState(false);
   const [recommendation, setRecommendation] = React.useState<SetRecommendation | null>(null);
@@ -60,6 +62,8 @@ export default function WorkoutPage() {
   const [summaryCommentError, setSummaryCommentError] = React.useState<string | null>(null);
   const [currentSet, setCurrentSet] = React.useState(1);
   const [formData, setFormData] = React.useState({ weight: '', reps: '', feeling: '' });
+  const [savedSets, setSavedSets] = React.useState<SavedWorkoutSet[]>([]);
+  const [savedSetsError, setSavedSetsError] = React.useState<string | null>(null);
   const [workoutStarted, setWorkoutStarted] = React.useState(false);
   const [currentExercise, setCurrentExercise] = React.useState({
     id: "Barbell_Bench_Press_-_Medium_Grip", 
@@ -174,7 +178,17 @@ export default function WorkoutPage() {
     });
   };
 
-  const applyStartedWorkout = (data: WorkoutPlanSession, summary: WorkoutSummary, selected?: { id: string; name: string }) => {
+  const applyStartedWorkout = (data: WorkoutPlanSession, summary: WorkoutSummary, sets: SavedWorkoutSet[], selected?: { id: string; name: string }) => {
+    // 手動追加した種目も詳細APIの集計から戻す。番号の復元は#58の方式に統一する。
+    const additionalExercises = summary.exercises.filter(ex => !data.plan.exercises.some(planned => planned.exercise_id === ex.exercise_id));
+    data = { ...data, plan: { ...data.plan, exercises: [...data.plan.exercises, ...additionalExercises.map(ex => ({
+      exercise_id: ex.exercise_id, name: ex.name, planned_sets: 3, target_weight: 0, target_reps: 10,
+    }))] } };
+    const lastExerciseID = sets.at(-1)?.exercise_id ?? summary.exercises.at(-1)?.exercise_id;
+    if (!selected && lastExerciseID) {
+      const lastExercise = data.plan.exercises.find(ex => ex.exercise_id === lastExerciseID);
+      if (lastExercise) selected = { id: lastExercise.exercise_id, name: lastExercise.name };
+    }
     let index = selected ? data.plan.exercises.findIndex(ex => ex.exercise_id === selected.id) : 0;
     if (selected && index < 0) {
       // 記録画面だけに選択種目を追加し、保存済みの日次予定は変更しない。
@@ -190,6 +204,7 @@ export default function WorkoutPage() {
     setWorkoutStarted(true);
     nextSetByExerciseRef.current = Object.fromEntries(summary.exercises.map(ex => [ex.exercise_id, (ex.last_set_order ?? ex.sets) + 1]));
     savedSetsByExerciseRef.current = Object.fromEntries(summary.exercises.map(ex => [ex.exercise_id, ex.sets]));
+    setSavedSets(sets);
     setStartNotice(data.resumed
       ? "今日のワークアウトを再開しました。保存済みのセットに追記します。"
       : isEnabled() && data.ai_status === "fallback"
@@ -233,7 +248,22 @@ export default function WorkoutPage() {
       }
       const detail = await getWorkoutDetail(String(data.workout_id), controller.signal);
       if (controller.signal.aborted || startRequestRef.current !== requestID) return;
-      applyStartedWorkout(data, detail.summary, exercise);
+      let sets: SavedWorkoutSet[] = [];
+      setSavedSetsError(null);
+      if (detail.summary.total_sets > 0) {
+        try {
+          const record = await getWorkoutByDate(data.plan_date, controller.signal);
+          if (record.workout_id === data.workout_id) {
+            sets = record.sets;
+          } else {
+            setSavedSetsError("当日の記録とワークアウトが一致しません。");
+          }
+        } catch (error) {
+          if (!controller.signal.aborted) setSavedSetsError(apiErrorMessage(error, "保存済みセットの一覧を取得できませんでした。再開すると再取得します。"));
+        }
+      }
+      if (controller.signal.aborted || startRequestRef.current !== requestID) return;
+      applyStartedWorkout(data, detail.summary, sets, exercise);
     } catch (e) {
       if (controller.signal.aborted || startRequestRef.current !== requestID) return;
       if (!planStarted && !exercise && e instanceof ApiError && e.status === 404) {
@@ -323,6 +353,7 @@ export default function WorkoutPage() {
         currentSet + 1,
       );
       savedSetsByExerciseRef.current[currentExercise.id] = (savedSetsByExerciseRef.current[currentExercise.id] || 0) + 1;
+      setSavedSets(previous => [...previous, { ...setInput, id: recorded.id, exercise_name: currentExercise.name }]);
       setSaveRetryLocked(false);
       dispatchRecordFlow({ type: "SAVE_SUCCEEDED" });
       void fetchRecommendation(workoutID, recorded.id);
@@ -407,6 +438,7 @@ export default function WorkoutPage() {
         setSummaryCommentState("idle");
       }
       setWorkoutStarted(false);
+      refreshTodayWorkout();
       setWorkoutPlan(null);
       setRecommendation(null);
       dispatchRecordFlow({ type: "RESET" });
@@ -546,9 +578,11 @@ export default function WorkoutPage() {
             <div className="absolute inset-0 bg-primary/20 rounded-full animate-ping" />
             <Play className="w-10 h-10 text-primary ml-2" />
           </div>
-          <h1 className="text-3xl font-bold mb-4">今日の筋トレを始めますか？</h1>
+          <h1 className="text-3xl font-bold mb-4">{todayWorkout ? "今日の筋トレを再開しますか？" : "今日の筋トレを始めますか？"}</h1>
           <div className="mb-5"><AIToggle /></div>
-          <p className="text-white/50 mb-10">今日のメニューを開始します。AIが使えないときも記録は続けられます。</p>
+          <p className="text-white/50 mb-10">{todayWorkout
+            ? todayWorkout.status === "completed" ? "今日の記録は完了済みです。再開して同じ記録に追記できます。" : "保存済みのセットから記録を再開できます。"
+            : "今日のメニューを開始します。AIが使えないときも記録は続けられます。"}</p>
           <button 
             onClick={startWorkout}
             disabled={starting}
@@ -556,9 +590,12 @@ export default function WorkoutPage() {
           >
             <div className="absolute inset-0 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/30 to-transparent skew-x-12" />
             <span className="relative z-10 flex items-center justify-center gap-2">
-              {starting ? <Loader2 className="w-6 h-6 animate-spin" /> : <>ワークアウトを開始 <Sparkles className="w-5 h-5" /></>}
+              {starting ? <Loader2 className="w-6 h-6 animate-spin" /> : <>{todayWorkout ? todayWorkout.status === "completed" ? "ワークアウトを再開して追記" : "ワークアウトを再開" : "ワークアウトを開始"} <Sparkles className="w-5 h-5" /></>}
             </span>
           </button>
+          {todayWorkout?.status === "completed" && (
+            <Link href={`/workouts/${todayWorkout.id}`} className="mt-4 block text-sm text-primary underline">今日の記録を見る</Link>
+          )}
             <div className="mt-3">
               <button
                 type="button"
@@ -659,6 +696,21 @@ export default function WorkoutPage() {
             <p className="mt-1 text-xs text-red-200/65">{finishError}</p>
           </div>
         )}
+
+        <section aria-label="今日ここまでの記録" className="glass mb-6 rounded-3xl p-5">
+          <h2 className="mb-3 text-lg font-bold">今日ここまでの記録</h2>
+          {savedSetsError && <p role="alert" className="mb-3 text-sm text-amber-200">{savedSetsError}</p>}
+          {savedSets.length > 0 ? (
+            <ul className="space-y-2 text-sm text-white/70">
+              {savedSets.map((set, index) => (
+                <li key={set.id ?? `${set.exercise_id}-${index}`}>
+                  {set.exercise_name || set.exercise_id} — セット {set.set_order}: {set.weight}kg × {set.reps}回
+                  {set.feeling && <span className="ml-2 text-white/45">{set.feeling}</span>}
+                </li>
+              ))}
+            </ul>
+          ) : !savedSetsError && <p className="text-sm text-white/45">保存済みのセットはまだありません。</p>}
+        </section>
 
         <section className="glass rounded-[32px] p-6 lg:p-8 border-primary/20 bg-primary/5 overflow-hidden relative shadow-2xl shadow-primary/5">
           <div className="flex justify-between items-center mb-8 border-b border-white/5 pb-6">

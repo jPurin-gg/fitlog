@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api";
-import type { SetInput, SetRecommendation, WorkoutDetail, WorkoutPlanSession, WorkoutSummary } from "./types";
+import type { SetInput, SetRecommendation, WorkoutDetail, WorkoutPlanSession, WorkoutRecord, WorkoutSummary } from "./types";
 
 export function getTargetSets(exerciseID: string) {
   return apiFetch<{ target_sets: number }>(`/api/exercises/${encodeURIComponent(exerciseID)}/settings`);
@@ -48,4 +48,8 @@ export function finishWorkoutSession(workoutID: number) {
 
 export function getWorkoutDetail(workoutID: string, signal?: AbortSignal) {
   return apiFetch<WorkoutDetail>(`/api/workouts/${encodeURIComponent(workoutID)}`, { signal });
+}
+
+export function getWorkoutByDate(date: string, signal?: AbortSignal) {
+  return apiFetch<WorkoutRecord>(`/api/workouts/by-date/${encodeURIComponent(date)}`, { signal });
 }
