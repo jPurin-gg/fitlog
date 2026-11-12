@@ -8,7 +8,7 @@ import { Loader2, X, MessageSquare, BrainCircuit, ArrowRight, AlertCircle } from
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { apiErrorMessage, apiFetch } from "@/lib/api";
 
-export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onReplace }: any) {
+export function AlternativeCoachModal({ exerciseId, exerciseName, scopeNote, onClose, onReplace }: any) {
   const { enabled: aiEnabled, isEnabled } = useAISettings();
   const [loading, setLoading] = React.useState(false);
   const [reason, setReason] = React.useState("");
@@ -111,6 +111,7 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
           <h2 className="text-xl font-bold tracking-tight">種目を変更</h2>
         </div>
 
+        {scopeNote && <p className="mb-4 text-sm text-white/60">{scopeNote}</p>}
         <div className="mb-4"><AIToggle /></div>
         {!aiEnabled && <p className="mb-4 text-sm text-white/50">AIはOFFです。種目は手動で変更できます。</p>}
         {error && <p role="alert" className="mb-4 text-sm text-red-300">{error}</p>}

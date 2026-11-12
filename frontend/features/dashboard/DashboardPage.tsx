@@ -40,6 +40,7 @@ const WEEKDAY_OPTIONS = [
 
 const EQUIPMENT_OPTIONS = ["ダンベル", "バーベル", "マシン", "ケーブル", "自重", "チューブ・バンド", "ケトルベル", "メディシンボール", "EZバー", "その他"];
 const ENVIRONMENT_OPTIONS = ["ジム", "家", "どちらも"];
+const REPLACEMENT_NOTE = "種目の変更は、今月の月間プランの毎週のこの曜日に反映されます。";
 
 function weekdayLabels(days?: number[]) {
   if (!days || days.length === 0) return "";
@@ -54,6 +55,9 @@ export default function DashboardPage() {
   const [showMonthlyModal, setShowMonthlyModal] = React.useState(false);
   const [showPreferencesModal, setShowPreferencesModal] = React.useState(false);
   const [monthlyPlan, setMonthlyPlan] = React.useState<any>(null);
+  const [monthlySaving, setMonthlySaving] = React.useState(false);
+  const [monthlySaveError, setMonthlySaveError] = React.useState("");
+  const monthlySaveRef = React.useRef<AbortController | null>(null);
   const preferencesQuery = useApiQuery<any>("/api/preferences", "設定の取得に失敗しました。", { scope: user.id });
   const dashboardQuery = useApiQuery<any>("/api/dashboard", "記録の取得に失敗しました。", { scope: user.id });
   const dashboardData = dashboardQuery.data;
@@ -71,7 +75,13 @@ export default function DashboardPage() {
   };
 
   const saveMonthlyPlan = async (plan: any) => {
+    if (monthlySaveRef.current) return;
+    const controller = new AbortController();
+    monthlySaveRef.current = controller;
+    const previousPlan = monthlyPlan;
     const planToSave = { ...plan, plan_month: plan.plan_month || currentMonth };
+    setMonthlySaving(true);
+    setMonthlySaveError("");
     setMonthlyPlan(planToSave);
     try {
       const input = {
@@ -85,11 +95,20 @@ export default function DashboardPage() {
       };
       const saved = await apiFetch<any>(`/api/monthly-plans/${currentMonth}`, {
         method: 'PUT',
+        signal: controller.signal,
         body: JSON.stringify(input)
       });
-      setMonthlyPlan(saved);
+      if (!controller.signal.aborted) setMonthlyPlan(saved);
     } catch (e) {
-      console.error("Failed to save monthly plan:", e);
+      if (!controller.signal.aborted) {
+        setMonthlyPlan(previousPlan);
+        setMonthlySaveError(`${apiErrorMessage(e, "月間プランの保存に失敗しました。")} 元の種目に戻しました。`);
+      }
+    } finally {
+      if (monthlySaveRef.current === controller) {
+        monthlySaveRef.current = null;
+        setMonthlySaving(false);
+      }
     }
   };
 
@@ -113,6 +132,9 @@ export default function DashboardPage() {
   React.useEffect(() => {
     const controller = new AbortController();
     setMonthlyPlan(null);
+    setAltModalData(null);
+    setMonthlySaving(false);
+    setMonthlySaveError("");
     setShowMonthlyModal(false);
     apiFetch<any>(`/api/monthly-plans/${currentMonth}`, { signal: controller.signal })
       .then(data => {
@@ -129,7 +151,11 @@ export default function DashboardPage() {
         setMonthlyLoad({ scope: promptScope, missing: false });
         console.error("Failed to fetch monthly plan:", err);
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      monthlySaveRef.current?.abort();
+      monthlySaveRef.current = null;
+    };
   }, [currentMonth, promptScope]);
 
   React.useEffect(() => {
@@ -170,16 +196,26 @@ export default function DashboardPage() {
           <AlternativeCoachModal 
             exerciseId={altModalData.exId}
             exerciseName={altModalData.exName}
+            scopeNote={REPLACEMENT_NOTE}
             onClose={() => setAltModalData(null)}
             onReplace={(newExercise: string | { id?: string; name?: string }) => {
               const newExName = typeof newExercise === "string" ? newExercise : newExercise.name || altModalData.exName;
-              const updatedPlan = { ...monthlyPlan };
-              updatedPlan.weekly_routine[altModalData.dayIdx].example_exercises[altModalData.exIdx] = newExName;
-              if (typeof newExercise !== "string" && newExercise.id) {
-                const routine = updatedPlan.weekly_routine[altModalData.dayIdx];
-                routine.exercise_ids = Array.isArray(routine.exercise_ids) ? [...routine.exercise_ids] : [];
-                routine.exercise_ids[altModalData.exIdx] = newExercise.id;
-              }
+              const updatedPlan = {
+                ...monthlyPlan,
+                weekly_routine: monthlyPlan.weekly_routine.map((routine: any, dayIdx: number) => {
+                  if (dayIdx !== altModalData.dayIdx) return routine;
+                  const updatedRoutine = {
+                    ...routine,
+                    example_exercises: [...routine.example_exercises],
+                    exercise_ids: [...(routine.exercise_ids || [])],
+                  };
+                  updatedRoutine.example_exercises[altModalData.exIdx] = newExName;
+                  if (typeof newExercise !== "string" && newExercise.id) {
+                    updatedRoutine.exercise_ids[altModalData.exIdx] = newExercise.id;
+                  }
+                  return updatedRoutine;
+                }),
+              };
               saveMonthlyPlan(updatedPlan);
               setAltModalData(null);
             }}
@@ -230,7 +266,8 @@ export default function DashboardPage() {
         <div className="mb-6">
           <button
             onClick={() => { promptHandledRef.current = promptScope; setShowMonthlyModal(true); }}
-            className="text-sm font-bold text-primary hover:text-white transition-colors"
+            disabled={monthlySaving}
+            className="text-sm font-bold text-primary hover:text-white transition-colors disabled:opacity-50"
           >
             月間プランを作成／見直す
           </button>
@@ -238,6 +275,8 @@ export default function DashboardPage() {
 
         {/* 今日のワークアウト */}
         <section className="mb-8">
+          {monthlySaveError && <div className="mb-4"><ErrorMessage message={monthlySaveError} /></div>}
+          {monthlySaving && <p role="status" className="mb-4 text-sm text-white/60">種目の変更を保存中...</p>}
           <div className="glass rounded-[32px] p-6 md:p-10 relative overflow-hidden border border-white/10 shadow-2xl shadow-primary/5">
             <div className="absolute top-0 right-0 p-8 text-primary/5 pointer-events-none">
               <Dumbbell className="w-64 h-64 -rotate-12" />
@@ -306,6 +345,7 @@ export default function DashboardPage() {
                     
                     <div className="space-y-3">
                       <p className="text-xs font-black text-white/30 tracking-widest mb-4">おすすめ種目</p>
+                      <p id="replacement-scope" className="text-sm text-white/60">{REPLACEMENT_NOTE}</p>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {routine.example_exercises.map((ex: string, i: number) => (
                           <div key={i} className="flex flex-col p-4 bg-black/40 rounded-2xl border border-white/5 transition-colors group">
@@ -317,7 +357,9 @@ export default function DashboardPage() {
                             </div>
                             <button 
                               onClick={() => setAltModalData({dayIdx: idx, exIdx: i, exName: ex, exId: routine.exercise_ids?.[i]})}
-                              className="text-xs font-bold text-primary opacity-60 hover:opacity-100 flex items-center gap-1 mt-auto self-start bg-primary/10 px-3 py-1.5 rounded-lg border border-primary/20 transition-all"
+                              disabled={monthlySaving}
+                              aria-describedby="replacement-scope"
+                              className="text-xs font-bold text-primary opacity-60 hover:opacity-100 flex items-center gap-1 mt-auto self-start bg-primary/10 px-3 py-1.5 rounded-lg border border-primary/20 transition-all disabled:opacity-30"
                             >
                               <RefreshCw className="w-3 h-3" /> 種目を変更・AIに相談
                             </button>

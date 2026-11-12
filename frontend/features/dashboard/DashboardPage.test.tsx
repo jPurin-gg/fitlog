@@ -128,6 +128,79 @@ it("設定を取得前に開いても、最初の取得が成功したら保存�
   expect(within(dialog).getByRole("button", { name: "保存する" })).toBeEnabled();
 });
 
+it("種目差し替えの保存失敗で元の名前とIDに戻り、再度変更して保存できる", async () => {
+  const plan = {
+    plan_month: "2026-10",
+    plan_name: "月間プラン",
+    frequency: "週2回",
+    description: "説明",
+    rationale: "理由",
+    rest_days: [],
+    recommended_days: [4, 6],
+    weekly_routine: [
+      { day_name: "木曜日", target: "胸", example_exercises: ["ベンチプレス", "腕立て伏せ"], exercise_ids: ["bench", "pushup"] },
+      { day_name: "土曜日", target: "脚", example_exercises: ["スクワット"], exercise_ids: ["squat"] },
+    ],
+  };
+  const response = deferred<Response>();
+  const payloads: typeof plan[] = [];
+  server.use(
+    http.get("http://localhost:3000/api/monthly-plans/:month", () => HttpResponse.json(plan)),
+    http.post("http://localhost:3000/api/exercises", () => HttpResponse.json({ id: "dumbbell", name: "ダンベルプレス" })),
+    http.put("http://localhost:3000/api/monthly-plans/:month", async ({ request }) => {
+      const input = await request.json() as typeof plan;
+      payloads.push(input);
+      return payloads.length === 1 ? response.promise : HttpResponse.json({ ...input, plan_month: "2026-10" });
+    }),
+  );
+  show();
+  await screen.findByText("ベンチプレス");
+  expect(screen.getByText(/種目の変更は、今月の月間プランの毎週のこの曜日/)).toBeInTheDocument();
+
+  const replace = async () => {
+    await userEvent.click(screen.getAllByRole("button", { name: "種目を変更・AIに相談" })[0]);
+    const dialog = await screen.findByRole("dialog", { name: "種目を変更" });
+    expect(within(dialog).getByText(/毎週のこの曜日/)).toBeInTheDocument();
+    await userEvent.type(within(dialog).getByPlaceholderText("好きな種目名を入力"), "ダンベルプレス");
+    await userEvent.click(within(dialog).getByRole("button", { name: "決定" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  };
+  await replace();
+  expect(screen.getByText("ダンベルプレス")).toBeInTheDocument();
+  expect(screen.queryByText("ベンチプレス")).not.toBeInTheDocument();
+  expect(screen.getByText("種目の変更を保存中...")).toBeInTheDocument();
+  screen.getAllByRole("button", { name: "種目を変更・AIに相談" }).forEach(button => expect(button).toBeDisabled());
+  await waitFor(() => expect(payloads).toHaveLength(1));
+  expect(payloads[0].weekly_routine[0]).toEqual({ ...plan.weekly_routine[0], example_exercises: ["ダンベルプレス", "腕立て伏せ"], exercise_ids: ["dumbbell", "pushup"] });
+  expect(payloads[0].weekly_routine[1]).toEqual(plan.weekly_routine[1]);
+
+  response.resolve(HttpResponse.json({ detail: "プランを保存できませんでした。" }, { status: 500 }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("プランを保存できませんでした。 元の種目に戻しました。");
+  expect(screen.getByText("ベンチプレス")).toBeInTheDocument();
+  expect(screen.queryByText("ダンベルプレス")).not.toBeInTheDocument();
+  expect(screen.queryByText("種目の変更を保存中...")).not.toBeInTheDocument();
+  await userEvent.click(screen.getAllByRole("button", { name: "種目を変更・AIに相談" })[0]);
+  const dialog = await screen.findByRole("dialog", { name: "種目を変更" });
+  expect(within(dialog).getByText("ベンチプレス")).toBeInTheDocument();
+  // 元のIDでAIへ相談できることも、実際のリクエストで確認する。
+  let consultedID = "";
+  server.use(http.post("http://localhost:3000/api/exercises/:id/alternatives", ({ params }) => {
+    consultedID = String(params.id);
+    return HttpResponse.json({ message: "候補", alternatives: [] });
+  }));
+  await userEvent.click(within(dialog).getByRole("switch"));
+  await userEvent.click(within(dialog).getByRole("button", { name: "AIに代替種目を相談する" }));
+  await waitFor(() => expect(consultedID).toBe("bench"));
+  await within(dialog).findByText("候補");
+  await userEvent.type(within(dialog).getByPlaceholderText("リストにない種目を手動で入力"), "ダンベルプレス");
+  await userEvent.click(within(dialog).getByRole("button", { name: "決定" }));
+  await waitFor(() => expect(payloads).toHaveLength(2));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  expect(await screen.findByText("ダンベルプレス")).toBeInTheDocument();
+  expect(screen.queryByText("ベンチプレス")).not.toBeInTheDocument();
+});
+
 it("未作成の月の最初のホーム訪問で案内し、AI OFFのまま記録に進める", async () => {
   show();
   const dialog = await screen.findByRole("dialog", { name: "月間プラン" });
