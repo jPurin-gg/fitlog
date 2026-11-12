@@ -9,6 +9,9 @@ import (
 	authcore "github.com/jPurin-gg/myfitlog-backend/internal/auth"
 	authhttp "github.com/jPurin-gg/myfitlog-backend/internal/auth/httpapi"
 	authpostgres "github.com/jPurin-gg/myfitlog-backend/internal/auth/postgres"
+	bodycore "github.com/jPurin-gg/myfitlog-backend/internal/body"
+	bodyhttp "github.com/jPurin-gg/myfitlog-backend/internal/body/httpapi"
+	bodypostgres "github.com/jPurin-gg/myfitlog-backend/internal/body/postgres"
 	"github.com/jPurin-gg/myfitlog-backend/internal/clock"
 	"github.com/jPurin-gg/myfitlog-backend/internal/config"
 	exercisecore "github.com/jPurin-gg/myfitlog-backend/internal/exercise"
@@ -49,6 +52,8 @@ func NewHandler(db *sql.DB, cfg config.Config, logger *slog.Logger) http.Handler
 	workoutHandler := workouthttp.NewHandler(workoutService)
 	reportingService := reportingcore.NewService(reportingpostgres.New(db), appClock)
 	reportingHandler := reportinghttp.NewHandler(reportingService)
+	bodyService := bodycore.NewService(bodypostgres.New(db))
+	bodyHandler := bodyhttp.NewHandler(bodyService)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
@@ -58,6 +63,10 @@ func NewHandler(db *sql.DB, cfg config.Config, logger *slog.Logger) http.Handler
 	protected := func(handler http.HandlerFunc) http.Handler { return authHandler.Authenticate(handler) }
 	mux.Handle("GET /api/dashboard", protected(reportingHandler.Dashboard))
 	mux.Handle("GET /api/calendar", protected(reportingHandler.Calendar))
+	mux.Handle("GET /api/body-measurements", protected(bodyHandler.List))
+	mux.Handle("POST /api/body-measurements", protected(bodyHandler.Create))
+	mux.Handle("PUT /api/body-measurements/{measurementID}", protected(bodyHandler.Update))
+	mux.Handle("DELETE /api/body-measurements/{measurementID}", protected(bodyHandler.Delete))
 	mux.Handle("GET /api/preferences", protected(profileHandler.Get))
 	mux.Handle("PUT /api/preferences", protected(profileHandler.Put))
 
