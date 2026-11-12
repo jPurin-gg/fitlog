@@ -9,6 +9,7 @@ import (
 
 	"github.com/lib/pq"
 
+	"github.com/jPurin-gg/myfitlog-backend/internal/database"
 	"github.com/jPurin-gg/myfitlog-backend/internal/workout"
 )
 
@@ -283,6 +284,9 @@ func (r *Repository) SaveCalendarWorkout(ctx context.Context, userID int, date t
 		return workout.CalendarWorkout{}, err
 	}
 	defer tx.Rollback()
+	if err := database.LockWorkoutDate(ctx, tx, userID, date); err != nil {
+		return workout.CalendarWorkout{}, err
+	}
 	for _, set := range input.Sets {
 		var exists bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM exercises WHERE id=$1)`, set.ExerciseID).Scan(&exists); err != nil {

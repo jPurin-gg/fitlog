@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jPurin-gg/myfitlog-backend/internal/database"
 	"github.com/jPurin-gg/myfitlog-backend/internal/planning"
 )
 
@@ -180,6 +181,9 @@ func (r *Repository) AttachWorkout(ctx context.Context, userID int, date time.Ti
 		return planning.PlanSession{}, err
 	}
 	defer tx.Rollback()
+	if err := database.LockWorkoutDate(ctx, tx, userID, date); err != nil {
+		return planning.PlanSession{}, err
+	}
 
 	var session planning.PlanSession
 	var planJSON []byte
@@ -205,8 +209,8 @@ func (r *Repository) AttachWorkout(ctx context.Context, userID int, date time.Ti
 		start := date
 		end := date.AddDate(0, 0, 1)
 		err = tx.QueryRowContext(ctx, `
-			SELECT id FROM workouts WHERE user_id=$1 AND ended_at IS NULL AND started_at >= $2 AND started_at < $3
-			ORDER BY started_at DESC LIMIT 1
+			SELECT id FROM workouts WHERE user_id=$1 AND started_at >= $2 AND started_at < $3
+			ORDER BY started_at DESC,id DESC LIMIT 1
 		`, userID, start, end).Scan(&session.WorkoutID)
 		if errors.Is(err, sql.ErrNoRows) {
 			err = tx.QueryRowContext(ctx, `INSERT INTO workouts (user_id, notes) VALUES ($1,$2) RETURNING id`, userID, session.Plan.WorkoutTitle).Scan(&session.WorkoutID)
@@ -218,8 +222,18 @@ func (r *Repository) AttachWorkout(ctx context.Context, userID int, date time.Ti
 			return planning.PlanSession{}, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE workouts SET notes=$1 WHERE id=$2 AND user_id=$3`, session.Plan.WorkoutTitle, session.WorkoutID, userID); err != nil {
+	// Calendar PUT saves a completed workout. Do not overwrite its title or create
+	// another workout when it wins the date lock before a start request.
+	result, err := tx.ExecContext(ctx, `UPDATE workouts SET notes=$1 WHERE id=$2 AND user_id=$3 AND ended_at IS NULL`, session.Plan.WorkoutTitle, session.WorkoutID, userID)
+	if err != nil {
 		return planning.PlanSession{}, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return planning.PlanSession{}, err
+	}
+	if count == 0 {
+		return planning.PlanSession{}, planning.ErrWorkoutCompleted
 	}
 	if err := tx.Commit(); err != nil {
 		return planning.PlanSession{}, err
