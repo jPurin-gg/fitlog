@@ -32,7 +32,13 @@ type DBConfig struct {
 }
 
 func (c DBConfig) DSN() string {
-	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", c.Host, c.Port, c.User, c.Password, c.Name)
+	// libpq values need quotes for whitespace and empty strings, and backslash escaping for quotes and backslashes.
+	escaper := strings.NewReplacer(`\`, `\\`, `'`, `\'`)
+	quote := func(value string) string {
+		return "'" + escaper.Replace(value) + "'"
+	}
+	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		quote(c.Host), quote(c.Port), quote(c.User), quote(c.Password), quote(c.Name))
 }
 
 type AIConfig struct {

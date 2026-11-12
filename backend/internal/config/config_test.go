@@ -1,9 +1,12 @@
 package config
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 func TestLoadOptionalAITimeout(t *testing.T) {
@@ -316,9 +319,56 @@ func TestDBConfigDSN(t *testing.T) {
 	db := DBConfig{Host: "db.example", Port: "6543", User: "alice", Password: "p@ss word", Name: "fitlog"}
 
 	got := db.DSN()
-	want := "host=db.example port=6543 user=alice password=p@ss word dbname=fitlog sslmode=disable"
+	want := "host='db.example' port='6543' user='alice' password='p@ss word' dbname='fitlog' sslmode=disable"
 	if got != want {
 		t.Fatalf("DSN() = %q, want %q", got, want)
+	}
+}
+
+func TestDBConfigDSNRoundTrip(t *testing.T) {
+	// An explicitly empty password must override libpq's environment fallback.
+	t.Setenv("PGPASSWORD", "environment-password")
+	t.Setenv("PGSSLMODE", "require")
+
+	tests := []struct {
+		name string
+		db   DBConfig
+	}{
+		{name: "通常の値", db: DBConfig{Host: "db.example", Port: "6543", User: "alice", Password: "password", Name: "fitlog"}},
+		{name: "空白", db: DBConfig{Host: "db.example", Port: "6543", User: "alice smith", Password: "p@ss word", Name: "fitlog test"}},
+		{name: "前後の空白", db: DBConfig{Host: "db.example", Port: "6543", User: " alice ", Password: " password ", Name: " fitlog "}},
+		{name: "引用符", db: DBConfig{Host: "db.example", Port: "6543", User: "a'lice", Password: `p'ass"word`, Name: "fit'log"}},
+		{name: "バックスラッシュと末尾のバックスラッシュ", db: DBConfig{Host: "db.example", Port: "6543", User: `alice\team`, Password: `p\ass\\word\`, Name: `fit\log\`}},
+		{name: "バックスラッシュと引用符の組み合わせ", db: DBConfig{Host: "db.example", Port: "6543", User: `a\'lice`, Password: `p\\'ass\'`, Name: `fit\'log\`}},
+		{name: "URLの予約文字", db: DBConfig{Host: "db.example", Port: "6543", User: "alice@team:dev", Password: "p@ss:/?#[]&=%+", Name: "fit/log?test#1%20"}},
+		{name: "Unicodeと空白文字", db: DBConfig{Host: "db.example", Port: "6543", User: "利用者\t名", Password: "秘密\n\r\v\f\u00a0文字", Name: "筋トレ\u3000記録"}},
+		{name: "接続オプションに似た値", db: DBConfig{Host: "db.example", Port: "6543", User: "alice password=other", Password: "secret sslmode=require", Name: "fitlog user=other"}},
+		{name: "空パスワード", db: DBConfig{Host: "db.example", Port: "6543", User: "alice", Password: "", Name: "fitlog"}},
+		{name: "空白だけのパスワード", db: DBConfig{Host: "db.example", Port: "6543", User: "alice", Password: " \t\n ", Name: "fitlog"}},
+		{name: "空文字列の値", db: DBConfig{Host: "", Port: "6543", User: "", Password: "", Name: ""}},
+		{name: "空白と特殊文字を含むUnixソケットパス", db: DBConfig{Host: `/tmp/postgres socket's\dir`, Port: "6543", User: "alice", Password: "password", Name: "fitlog"}},
+		{name: "IPv6ホスト", db: DBConfig{Host: "::1", Port: "6543", User: "alice", Password: "password", Name: "fitlog"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed, err := pq.NewConfig(tt.db.DSN())
+			if err != nil {
+				t.Fatalf("pq.NewConfig(DSN()) error = %v", err)
+			}
+			got := DBConfig{
+				Host:     parsed.Host,
+				Port:     strconv.Itoa(int(parsed.Port)),
+				User:     parsed.User,
+				Password: parsed.Password,
+				Name:     parsed.Database,
+			}
+			if got != tt.db {
+				t.Errorf("parsed DB config = %#v, want %#v", got, tt.db)
+			}
+			if parsed.SSLMode != pq.SSLModeDisable {
+				t.Errorf("parsed SSLMode = %q, want %q", parsed.SSLMode, pq.SSLModeDisable)
+			}
+		})
 	}
 }
 
