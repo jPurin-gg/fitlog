@@ -25,6 +25,7 @@ import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
 import { displayPlanText, formatPlanMonth } from "@/lib/fitlog";
 import { useMonthlyPromptDismissal } from "./useMonthlyPromptDismissal";
+import { useTodayWorkout } from "@/features/workout/useTodayWorkout";
 
 const WEEKDAY_OPTIONS = [
   { value: 0, label: "日" },
@@ -49,6 +50,7 @@ function weekdayLabels(days?: number[]) {
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const { workout: todayWorkout } = useTodayWorkout();
   const [showMonthlyModal, setShowMonthlyModal] = React.useState(false);
   const [showPreferencesModal, setShowPreferencesModal] = React.useState(false);
   const [monthlyPlan, setMonthlyPlan] = React.useState<any>(null);
@@ -257,6 +259,20 @@ export default function DashboardPage() {
               </div>
 
               {(() => {
+                if (todayWorkout) {
+                  return (
+                    <div className="rounded-3xl border border-primary/20 bg-primary/10 p-6">
+                      <h3 className="mb-2 text-xl font-bold">{todayWorkout.status === "completed" ? "今日の記録は完了済みです" : "ワークアウトが進行中です"}</h3>
+                      <p className="mb-4 text-sm text-white/60">保存済み {todayWorkout.summary.total_sets} セット。再開すると同じ記録に追記できます。</p>
+                      <Link href="/workout" className="inline-flex rounded-2xl bg-primary px-6 py-3 font-bold text-black">
+                        {todayWorkout.status === "completed" ? "記録を再開して追記" : "記録を再開"}
+                      </Link>
+                      {todayWorkout.status === "completed" && (
+                        <Link href={`/workouts/${todayWorkout.id}`} className="ml-4 inline-block text-sm text-primary underline">今日の記録を見る</Link>
+                      )}
+                    </div>
+                  );
+                }
                 if (!monthlyPlan) {
                   return (
                     <div className="text-center py-12">

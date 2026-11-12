@@ -69,3 +69,15 @@ export interface SetInput {
   reps: number;
   feeling: string;
 }
+
+export interface SavedWorkoutSet extends SetInput {
+  id?: number;
+  exercise_name?: string;
+}
+
+export interface WorkoutRecord {
+  workout_id: number;
+  date: string;
+  title: string;
+  sets: SavedWorkoutSet[];
+}

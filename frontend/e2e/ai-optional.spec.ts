@@ -10,6 +10,7 @@ async function mockAPI(page: Page) {
   const unexpected: string[] = [];
   const keys = new Set<string>();
   let finishes = 0;
+  let status = "active";
   const summary = () => ({
     total_sets: saved.length, total_reps: saved.reduce((n, set) => n + set.reps, 0),
     total_volume: saved.reduce((n, set) => n + set.weight * set.reps, 0), duration_min: 5, pr_count: 0,
@@ -26,7 +27,10 @@ async function mockAPI(page: Page) {
     if (method === "GET") {
       if (path === "/api/auth/me") return respond(200, { id: 1, nickname: "E2E user" });
       if (path === "/api/dashboard") return respond(200, { recent_workouts: [] });
-      if (path === "/api/workouts/42") return respond(200, { id: 42, status: "active", summary: summary() });
+      if (/^\/api\/workouts\/by-date\//.test(path)) return starts.length
+        ? respond(200, { workout_id: 42, sets: saved.map(set => ({ ...set, feeling: "", exercise_name: exercises.find(exercise => exercise.id === set.exercise_id)?.name })) })
+        : respond(404, { detail: "記録はまだありません。" });
+      if (path === "/api/workouts/42") return respond(200, { id: 42, status, summary: summary() });
       if (path === "/api/preferences") return respond(200, {});
       if (/^\/api\/monthly-plans\/\d{4}-\d{2}$/.test(path)) return respond(404, { detail: "月間プランはありません。" });
       if (["/api/exercises", "/api/exercises/favorites"].includes(path)) return respond(200, exercises);
@@ -36,9 +40,10 @@ async function mockAPI(page: Page) {
     if (method === "POST" && /^\/api\/workout-plans\/[^/]+\/start$/.test(path)) {
       const input = request.postDataJSON();
       starts.push(input);
+      status = "active";
       expect(input).toEqual(starts.length === 1 ? { use_ai: false, exercise_id: "bench" } : { use_ai: false });
       return respond(200, {
-        workout_id: 42, status: "active", ai_status: "not_requested", resumed: starts.length > 1,
+        workout_id: 42, plan_date: path.split("/")[3], status: "active", ai_status: "not_requested", resumed: starts.length > 1,
         plan: {
           workout_title: "フリーワークアウト", target: "自分で選んだ種目", estimated_duration_min: 15,
           exercises: [{ exercise_id: "bench", name: "ベンチプレス", planned_sets: 3, target_weight: 0, target_reps: 10, last_max_weight: 0 }],
@@ -55,6 +60,7 @@ async function mockAPI(page: Page) {
     }
     if (method === "POST" && path === "/api/workouts/42/finish") {
       finishes++;
+      status = "completed";
       return respond(200, { workout_id: 42, status: "completed", summary: summary() });
     }
     if (/\/(generate|recommendation|summary-comment|alternatives)$/.test(path)) {
@@ -132,7 +138,7 @@ test("終了を確認してから同日の記録を再開し、追記したセ�
   await expect(page.getByText("600", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "新しく始める" }).click();
-  await page.getByRole("button", { name: /ワークアウトを開始/ }).click();
+  await page.getByRole("button", { name: "ワークアウトを再開して追記" }).click();
   await expect(page.getByText(/今日のワークアウトを再開しました/)).toBeVisible();
   await expect(page.getByText("セット 2 / 3")).toBeVisible();
   await page.getByPlaceholder("80", { exact: true }).fill("60");

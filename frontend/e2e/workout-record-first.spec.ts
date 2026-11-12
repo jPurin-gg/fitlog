@@ -14,6 +14,9 @@ test("ブラウザでワークアウトを開始し、AI障害中も記録を完
     if (request.method() === "GET" && url.pathname === "/api/auth/me") {
       return respond(200, { id: 1, nickname: "E2E user" });
     }
+    if (request.method() === "GET" && /^\/api\/workouts\/by-date\//.test(url.pathname)) {
+      return respond(404, { detail: "記録はまだありません。" });
+    }
     if (request.method() === "GET" && /\/api\/exercises\/[^/]+\/settings$/.test(url.pathname)) {
       return respond(200, { target_sets: 3 });
     }
