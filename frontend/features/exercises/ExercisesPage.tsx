@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react'
 import { Search, Filter, Dumbbell, Activity, Shield, Plus, Loader2 } from 'lucide-react'
 import { apiErrorMessage, apiFetch } from '@/lib/api'
+import { ErrorMessage } from '@/components/ErrorMessage'
+import { useApiQuery } from '@/hooks/useApiQuery'
 import type { Exercise } from './types'
 
 // 今回のマスターデータ（tmpkin_jp.jsonベース）の構造
@@ -54,17 +56,14 @@ function displayExerciseLabel(value?: string) {
 }
 
 export default function ExercisesPage() {
-  const [exercises, setExercises] = useState<Exercise[]>([])
   const [muscle, setMuscle] = useState('すべて')
   const [difficulty, setDifficulty] = useState('すべて')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedEquipments, setSelectedEquipments] = useState<string[]>([])
-  const [isLoading, setIsLoading] = useState(true)
   const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [isAdding, setIsAdding] = useState(false)
   const [addError, setAddError] = useState('')
-  const [reloadToken, setReloadToken] = useState(0)
   const [newExercise, setNewExercise] = useState({
     name: '',
     primaryMuscle: '大胸筋',
@@ -83,27 +82,15 @@ export default function ExercisesPage() {
     }
   }
 
-  useEffect(() => {
-    const fetchExercises = async () => {
-      setIsLoading(true)
-      try {
-        const params = new URLSearchParams()
-        if (muscle !== 'すべて') params.set('muscle', muscle)
-        if (difficulty !== 'すべて') params.set('level', difficulty)
-        if (searchQuery.trim()) params.set('name', searchQuery.trim())
-        if (selectedEquipments.length > 0) params.set('equipment', selectedEquipments.join(','))
-        const qs = params.toString()
-        const data = await apiFetch<Exercise[]>(`/api/exercises${qs ? '?' + qs : ''}`)
-        setExercises(data || [])
-      } catch (e) {
-        console.error("Failed to fetch exercises", e)
-      }
-      setIsLoading(false)
-    }
-    // 入力中に毎回叩かないよう 300ms debounce
-    const timer = setTimeout(fetchExercises, 300)
-    return () => clearTimeout(timer)
-  }, [muscle, difficulty, searchQuery, selectedEquipments, reloadToken])
+  const params = new URLSearchParams()
+  if (muscle !== 'すべて') params.set('muscle', muscle)
+  if (difficulty !== 'すべて') params.set('level', difficulty)
+  if (searchQuery.trim()) params.set('name', searchQuery.trim())
+  if (selectedEquipments.length > 0) params.set('equipment', selectedEquipments.join(','))
+  const qs = params.toString()
+  // 入力中に毎回叩かないよう 300ms debounce
+  const exercisesQuery = useApiQuery<Exercise[]>(`/api/exercises${qs ? '?' + qs : ''}`, '種目の取得に失敗しました。', { delay: 300 })
+  const exercises = exercisesQuery.data || []
 
   // モーダルが開いている間は背景のスクロールを無効化する（UX改善）
   useEffect(() => {
@@ -163,9 +150,8 @@ export default function ExercisesPage() {
           instructions,
         })
       })
-      setExercises(prev => [created, ...prev])
       setSelectedExercise(created)
-      setReloadToken(prev => prev + 1)
+      exercisesQuery.retry()
       closeAddModal()
     } catch (e) {
       console.error(e)
@@ -265,8 +251,10 @@ export default function ExercisesPage() {
         </div>
 
         {/* 種目リスト */}
-        {isLoading ? (
-          <div className="flex justify-center items-center py-20">
+        {exercisesQuery.error ? (
+          <ErrorMessage message={exercisesQuery.error} onRetry={exercisesQuery.retry} />
+        ) : exercisesQuery.status === 'loading' ? (
+          <div role="status" aria-label="種目を読み込み中..." className="flex justify-center items-center py-20">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
           </div>
         ) : exercises.length === 0 ? (
