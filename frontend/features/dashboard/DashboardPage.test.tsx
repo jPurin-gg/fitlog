@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vite
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { AISettingsProvider } from "@/components/AISettings";
+import { expectAccessible } from "@/test/a11y";
 import DashboardPage from "./DashboardPage";
 
 const auth = vi.hoisted(() => ({ user: { id: 1, nickname: "テスト" } }));
@@ -161,7 +162,7 @@ it("種目差し替えの保存失敗で元の名前とIDに戻り、再度変�
     await userEvent.click(screen.getAllByRole("button", { name: "種目を変更・AIに相談" })[0]);
     const dialog = await screen.findByRole("dialog", { name: "種目を変更" });
     expect(within(dialog).getByText(/毎週のこの曜日/)).toBeInTheDocument();
-    await userEvent.type(within(dialog).getByPlaceholderText("好きな種目名を入力"), "ダンベルプレス");
+    await userEvent.type(within(dialog).getByRole("textbox", { name: "変更する種目名" }), "ダンベルプレス");
     await userEvent.click(within(dialog).getByRole("button", { name: "決定" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   };
@@ -192,7 +193,7 @@ it("種目差し替えの保存失敗で元の名前とIDに戻り、再度変�
   await userEvent.click(within(dialog).getByRole("button", { name: "AIに代替種目を相談する" }));
   await waitFor(() => expect(consultedID).toBe("bench"));
   await within(dialog).findByText("候補");
-  await userEvent.type(within(dialog).getByPlaceholderText("リストにない種目を手動で入力"), "ダンベルプレス");
+  await userEvent.type(within(dialog).getByRole("textbox", { name: "変更する種目名" }), "ダンベルプレス");
   await userEvent.click(within(dialog).getByRole("button", { name: "決定" }));
   await waitFor(() => expect(payloads).toHaveLength(2));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -276,4 +277,72 @@ it("プランの読み込み失敗を未作成と誤認して案内しない", a
   await waitFor(() => expect(error).toHaveBeenCalled());
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "プランなしで記録を始める" })).toHaveAttribute("href", "/workout");
+});
+
+it("設定の器具は優先と回避を排他にし、保存失敗後も編集内容を保って再試行できる", async () => {
+  existingPlan();
+  const payloads: unknown[] = [];
+  server.use(http.put("http://localhost:3000/api/preferences", async ({ request }) => {
+    const input = await request.json();
+    payloads.push(input);
+    return payloads.length === 1
+      ? HttpResponse.json({ detail: "設定を保存できませんでした。" }, { status: 500 })
+      : HttpResponse.json(input as object);
+  }));
+  show();
+  const trigger = screen.getByRole("button", { name: "トレーニング設定" });
+  await userEvent.click(trigger);
+  const dialog = await screen.findByRole("dialog", { name: "トレーニング設定" });
+  const notes = await within(dialog).findByRole("textbox", { name: "メモ" });
+  const preferred = within(dialog).getByRole("group", { name: "優先する器具" });
+  const avoided = within(dialog).getByRole("group", { name: "避けたい器具" });
+  await userEvent.click(within(preferred).getByRole("button", { name: "ダンベル" }));
+  await userEvent.click(within(avoided).getByRole("button", { name: "ダンベル" }));
+  expect(within(preferred).getByRole("button", { name: "ダンベル" })).toHaveAttribute("aria-pressed", "false");
+  await userEvent.click(within(preferred).getByRole("button", { name: "ダンベル" }));
+  expect(within(avoided).getByRole("button", { name: "ダンベル" })).toHaveAttribute("aria-pressed", "false");
+  await userEvent.click(within(dialog).getByRole("button", { name: "家" }));
+  await userEvent.type(notes, "自宅で記録");
+  await expectAccessible(dialog);
+  await userEvent.click(within(dialog).getByRole("button", { name: "保存する" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent("設定を保存できませんでした。");
+  expect(notes).toHaveValue("自宅で記録");
+  await userEvent.click(within(dialog).getByRole("button", { name: "保存する" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(payloads).toEqual(Array(2).fill({ preferred_equipment: ["ダンベル"], avoided_equipment: [], training_environment: "家", notes: "自宅で記録" }));
+  expect(trigger).toHaveFocus();
+});
+
+it("月間プランのAI候補を選ぶと対象曜日の種目名とIDだけを変更する", async () => {
+  const plan = {
+    plan_month: "2026-10", plan_name: "上半身プラン", recommended_days: [4, 6],
+    weekly_routine: [
+      { day_name: "木曜日", target: "胸", example_exercises: ["ベンチプレス"], exercise_ids: ["bench"] },
+      { day_name: "土曜日", target: "脚", example_exercises: ["スクワット"], exercise_ids: ["squat"] },
+    ],
+  };
+  let saved: typeof plan | undefined;
+  server.use(
+    http.get("http://localhost:3000/api/monthly-plans/:month", () => HttpResponse.json(plan)),
+    http.post("http://localhost:3000/api/exercises/bench/alternatives", () => HttpResponse.json({ message: "候補", alternatives: [{ id: "dumbbell", name: "ダンベルプレス", description: "ダンベルで代替" }] })),
+    http.put("http://localhost:3000/api/monthly-plans/2026-10", async ({ request }) => {
+      saved = await request.json() as typeof plan;
+      return HttpResponse.json(saved);
+    }),
+  );
+  show();
+  await screen.findByText("ベンチプレス");
+  await userEvent.click(screen.getAllByRole("button", { name: "種目を変更・AIに相談" })[0]);
+  const dialog = screen.getByRole("dialog", { name: "種目を変更" });
+  await expectAccessible(dialog);
+  await userEvent.click(within(dialog).getByRole("switch", { name: "AIを使う" }));
+  await userEvent.click(within(dialog).getByRole("button", { name: "AIに代替種目を相談する" }));
+  await userEvent.click(await within(dialog).findByRole("button", { name: /ダンベルプレス/ }));
+  await waitFor(() => expect(saved).toBeDefined());
+  expect(saved?.weekly_routine).toEqual([
+    { ...plan.weekly_routine[0], example_exercises: ["ダンベルプレス"], exercise_ids: ["dumbbell"] },
+    plan.weekly_routine[1],
+  ]);
+  expect(await screen.findByText("ダンベルプレス")).toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
