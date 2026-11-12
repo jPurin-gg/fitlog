@@ -5,7 +5,9 @@ import { ArrowLeft, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Dumbbel
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { ExerciseSelectorModal } from "@/features/exercises/components/ExerciseSelectorModal";
+import { ErrorMessage } from "@/components/ErrorMessage";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
 import { displayPlanText, formatLocalDate, formatPlanMonth } from "@/lib/fitlog";
 import type { CalendarPlan, CalendarPlanExercise, CalendarWorkout, CalendarWorkoutSet, DayRoutine, MonthlyPlan, PlannedWorkoutDay, WorkedOutDay } from "./types";
@@ -43,60 +45,21 @@ function weekdayLabels(days?: number[]) {
 
 export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [plan, setPlan] = useState<MonthlyPlan | null>(null);
-  const [planHistory, setPlanHistory] = useState<MonthlyPlan[]>([]);
-  const [plannedWeekDays, setPlannedWeekDays] = useState<number[]>([]);
-  const [workedOutDates, setWorkedOutDates] = useState<number[]>([]);
-  const [workedOutDays, setWorkedOutDays] = useState<WorkedOutDay[]>([]);
-  const [plannedDays, setPlannedDays] = useState<PlannedWorkoutDay[]>([]);
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const selectedPlanMonth = formatPlanMonth(currentDate);
 
-  const refreshCalendarData = React.useCallback(() => {
-    return apiFetch<{ worked_out_dates?: number[]; worked_out_days?: WorkedOutDay[]; planned_days?: PlannedWorkoutDay[] }>(`/api/calendar?year=${currentDate.getFullYear()}&month=${currentDate.getMonth() + 1}`)
-      .then(data => {
-        if (data && data.worked_out_dates) {
-          setWorkedOutDates(data.worked_out_dates);
-        } else {
-          setWorkedOutDates([]);
-        }
-        if (data && data.worked_out_days) {
-          setWorkedOutDays(data.worked_out_days);
-        } else {
-          setWorkedOutDays([]);
-        }
-        if (data && data.planned_days) {
-          setPlannedDays(data.planned_days);
-        } else {
-          setPlannedDays([]);
-        }
-      })
-      .catch(err => console.error("Failed to fetch calendar data:", err));
-  }, [currentDate]);
-
-  useEffect(() => {
-    apiFetch<MonthlyPlan[]>("/api/monthly-plans")
-      .then(data => setPlanHistory(Array.isArray(data) ? data : []))
-      .catch(err => console.error("Failed to fetch monthly plan history:", err));
-  }, []);
-
-  useEffect(() => {
-    apiFetch<MonthlyPlan>(`/api/monthly-plans/${selectedPlanMonth}`)
-      .then(data => {
-        setPlan(data);
-        setPlannedWeekDays(data.recommended_days || [1, 3, 5]);
-      })
-      .catch(err => {
-        if (err instanceof ApiError && err.status === 404) {
-          setPlan(null);
-          setPlannedWeekDays([]);
-          return;
-        }
-        console.error("Failed to fetch monthly plan:", err);
-      });
-
-    refreshCalendarData();
-  }, [refreshCalendarData, selectedPlanMonth]);
+  const calendarQuery = useApiQuery<{ worked_out_dates?: number[]; worked_out_days?: WorkedOutDay[]; planned_days?: PlannedWorkoutDay[] }>(
+    `/api/calendar?year=${currentDate.getFullYear()}&month=${currentDate.getMonth() + 1}`, "カレンダーの取得に失敗しました。",
+  );
+  const historyQuery = useApiQuery<MonthlyPlan[]>("/api/monthly-plans", "プラン履歴の取得に失敗しました。");
+  const planQuery = useApiQuery<MonthlyPlan>(`/api/monthly-plans/${selectedPlanMonth}`, "月間プランの取得に失敗しました。", { allowNotFound: true });
+  const plan = planQuery.data;
+  const planHistory = Array.isArray(historyQuery.data) ? historyQuery.data : [];
+  const plannedWeekDays = plan ? plan.recommended_days || [1, 3, 5] : [];
+  const workedOutDates = calendarQuery.data?.worked_out_dates || [];
+  const workedOutDays = calendarQuery.data?.worked_out_days || [];
+  const plannedDays = calendarQuery.data?.planned_days || [];
+  const refreshCalendarData = calendarQuery.retry;
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -233,6 +196,8 @@ export default function CalendarPage() {
                 ))}
               </div>
 
+              {calendarQuery.error && <div className="mb-4"><ErrorMessage message={calendarQuery.error} onRetry={calendarQuery.retry} /></div>}
+              {calendarQuery.status === "loading" && <p role="status" className="mb-4 text-sm text-white/60">カレンダーを読み込み中...</p>}
               <div className="grid grid-cols-7 gap-2 lg:gap-4">
                 {days.map((day, idx) => {
                   if (!day) return <div key={`empty-${idx}`} className="p-2" />;
@@ -328,7 +293,11 @@ export default function CalendarPage() {
                 </span>
               </div>
 
-              {planHistory.length > 0 ? (
+              {historyQuery.error ? (
+                <ErrorMessage message={historyQuery.error} onRetry={historyQuery.retry} />
+              ) : historyQuery.status === "loading" ? (
+                <p role="status" className="text-sm text-white/60">プラン履歴を読み込み中...</p>
+              ) : planHistory.length > 0 ? (
                 <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                   {planHistory.map(historyPlan => {
                     const active = historyPlan.plan_month === selectedPlanMonth;
@@ -366,7 +335,11 @@ export default function CalendarPage() {
               <div className="flex items-center gap-2 text-primary font-bold mb-4 text-sm tracking-widest">
                 <Sparkles className="w-5 h-5" /> {isSelectedCurrentMonth ? "今月のプラン" : "過去のプラン"}
               </div>
-              {plan ? (
+              {planQuery.error ? (
+                <ErrorMessage message={planQuery.error} onRetry={planQuery.retry} />
+              ) : planQuery.status === "loading" ? (
+                <p role="status" className="text-sm text-white/60">月間プランを読み込み中...</p>
+              ) : plan ? (
                 <div>
                   <h3 className="text-xl font-bold mb-2 tracking-tight">{displayPlanText(plan.plan_name)}</h3>
                   <div className="px-3 py-1 glass bg-white/5 rounded-lg inline-block text-xs font-bold text-white/70 mb-6">
