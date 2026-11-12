@@ -17,12 +17,12 @@ import {
   RefreshCw,
   ChevronRight,
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { AlternativeCoachModal } from "@/features/exercises/components/AlternativeCoachModal";
 import { LogoutButton, useAuth } from "@/components/AuthGate";
 import { AIToggle, useAISettings } from "@/components/AISettings";
 import { ErrorMessage } from "@/components/ErrorMessage";
-import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { Modal } from "@/components/Modal";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
 import { displayPlanText, formatPlanMonth } from "@/lib/fitlog";
@@ -239,7 +239,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex flex-wrap gap-3 sm:gap-4 w-full sm:w-auto">
             <AIToggle />
-            <Link href="/calendar" className="flex-none p-3 glass rounded-2xl hover:bg-white/10 transition-colors block">
+            <Link aria-label="カレンダー" href="/calendar" className="flex-none p-3 glass rounded-2xl hover:bg-white/10 transition-colors block">
               <Calendar className="w-5 h-5 text-white/70" />
             </Link>
             <button
@@ -396,14 +396,14 @@ export default function DashboardPage() {
                   <h4 className="font-bold truncate">{w.title}</h4>
                   <ChevronRight className="w-4 h-4 text-white/25 group-hover:text-primary transition-colors flex-shrink-0 mt-0.5" />
                 </div>
-                <p className="text-xs text-white/40 mb-4">{w.time}</p>
+                <p className="text-xs text-white/60 mb-4">{w.time}</p>
                 <div>
                   <span className="text-[10px] font-bold text-white/30 block mb-1">時間</span>
                   <span className="font-medium text-sm">{w.duration}</span>
                 </div>
               </Link>
             )) : (
-              <div className="col-span-full text-center py-8 text-white/40 text-sm bg-white/5 rounded-2xl border border-white/5">
+              <div className="col-span-full text-center py-8 text-white/60 text-sm bg-white/5 rounded-2xl border border-white/5">
                 まだ完了したワークアウトはありません。
               </div>
             )}
@@ -416,17 +416,8 @@ export default function DashboardPage() {
 
 
 function TrainingPreferencesModal({ preferencesQuery, onClose, onSaved }: any) {
-  useBodyScrollLock();
-
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md overflow-hidden overscroll-none">
-      <motion.div
-        role="dialog"
-        aria-modal="true"
-        aria-label="トレーニング設定"
-        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.9, y: 20 }}
+    <Modal label="トレーニング設定" onClose={onClose}
         className="glass border-secondary/20 w-full max-w-2xl rounded-[32px] overflow-hidden relative shadow-2xl shadow-secondary/10 max-h-[90vh] overflow-y-auto overscroll-contain"
       >
         <button onClick={onClose} aria-label="閉じる" className="absolute top-6 right-6 p-2 bg-white/5 rounded-full hover:bg-white/10 transition z-10 text-white/60 hover:text-white">
@@ -454,8 +445,7 @@ function TrainingPreferencesModal({ preferencesQuery, onClose, onSaved }: any) {
             </div>
           )}
         </div>
-      </motion.div>
-    </div>
+    </Modal>
   );
 }
 
@@ -510,8 +500,8 @@ function TrainingPreferencesForm({ initialPreferences, onClose, onSaved }: any) 
   return (
     <>
       <div className="space-y-6 mb-8">
-        <div className="space-y-3">
-          <label className="text-xs font-black tracking-widest text-white/40 ml-1">トレーニング環境</label>
+        <div role="group" aria-label="トレーニング環境" className="space-y-3">
+          <p className="text-xs font-black tracking-widest text-white/60 ml-1">トレーニング環境</p>
           <div className="grid grid-cols-3 gap-2">
             {ENVIRONMENT_OPTIONS.map(option => (
               <button
@@ -545,7 +535,7 @@ function TrainingPreferencesForm({ initialPreferences, onClose, onSaved }: any) 
         />
 
         <div className="space-y-2">
-          <label htmlFor="training-notes" className="text-xs font-black tracking-widest text-white/40 ml-1">メモ</label>
+          <label htmlFor="training-notes" className="text-xs font-black tracking-widest text-white/60 ml-1">メモ</label>
           <textarea
             id="training-notes"
             value={notes}
@@ -585,7 +575,7 @@ function TrainingPreferencesForm({ initialPreferences, onClose, onSaved }: any) 
 function EquipmentPicker({ label, selected, onToggle, activeClassName }: any) {
   return (
     <div role="group" aria-label={label} className="space-y-3">
-      <label className="text-xs font-black tracking-widest text-white/40 ml-1">{label}</label>
+      <label className="text-xs font-black tracking-widest text-white/60 ml-1">{label}</label>
       <div className="flex flex-wrap gap-2">
         {EQUIPMENT_OPTIONS.map(equipment => (
           <button
@@ -608,7 +598,6 @@ function EquipmentPicker({ label, selected, onToggle, activeClassName }: any) {
 
 
 export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, month = formatPlanMonth(new Date()) }: any) {
-  useBodyScrollLock();
   const { enabled: aiEnabled, isEnabled } = useAISettings();
 
   const [motivation, setMotivation] = React.useState("健康維持");
@@ -683,14 +672,7 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, mon
   ];
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md overflow-hidden overscroll-none">
-      <motion.div
-        role="dialog"
-        aria-modal="true"
-        aria-label="月間プラン"
-        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.9, y: 20 }}
+    <Modal label="月間プラン" onClose={onClose}
         className="glass border-primary/20 w-full max-w-lg rounded-[32px] overflow-hidden relative shadow-2xl shadow-primary/10 max-h-[90vh] overflow-y-auto overscroll-contain"
       >
         <button onClick={onClose} aria-label="閉じる" className="absolute top-6 right-6 p-2 bg-white/5 rounded-full hover:bg-white/10 transition z-10 text-white/60 hover:text-white">
@@ -720,11 +702,12 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, mon
           
           <div className="space-y-6 mb-8">
             <div className="space-y-3">
-              <label className="text-xs font-black tracking-widest text-white/40 ml-1">今月のモチベーション</label>
+              <label className="text-xs font-black tracking-widest text-white/60 ml-1">今月のモチベーション</label>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                 {motivationOptions.map(opt => (
                   <button
                     key={opt.id}
+                    aria-pressed={motivation === opt.id}
                     onClick={() => setMotivation(opt.id)}
                     className={`p-3 rounded-2xl border text-left transition-all ${
                       motivation === opt.id 
@@ -733,18 +716,19 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, mon
                     }`}
                   >
                     <div className={`font-bold text-sm mb-1 ${motivation === opt.id ? 'text-primary' : ''}`}>{opt.label}</div>
-                    <div className="text-[10px] opacity-70">{opt.desc}</div>
+                    <div className="text-[10px] text-white/70">{opt.desc}</div>
                   </button>
                 ))}
               </div>
             </div>
 
             <div className="space-y-3">
-              <label className="text-xs font-black tracking-widest text-white/40 ml-1">通える頻度（目安）</label>
+              <label className="text-xs font-black tracking-widest text-white/60 ml-1">通える頻度（目安）</label>
               <div className="grid grid-cols-3 gap-2">
                 {frequencyOptions.map(opt => (
                   <button
                     key={opt.id}
+                    aria-pressed={frequency === opt.id}
                     onClick={() => setFrequency(opt.id)}
                     className={`py-3 px-2 rounded-2xl border text-center font-bold text-sm transition-all ${
                       frequency === opt.id 
@@ -759,11 +743,12 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, mon
             </div>
 
             <div className="space-y-3">
-              <label className="text-xs font-black tracking-widest text-white/40 ml-1">休みたい曜日（任意）</label>
+              <label className="text-xs font-black tracking-widest text-white/60 ml-1">休みたい曜日（任意）</label>
               <div className="grid grid-cols-7 gap-2">
                 {WEEKDAY_OPTIONS.map(day => (
                   <button
                     key={day.value}
+                    aria-pressed={restDays.includes(day.value)}
                     onClick={() => toggleRestDay(day.value)}
                     className={`aspect-square rounded-2xl border text-center font-black text-sm transition-all ${
                       restDays.includes(day.value)
@@ -775,7 +760,7 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, mon
                   </button>
                 ))}
               </div>
-              <p className="text-[11px] text-white/40 leading-relaxed">
+              <p className="text-[11px] text-white/60 leading-relaxed">
                 選んだ曜日は休息日として避けます。生活リズム優先でOKです。
               </p>
               {!canGenerate && (
@@ -812,7 +797,6 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, mon
             </div>
           </button>
         </div>
-      </motion.div>
-    </div>
+    </Modal>
   );
 }

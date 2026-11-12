@@ -65,7 +65,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   if (!ready) {
     return (
       <div className="min-h-screen bg-[#0a0a0a] text-white flex items-center justify-center">
-        <Loader2 className="w-7 h-7 animate-spin text-primary" />
+        <span role="status" aria-label="セッションを確認中"><Loader2 className="w-7 h-7 animate-spin text-primary" /></span>
       </div>
     );
   }
@@ -121,8 +121,9 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
 
         <form onSubmit={login} className="glass rounded-[32px] p-6 md:p-8 border border-white/10 space-y-5">
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-white/40 ml-1">ニックネーム</label>
+            <label htmlFor="login-nickname" className="text-[10px] font-black text-white/60 ml-1">ニックネーム</label>
             <input
+              id="login-nickname"
               value={nickname}
               onChange={e => setNickname(e.target.value)}
               className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-primary/50 text-base"
@@ -132,9 +133,10 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
           </div>
 
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-white/40 ml-1">パスワード</label>
+            <label htmlFor="login-password" className="text-[10px] font-black text-white/60 ml-1">パスワード</label>
             <input
               type="password"
+              id="login-password"
               value={password}
               onChange={e => setPassword(e.target.value)}
               className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-primary/50 text-base"
@@ -144,13 +146,15 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
           </div>
 
           {error && (
-            <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl">
+            <div role="alert" className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl">
               <p className="text-sm text-red-200 whitespace-pre-line">{error}</p>
             </div>
           )}
 
           <button
             type="submit"
+            aria-label="ログイン"
+            aria-busy={loading}
             disabled={loading || !nickname.trim() || !password}
             className="w-full py-4 bg-primary text-black font-black rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-2"
           >

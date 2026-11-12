@@ -457,7 +457,7 @@ export default function WorkoutPage() {
           <WorkoutSummaryView
             summary={finishedSummary}
             emptyText="セット記録はまだありません。次回は1セット目から記録していきましょう。"
-            emptyStateClassName="text-sm text-white/45"
+            emptyStateClassName="text-sm text-white/60"
             exerciseSectionClassName="mb-6"
           />
 
@@ -472,7 +472,7 @@ export default function WorkoutPage() {
               <Loader2 className="h-5 w-5 animate-spin text-primary" />
               <div>
                 <p className="font-bold text-white/85">AIコーチが総評を作成中です</p>
-                <p className="mt-0.5 text-xs text-white/40">記録と集計はすでに完了しています。</p>
+                <p className="mt-0.5 text-xs text-white/60">記録と集計はすでに完了しています。</p>
               </div>
             </div>
           )}
@@ -556,7 +556,7 @@ export default function WorkoutPage() {
               >
                 自分で種目を選んで始める
               </button>
-              <p className="mt-2 text-[11px] text-white/30">月間プランがなくても、好きな種目から記録できます。</p>
+              <p className="mt-2 text-[11px] text-white/60">月間プランがなくても、好きな種目から記録できます。</p>
             </div>
           {startError && (
             <div className="mt-5 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-left">
@@ -692,13 +692,13 @@ export default function WorkoutPage() {
                 <button onClick={() => saveTargetSets(Math.max(1, tempTargetSets - 1))} disabled={finishing || recordTransitionLocked} className="w-6 h-6 bg-white/10 rounded-lg text-white font-bold hover:bg-white/20 transition-colors flex items-center justify-center text-xs disabled:opacity-40">−</button>
                 <span className="text-xs text-white/70 w-10 text-center font-bold">{tempTargetSets} セット</span>
                 <button onClick={() => saveTargetSets(Math.min(20, tempTargetSets + 1))} disabled={finishing || recordTransitionLocked} className="w-6 h-6 bg-white/10 rounded-lg text-white font-bold hover:bg-white/20 transition-colors flex items-center justify-center text-xs disabled:opacity-40">＋</button>
-                <button onClick={() => setEditingTargetSets(false)} disabled={finishing || recordTransitionLocked} className="text-[10px] text-white/40 ml-1 hover:text-white/60 disabled:opacity-40">✕</button>
+                <button onClick={() => setEditingTargetSets(false)} disabled={finishing || recordTransitionLocked} className="text-[10px] text-white/60 ml-1 hover:text-white/60 disabled:opacity-40">✕</button>
               </div>
             ) : (
               <button
                 onClick={() => { setTempTargetSets(targetSets); setEditingTargetSets(true); }}
                 disabled={finishing || recordTransitionLocked}
-                className="text-[10px] text-white/30 hover:text-white/60 transition-colors mt-0.5 disabled:opacity-40"
+                className="text-[10px] text-white/60 hover:text-white/60 transition-colors mt-0.5 disabled:opacity-40"
               >
                 目標セット数を変更
               </button>
@@ -711,7 +711,7 @@ export default function WorkoutPage() {
                 <div>
                   <p className="text-[10px] tracking-widest text-primary font-black mb-1">今日の計画</p>
                   <h3 className="text-lg font-bold">{displayPlanText(workoutPlan.plan.workout_title)}</h3>
-                  <p className="text-xs text-white/45 mt-1">{workoutPlan.plan.coach_note}</p>
+                  <p className="text-xs text-white/60 mt-1">{workoutPlan.plan.coach_note}</p>
                 </div>
                 <div className="text-right text-xs text-white/50 font-bold">
                   約 {workoutPlan.plan.estimated_duration_min} 分
@@ -733,7 +733,7 @@ export default function WorkoutPage() {
                       {idx < currentExerciseIndex ? <CheckCircle2 className="w-4 h-4 text-green-400" /> : <ListChecks className="w-4 h-4 text-primary" />}
                       <span className="text-sm font-bold truncate">{ex.name}</span>
                     </div>
-                    <div className="mt-1 text-[10px] text-white/40">
+                    <div className="mt-1 text-[10px] text-white/60">
                       {ex.planned_sets}セット / {ex.target_weight}kg × {ex.target_reps}回
                     </div>
                   </button>
@@ -747,9 +747,10 @@ export default function WorkoutPage() {
             <div className="space-y-6">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-white/40 ml-1">重量（kg）</label>
+                  <label htmlFor="set-weight" className="text-[10px] font-black text-white/60 ml-1">重量（kg）</label>
                   <input 
                     type="number" 
+                    id="set-weight"
                     value={formData.weight}
                     onChange={(e) => setFormData({...formData, weight: e.target.value})}
                     disabled={recordTransitionLocked || saveState === "saved" || finishing}
@@ -758,9 +759,10 @@ export default function WorkoutPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-white/40 ml-1">回数</label>
+                  <label htmlFor="set-reps" className="text-[10px] font-black text-white/60 ml-1">回数</label>
                   <input 
                     type="number" 
+                    id="set-reps"
                     value={formData.reps}
                     onChange={(e) => setFormData({...formData, reps: e.target.value})}
                     disabled={recordTransitionLocked || saveState === "saved" || finishing}
@@ -770,8 +772,9 @@ export default function WorkoutPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-white/40 ml-1">セット後の感想</label>
+                <label htmlFor="set-feeling" className="text-[10px] font-black text-white/60 ml-1">セット後の感想</label>
                 <textarea 
+                  id="set-feeling"
                   value={formData.feeling}
                   onChange={(e) => setFormData({...formData, feeling: e.target.value})}
                   disabled={recordTransitionLocked || saveState === "saved" || finishing}
@@ -820,7 +823,7 @@ export default function WorkoutPage() {
                     <Loader2 className="h-5 w-5 animate-spin text-primary" />
                     <div>
                       <p className="text-sm font-bold text-white/85">AI提案を取得中</p>
-                      <p className="mt-0.5 text-xs text-white/40">待たずに同じ重量・回数で次へ進めます。</p>
+                      <p className="mt-0.5 text-xs text-white/60">待たずに同じ重量・回数で次へ進めます。</p>
                     </div>
                   </div>
                 </div>
@@ -849,11 +852,11 @@ export default function WorkoutPage() {
                 <div className="space-y-3 rounded-2xl border border-white/10 bg-black/25 p-4">
                   <div className="grid grid-cols-1 gap-2 text-center sm:grid-cols-3">
                     <div className="rounded-xl bg-white/5 p-3">
-                      <p className="text-[10px] font-bold text-white/35">直前のセット</p>
+                      <p className="text-[10px] font-bold text-white/60">直前のセット</p>
                       <p className="mt-1 text-sm font-bold">{formData.weight}kg × {formData.reps}回</p>
                     </div>
                     <div className="rounded-xl bg-white/5 p-3">
-                      <p className="text-[10px] font-bold text-white/35">計画上の目標</p>
+                      <p className="text-[10px] font-bold text-white/60">計画上の目標</p>
                       <p className="mt-1 text-sm font-bold">
                         {activePlanExercise
                           ? `${activePlanExercise.target_weight ? `${activePlanExercise.target_weight}kg × ` : ""}${activePlanExercise.target_reps}回`
@@ -861,7 +864,7 @@ export default function WorkoutPage() {
                       </p>
                     </div>
                     <div className="rounded-xl bg-white/5 p-3">
-                      <p className="text-[10px] font-bold text-white/35">過去の最大重量</p>
+                      <p className="text-[10px] font-bold text-white/60">過去の最大重量</p>
                       <p className="mt-1 text-sm font-bold">
                         {activePlanExercise?.last_max_weight
                           ? `${activePlanExercise.last_max_weight}kg`
@@ -918,28 +921,28 @@ export default function WorkoutPage() {
                     {recommendation.next_action !== 'STOP' && (
                       <div className="flex gap-4 pt-4">
                         <div className="flex-1 bg-white/5 p-4 rounded-xl border border-white/5 text-center">
-                          <span className="text-[10px] font-black text-white/40 block mb-1">目標重量</span>
+                          <span className="text-[10px] font-black text-white/60 block mb-1">目標重量</span>
                           <span className="text-2xl font-bold">{recommendation.target_weight}</span>
                         </div>
                         <div className="flex-1 bg-white/5 p-4 rounded-xl border border-white/5 text-center">
-                          <span className="text-[10px] font-black text-white/40 block mb-1">目標回数</span>
+                          <span className="text-[10px] font-black text-white/60 block mb-1">目標回数</span>
                           <span className="text-2xl font-bold">{recommendation.target_reps}</span>
                         </div>
                       </div>
                     )}
                     <div className="pt-4 border-t border-white/5 flex justify-between items-end">
                       <div>
-                        <p className="text-[10px] text-white/30 font-black mb-1">提案理由</p>
+                        <p className="text-[10px] text-white/60 font-black mb-1">提案理由</p>
                         <p className="text-xs text-white/50">{recommendation.reason}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-[10px] text-white/30 font-black mb-1">過去最高</p>
+                        <p className="text-[10px] text-white/60 font-black mb-1">過去最高</p>
                         <p className="text-sm font-bold text-white/70">{recommendation.max_weight}<span className="text-[10px] ml-0.5">kg</span></p>
                       </div>
                     </div>
                     {recommendation.record_template && (
                       <div className="pt-4 border-t border-white/5">
-                        <p className="text-[10px] text-white/30 font-black mb-2">記録テンプレート</p>
+                        <p className="text-[10px] text-white/60 font-black mb-2">記録テンプレート</p>
                         <pre className="whitespace-pre-wrap rounded-xl border border-white/10 bg-black/50 p-3 text-xs leading-relaxed text-white/70">
                           {recommendation.record_template}
                         </pre>

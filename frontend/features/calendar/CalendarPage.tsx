@@ -6,7 +6,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { ExerciseSelectorModal } from "@/features/exercises/components/ExerciseSelectorModal";
 import { ErrorMessage } from "@/components/ErrorMessage";
-import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { Modal } from "@/components/Modal";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
 import { displayPlanText, formatLocalDate, formatPlanMonth } from "@/lib/fitlog";
@@ -131,7 +131,7 @@ export default function CalendarPage() {
       <main className="max-w-5xl mx-auto relative z-10">
         <header className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between mb-10">
           <div className="flex items-center gap-4">
-            <Link href="/" className="p-3 glass rounded-2xl hover:bg-white/10 transition-colors">
+            <Link aria-label="ホームへ戻る" href="/" className="p-3 glass rounded-2xl hover:bg-white/10 transition-colors">
               <ArrowLeft className="w-5 h-5" />
             </Link>
             <div>
@@ -190,7 +190,7 @@ export default function CalendarPage() {
 
               <div className="grid grid-cols-7 gap-2 lg:gap-4 mb-4">
                 {weekDayNames.map(day => (
-                  <div key={day} className="text-center text-[10px] font-black text-white/30 tracking-widest">
+                  <div key={day} className="text-center text-[10px] font-black text-white/60 tracking-widest">
                     {day}
                   </div>
                 ))}
@@ -286,9 +286,9 @@ export default function CalendarPage() {
               <div className="flex items-center justify-between gap-3 mb-5">
                 <div>
                   <h2 className="text-lg font-bold tracking-tight">プラン履歴</h2>
-                  <p className="text-xs text-white/40">過去月のプランを閲覧</p>
+                  <p className="text-xs text-white/60">過去月のプランを閲覧</p>
                 </div>
-                <span className="text-[10px] font-black text-white/30 bg-white/5 px-2 py-1 rounded-md">
+                <span className="text-[10px] font-black text-white/60 bg-white/5 px-2 py-1 rounded-md">
                   {planHistory.length}
                 </span>
               </div>
@@ -325,7 +325,7 @@ export default function CalendarPage() {
                   })}
                 </div>
               ) : (
-                <p className="text-white/40 text-sm leading-relaxed">
+                <p className="text-white/60 text-sm leading-relaxed">
                   まだ保存済みの月間プランがありません。ホームで今月のプランを作成すると、ここに履歴として残ります。
                 </p>
               )}
@@ -371,7 +371,7 @@ export default function CalendarPage() {
                   </div>
                 </div>
               ) : (
-                <p className="text-white/40 text-sm">
+                <p className="text-white/60 text-sm">
                   {selectedPlanMonth} のプランはまだありません。<br/>
                   今月分はホームから生成できます。
                 </p>
@@ -428,7 +428,6 @@ export function CalendarWorkoutEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  useBodyScrollLock();
   const [workout, setWorkout] = useState<CalendarWorkout | null>(null);
   const [title, setTitle] = useState("筋トレ");
   const [sets, setSets] = useState<CalendarWorkoutSet[]>([]);
@@ -510,8 +509,7 @@ export function CalendarWorkoutEditor({
   };
 
   return (
-    <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md p-4 flex items-center justify-center overflow-hidden overscroll-none" onClick={onClose}>
-      <div className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-[28px] border border-white/10 bg-[#111] shadow-2xl text-white" onClick={e => e.stopPropagation()}>
+    <Modal label="記録を編集" onClose={onClose} className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-[28px] border border-white/10 bg-[#111] shadow-2xl text-white">
         <div className="p-5 border-b border-white/10 flex items-start justify-between gap-4 bg-[#171717]">
           <div>
             <div className="text-xs font-black text-primary mb-1">{date}</div>
@@ -531,8 +529,9 @@ export function CalendarWorkoutEditor({
             <>
               <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-white/40">タイトル</label>
+                  <label htmlFor="record-title" className="text-[10px] font-black text-white/60">タイトル</label>
                   <input
+                    id="record-title"
                     value={title}
                     onChange={e => setTitle(e.target.value)}
                     className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 focus:outline-none focus:border-primary/50"
@@ -552,7 +551,7 @@ export function CalendarWorkoutEditor({
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h3 className="font-bold">セット</h3>
-                  <p className="text-xs text-white/40">種目を検索して、重量・回数・感想を保存できます。</p>
+                  <p className="text-xs text-white/60">種目を検索して、重量・回数・感想を保存できます。</p>
                 </div>
                 <button
                   onClick={() => setShowExerciseSelector(true)}
@@ -581,7 +580,7 @@ export function CalendarWorkoutEditor({
                         </div>
                         <button
                           onClick={() => removeSet(index)}
-                          className="p-2 rounded-xl text-white/40 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+                          className="p-2 rounded-xl text-white/60 hover:text-red-300 hover:bg-red-500/10 transition-colors"
                           aria-label="セットを削除"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -590,7 +589,7 @@ export function CalendarWorkoutEditor({
 
                       <div className="grid grid-cols-2 md:grid-cols-[120px_120px_1fr] gap-3">
                         <label className="space-y-1">
-                          <span className="text-[10px] font-black text-white/40">重量 kg</span>
+                          <span className="text-[10px] font-black text-white/60">重量 kg</span>
                           <input
                             type="number"
                             min="0"
@@ -601,7 +600,7 @@ export function CalendarWorkoutEditor({
                           />
                         </label>
                         <label className="space-y-1">
-                          <span className="text-[10px] font-black text-white/40">回数</span>
+                          <span className="text-[10px] font-black text-white/60">回数</span>
                           <input
                             type="number"
                             min="1"
@@ -612,7 +611,7 @@ export function CalendarWorkoutEditor({
                           />
                         </label>
                         <label className="space-y-1 col-span-2 md:col-span-1">
-                          <span className="text-[10px] font-black text-white/40">感想</span>
+                          <span className="text-[10px] font-black text-white/60">感想</span>
                           <input
                             value={set.feeling}
                             onChange={e => updateSet(index, { feeling: e.target.value })}
@@ -651,7 +650,6 @@ export function CalendarWorkoutEditor({
             </>
           )}
         </div>
-      </div>
       {showExerciseSelector && (
         <div onClick={e => e.stopPropagation()}>
           <ExerciseSelectorModal
@@ -660,7 +658,7 @@ export function CalendarWorkoutEditor({
           />
         </div>
       )}
-    </div>
+    </Modal>
   );
 }
 
@@ -673,7 +671,6 @@ export function CalendarPlanEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  useBodyScrollLock();
   const [plan, setPlan] = useState<CalendarPlan | null>(null);
   const [title, setTitle] = useState("筋トレ");
   const [target, setTarget] = useState("筋トレ");
@@ -756,13 +753,12 @@ export function CalendarPlanEditor({
   };
 
   return (
-    <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md p-4 flex items-center justify-center overflow-hidden overscroll-none" onClick={onClose}>
-      <div className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-[28px] border border-white/10 bg-[#111] shadow-2xl text-white" onClick={e => e.stopPropagation()}>
+    <Modal label="予定を編集" onClose={onClose} className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-[28px] border border-white/10 bg-[#111] shadow-2xl text-white">
         <div className="p-5 border-b border-white/10 flex items-start justify-between gap-4 bg-[#171717]">
           <div>
             <div className="text-xs font-black text-primary mb-1">{date}</div>
             <h2 className="text-xl font-black tracking-tight">予定を編集</h2>
-            {plan?.status === "draft" && <p className="text-xs text-white/40 mt-1">月間プランから作った未保存の予定です。</p>}
+            {plan?.status === "draft" && <p className="text-xs text-white/60 mt-1">月間プランから作った未保存の予定です。</p>}
           </div>
           <button onClick={onClose} className="p-2 rounded-xl text-white/50 hover:text-white hover:bg-white/10 transition-colors" aria-label="閉じる">
             <X className="w-5 h-5" />
@@ -778,7 +774,7 @@ export function CalendarPlanEditor({
             <>
               <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_120px] gap-3">
                 <label className="space-y-2">
-                  <span className="text-[10px] font-black text-white/40">タイトル</span>
+                  <span className="text-[10px] font-black text-white/60">タイトル</span>
                   <input
                     value={title}
                     onChange={e => setTitle(e.target.value)}
@@ -787,7 +783,7 @@ export function CalendarPlanEditor({
                   />
                 </label>
                 <label className="space-y-2">
-                  <span className="text-[10px] font-black text-white/40">狙い</span>
+                  <span className="text-[10px] font-black text-white/60">狙い</span>
                   <input
                     value={target}
                     onChange={e => setTarget(e.target.value)}
@@ -796,7 +792,7 @@ export function CalendarPlanEditor({
                   />
                 </label>
                 <label className="space-y-2">
-                  <span className="text-[10px] font-black text-white/40">目安分</span>
+                  <span className="text-[10px] font-black text-white/60">目安分</span>
                   <input
                     type="number"
                     min="15"
@@ -809,7 +805,7 @@ export function CalendarPlanEditor({
               </div>
 
               <label className="space-y-2 block">
-                <span className="text-[10px] font-black text-white/40">メモ</span>
+                <span className="text-[10px] font-black text-white/60">メモ</span>
                 <textarea
                   value={coachNote}
                   onChange={e => setCoachNote(e.target.value)}
@@ -822,7 +818,7 @@ export function CalendarPlanEditor({
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h3 className="font-bold">予定種目</h3>
-                  <p className="text-xs text-white/40">未来の日付では、当日やる予定を調整します。</p>
+                  <p className="text-xs text-white/60">未来の日付では、当日やる予定を調整します。</p>
                 </div>
                 <button
                   onClick={() => setShowExerciseSelector(true)}
@@ -851,7 +847,7 @@ export function CalendarPlanEditor({
                         </div>
                         <button
                           onClick={() => removeExercise(index)}
-                          className="p-2 rounded-xl text-white/40 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+                          className="p-2 rounded-xl text-white/60 hover:text-red-300 hover:bg-red-500/10 transition-colors"
                           aria-label="予定種目を削除"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -860,7 +856,7 @@ export function CalendarPlanEditor({
 
                       <div className="grid grid-cols-3 gap-3">
                         <label className="space-y-1">
-                          <span className="text-[10px] font-black text-white/40">セット</span>
+                          <span className="text-[10px] font-black text-white/60">セット</span>
                           <input
                             type="number"
                             min="1"
@@ -871,7 +867,7 @@ export function CalendarPlanEditor({
                           />
                         </label>
                         <label className="space-y-1">
-                          <span className="text-[10px] font-black text-white/40">重量 kg</span>
+                          <span className="text-[10px] font-black text-white/60">重量 kg</span>
                           <input
                             type="number"
                             min="0"
@@ -882,7 +878,7 @@ export function CalendarPlanEditor({
                           />
                         </label>
                         <label className="space-y-1">
-                          <span className="text-[10px] font-black text-white/40">回数</span>
+                          <span className="text-[10px] font-black text-white/60">回数</span>
                           <input
                             type="number"
                             min="1"
@@ -923,7 +919,6 @@ export function CalendarPlanEditor({
             </>
           )}
         </div>
-      </div>
       {showExerciseSelector && (
         <div onClick={e => e.stopPropagation()}>
           <ExerciseSelectorModal
@@ -932,6 +927,6 @@ export function CalendarPlanEditor({
           />
         </div>
       )}
-    </div>
+    </Modal>
   );
 }

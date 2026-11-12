@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Search, Plus, Dumbbell, X, Loader2, Activity, Star } from "lucide-react";
-import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { Modal } from "@/components/Modal";
 import { apiFetch } from "@/lib/api";
 
 interface Exercise {
@@ -62,8 +62,6 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
   const [customName, setCustomName] = useState("");
   const [customCategory, setCustomCategory] = useState("筋力トレーニング");
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useBodyScrollLock();
 
   const fetchFavorites = React.useCallback(async () => {
     try {
@@ -172,15 +170,14 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md overflow-hidden overscroll-none touch-none" onClick={onClose}>
-      <div className="bg-[#111] border border-white/10 rounded-3xl shadow-2xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+    <Modal label="種目を選択" onClose={onClose} className="bg-[#111] border border-white/10 rounded-3xl shadow-2xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col">
         
         <div className="p-5 border-b border-white/10 flex justify-between items-center bg-[#1a1a1a]">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <Dumbbell className="text-primary w-5 h-5" />
             種目を選択
           </h2>
-          <button onClick={onClose} className="text-white/50 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors">
+          <button aria-label="閉じる" onClick={onClose} className="text-white/50 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -193,9 +190,10 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
             </p>
 
             <div className="space-y-2">
-              <label className="text-xs font-black text-white/40">種目名 <span className="text-red-500">*</span></label>
+              <label htmlFor="custom-exercise-name" className="text-xs font-black text-white/60">種目名 <span className="text-red-500">*</span></label>
               <input 
                 type="text" 
+                id="custom-exercise-name"
                 value={customName}
                 onChange={e => setCustomName(e.target.value)}
                 placeholder="例: ダンベルプレス"
@@ -204,8 +202,9 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs font-black text-white/40">カテゴリ（任意）</label>
+              <label htmlFor="custom-exercise-category" className="text-xs font-black text-white/60">カテゴリ（任意）</label>
               <select 
+                id="custom-exercise-category"
                 value={customCategory}
                 onChange={e => setCustomCategory(e.target.value)}
                 className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
@@ -239,6 +238,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
               <div className="grid grid-cols-3 gap-2 rounded-2xl bg-black/30 p-1 border border-white/10">
                 <button
                   type="button"
+                  aria-pressed={activeTab === "favorite"}
                   onClick={() => setActiveTab("favorite")}
                   className={`py-2 rounded-xl text-sm font-bold transition-colors ${
                     activeTab === "favorite" ? "bg-primary text-black" : "text-white/50 hover:text-white hover:bg-white/5"
@@ -248,6 +248,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={activeTab === "recent"}
                   onClick={() => setActiveTab("recent")}
                   className={`py-2 rounded-xl text-sm font-bold transition-colors ${
                     activeTab === "recent" ? "bg-primary text-black" : "text-white/50 hover:text-white hover:bg-white/5"
@@ -257,6 +258,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={activeTab === "search"}
                   onClick={() => setActiveTab("search")}
                   className={`py-2 rounded-xl text-sm font-bold transition-colors ${
                     activeTab === "search" ? "bg-primary text-black" : "text-white/50 hover:text-white hover:bg-white/5"
@@ -266,10 +268,11 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
                 </button>
               </div>
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 w-4 h-4" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/60 w-4 h-4" />
                 <input 
                   type="text" 
                   placeholder="種目名で検索..." 
+                  aria-label="種目名で検索"
                   value={searchQuery}
                   onFocus={() => setActiveTab("search")}
                   onChange={e => {
@@ -281,6 +284,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <select 
+                  aria-label="大まかな部位"
                   value={broadMuscle}
                   onChange={e => handleBroadMuscleChange(e.target.value)}
                   className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/80 focus:outline-none focus:border-primary/50 appearance-none"
@@ -289,6 +293,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
                   {Object.keys(MUSCLE_CATEGORIES).map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
                 <select 
+                  aria-label="細かい筋肉"
                   value={muscleFilter}
                   onChange={e => handleDetailedMuscleChange(e.target.value)}
                   className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/80 focus:outline-none focus:border-primary/50 appearance-none"
@@ -299,6 +304,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
               </div>
               <div>
                 <select 
+                  aria-label="器具"
                   value={equipFilter}
                   onChange={e => setEquipFilter(e.target.value)}
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/80 focus:outline-none focus:border-primary/50 appearance-none"
@@ -311,14 +317,14 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
 
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
               {filtered.length === 0 && activeTab === "favorite" ? (
-                <div className="min-h-52 flex flex-col items-center justify-center text-center text-white/40 px-8">
+                <div className="min-h-52 flex flex-col items-center justify-center text-center text-white/60 px-8">
                   <Star className="w-8 h-8 text-primary mb-3" />
                   <p className="text-sm leading-relaxed">
                     まだお気に入りがありません。検索タブでよく使う種目に星を付けると、ここからすぐ選べます。
                   </p>
                 </div>
               ) : filtered.length === 0 && activeTab === "recent" ? (
-                <div className="min-h-52 flex flex-col items-center justify-center text-center text-white/40 px-8">
+                <div className="min-h-52 flex flex-col items-center justify-center text-center text-white/60 px-8">
                   <Dumbbell className="w-8 h-8 text-primary mb-3" />
                   <p className="text-sm leading-relaxed">
                     まだ最近使った種目がありません。記録が増えると、ここからすぐ選べます。
@@ -335,7 +341,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
                     className={`mt-0.5 p-2 rounded-xl transition-colors ${
                       favoriteIds.has(ex.id)
                         ? "text-primary bg-primary/10 hover:bg-primary/20"
-                        : "text-white/25 hover:text-primary hover:bg-white/10"
+                        : "text-white/60 hover:text-primary hover:bg-white/10"
                     }`}
                     aria-label={favoriteIds.has(ex.id) ? "お気に入りから外す" : "お気に入りに追加"}
                   >
@@ -348,16 +354,16 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
                   >
                     <div className="flex justify-between items-center gap-3 w-full">
                       <span className="text-white font-medium group-hover:text-primary transition-colors">{ex.name}</span>
-                      {ex.category && <span className="shrink-0 text-[10px] px-2 py-0.5 bg-white/5 rounded-full text-white/40">{displayExerciseLabel(ex.category)}</span>}
+                      {ex.category && <span className="shrink-0 text-[10px] px-2 py-0.5 bg-white/5 rounded-full text-white/60">{displayExerciseLabel(ex.category)}</span>}
                     </div>
                     <div className="flex gap-2 mt-1">
                       {ex.primaryMuscles && ex.primaryMuscles.length > 0 && (
-                        <span className="text-[10px] text-white/30 flex items-center gap-1">
+                        <span className="text-[10px] text-white/60 flex items-center gap-1">
                           <Activity className="w-3 h-3" /> {ex.primaryMuscles[0]}
                         </span>
                       )}
                       {ex.equipment && (
-                        <span className="text-[10px] text-white/30 flex items-center gap-1">
+                        <span className="text-[10px] text-white/60 flex items-center gap-1">
                           <Dumbbell className="w-3 h-3" /> {ex.equipment}
                         </span>
                       )}
@@ -367,7 +373,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
               ))}
               
               {filtered.length === 0 && activeTab === "search" && (
-                <div className="text-center py-10 text-white/40">
+                <div className="text-center py-10 text-white/60">
                   <p>種目が見つかりません</p>
                 </div>
               )}
@@ -384,7 +390,6 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -16,7 +16,7 @@ interface WorkoutSummaryViewProps {
 export function WorkoutSummaryView({
   summary,
   emptyText = "セット記録はありません。",
-  emptyStateClassName = "text-sm text-white/45 bg-white/5 rounded-2xl border border-white/5 p-5",
+  emptyStateClassName = "text-sm text-white/60 bg-white/5 rounded-2xl border border-white/5 p-5",
   exerciseSectionClassName = "",
 }: WorkoutSummaryViewProps) {
   return (
@@ -70,10 +70,10 @@ function SummaryMetric({ icon, label, value, unit }: { icon: React.ReactNode; la
   return (
     <div className="glass rounded-2xl p-4 border border-white/5 min-w-0">
       <div className="text-primary mb-3">{icon}</div>
-      <p className="text-[10px] font-bold text-white/35 mb-1">{label}</p>
+      <p className="text-[10px] font-bold text-white/60 mb-1">{label}</p>
       <div className="flex items-baseline gap-1 min-w-0">
         <span className="text-xl sm:text-2xl font-black leading-tight break-words min-w-0">{value}</span>
-        <span className="text-xs text-white/40 font-bold">{unit}</span>
+        <span className="text-xs text-white/60 font-bold">{unit}</span>
       </div>
     </div>
   );
@@ -82,7 +82,7 @@ function SummaryMetric({ icon, label, value, unit }: { icon: React.ReactNode; la
 function SummaryMini({ label, value }: { label: string; value: string }) {
   return (
     <div className="bg-black/25 rounded-xl p-3 min-w-0">
-      <p className="text-[10px] text-white/35 font-bold mb-1">{label}</p>
+      <p className="text-[10px] text-white/60 font-bold mb-1">{label}</p>
       <p className="text-sm font-bold">{value}</p>
     </div>
   );
