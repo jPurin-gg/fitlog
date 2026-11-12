@@ -267,13 +267,16 @@ func (r *memoryRepository) Create(_ context.Context, nickname, passwordHash stri
 	return user, nil
 }
 
-func (r *memoryRepository) SetPasswordHash(_ context.Context, userID int, passwordHash string) error {
+func (r *memoryRepository) SetPasswordHashIfEmpty(_ context.Context, userID int, passwordHash string) (bool, error) {
 	for nickname, user := range r.users {
 		if user.ID == userID {
+			if user.PasswordHash != "" {
+				return false, nil
+			}
 			user.PasswordHash = passwordHash
 			r.users[nickname] = user
-			return nil
+			return true, nil
 		}
 	}
-	return ErrUserNotFound
+	return false, nil
 }

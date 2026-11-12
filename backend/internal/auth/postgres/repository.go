@@ -53,17 +53,17 @@ func (r *Repository) Create(ctx context.Context, nickname, passwordHash string) 
 	return user, err
 }
 
-func (r *Repository) SetPasswordHash(ctx context.Context, userID int, passwordHash string) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE users SET password_hash = $1 WHERE id = $2`, passwordHash, userID)
+func (r *Repository) SetPasswordHashIfEmpty(ctx context.Context, userID int, passwordHash string) (bool, error) {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE users SET password_hash = $1
+		WHERE id = $2 AND (password_hash IS NULL OR password_hash = '')
+	`, passwordHash, userID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return false, err
 	}
-	if affected == 0 {
-		return auth.ErrUserNotFound
-	}
-	return nil
+	return affected > 0, nil
 }

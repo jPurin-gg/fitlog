@@ -192,7 +192,10 @@ func (r *authRepository) Create(_ context.Context, nickname, passwordHash string
 	return r.user.User, nil
 }
 
-func (r *authRepository) SetPasswordHash(_ context.Context, _ int, passwordHash string) error {
+func (r *authRepository) SetPasswordHashIfEmpty(_ context.Context, userID int, passwordHash string) (bool, error) {
+	if r.user.ID != userID || r.user.PasswordHash != "" {
+		return false, nil
+	}
 	r.user.PasswordHash = passwordHash
-	return nil
+	return true, nil
 }
