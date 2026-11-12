@@ -99,6 +99,7 @@ type PlanSession struct {
 	PlanDate  string      `json:"plan_date"`
 	Status    string      `json:"status"`
 	AIStatus  string      `json:"ai_status"`
+	Resumed   bool        `json:"resumed,omitempty"`
 	Plan      WorkoutPlan `json:"plan"`
 }
 
@@ -118,6 +119,7 @@ type Repository interface {
 	Daily(ctx context.Context, userID int, date time.Time) (PlanSession, error)
 	SaveDaily(ctx context.Context, userID int, date time.Time, plan WorkoutPlan) (PlanSession, error)
 	CreateDailyIfMissing(ctx context.Context, userID int, date time.Time, plan WorkoutPlan) (bool, error)
+	ResumeDaily(ctx context.Context, userID int, date time.Time) (bool, error)
 	AttachWorkout(ctx context.Context, userID int, date time.Time) (PlanSession, error)
 	ResolveExercise(ctx context.Context, userID int, exerciseID, name string) (ExerciseStats, string, error)
 }
@@ -312,7 +314,17 @@ func (s *Service) StartDaily(ctx context.Context, userID int, dateText string, i
 		}
 		manual = &plan
 	}
-	if _, err := s.repository.Daily(ctx, userID, date); errors.Is(err, ErrNotFound) {
+	resumed := false
+	_, err = s.repository.Daily(ctx, userID, date)
+	if errors.Is(err, ErrNotFound) {
+		// A plan finished earlier today is reopened together with its workout, so a
+		// same-day restart appends to that record instead of creating a second one.
+		if resumed, err = s.repository.ResumeDaily(ctx, userID, date); err == nil && !resumed {
+			// A concurrent start may have reopened or created the active plan.
+			_, err = s.repository.Daily(ctx, userID, date)
+		}
+	}
+	if errors.Is(err, ErrNotFound) {
 		var base WorkoutPlan
 		if manual != nil {
 			base = *manual
@@ -354,6 +366,7 @@ func (s *Service) StartDaily(ctx context.Context, userID int, dateText string, i
 		return PlanSession{}, apperr.Internal(err)
 	}
 	session.AIStatus = aiStatus
+	session.Resumed = resumed
 	return session, nil
 }
 

@@ -13,6 +13,7 @@ export interface WorkoutPlanSession {
   plan_date: string;
   status: string;
   ai_status?: "applied" | "fallback" | "not_requested";
+  resumed?: boolean;
   plan: {
     workout_title: string;
     target: string;
@@ -36,6 +37,7 @@ export interface WorkoutSummaryExercise {
   exercise_id: string;
   name: string;
   sets: number;
+  last_set_order?: number;
   total_reps: number;
   best_weight: number;
   total_volume: number;

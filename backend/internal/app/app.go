@@ -47,7 +47,7 @@ func NewHandler(db *sql.DB, cfg config.Config, logger *slog.Logger) http.Handler
 	planningHandler := planninghttp.NewHandler(planningService)
 	workoutService := workoutcore.NewService(workoutpostgres.New(db), aiClient, promptRenderer, appClock, cfg.AI.OptionalTimeout).WithLogger(logger)
 	workoutHandler := workouthttp.NewHandler(workoutService)
-	reportingService := reportingcore.NewService(reportingpostgres.New(db), appClock)
+	reportingService := reportingcore.NewService(reportingpostgres.New(db), appClock).WithLogger(logger)
 	reportingHandler := reportinghttp.NewHandler(reportingService)
 
 	mux := http.NewServeMux()

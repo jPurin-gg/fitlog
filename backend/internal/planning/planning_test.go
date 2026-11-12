@@ -372,21 +372,25 @@ func TestDailyAndSaveDailyMarkAINotRequested(t *testing.T) {
 }
 
 type startDailyRepository struct {
-	monthlyErr       error
-	monthlyCalls     int
-	resolveErr       error
-	createdByOther   bool
-	now              time.Time
-	dailyResult      PlanSession
-	dailyErr         error
-	candidates       []Candidate
-	saveMonthlyErr   error
-	savedMonthly     MonthlyPlan
-	saveMonthlyCalls int
-	savedPlan        WorkoutPlan
-	saveCalls        int
-	saveContextErr   error
-	attachResult     PlanSession
+	monthlyErr        error
+	monthlyCalls      int
+	resolveErr        error
+	createdByOther    bool
+	now               time.Time
+	dailyResult       PlanSession
+	dailyErr          error
+	candidates        []Candidate
+	saveMonthlyErr    error
+	savedMonthly      MonthlyPlan
+	saveMonthlyCalls  int
+	savedPlan         WorkoutPlan
+	saveCalls         int
+	saveContextErr    error
+	attachResult      PlanSession
+	resumed           bool
+	resumeErr         error
+	resumeCalls       int
+	activeAfterResume bool
 }
 
 func newStartDailyRepository(now time.Time) *startDailyRepository {
@@ -456,6 +460,105 @@ func (r *startDailyRepository) CreateDailyIfMissing(ctx context.Context, userID 
 	}
 	_, err := r.SaveDaily(ctx, userID, date, plan)
 	return err == nil, err
+}
+
+func (r *startDailyRepository) ResumeDaily(context.Context, int, time.Time) (bool, error) {
+	r.resumeCalls++
+	if r.activeAfterResume {
+		r.dailyErr = nil
+	}
+	return r.resumed, r.resumeErr
+}
+
+func TestStartDailyReusesPlanResumedByConcurrentStart(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	repository := newStartDailyRepository(now)
+	repository.activeAfterResume = true
+	repository.monthlyErr = ErrNotFound
+	repository.attachResult = PlanSession{ID: 7, WorkoutID: 9, Status: "active", Plan: repository.basePlan()}
+	service := NewService(repository, nil, nil, nil, clock.Fixed{Time: now}, time.Second)
+
+	result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{})
+	if err != nil || result.WorkoutID != 9 || result.AIStatus != AIStatusNotRequested {
+		t.Fatalf("StartDaily() = %#v, %v", result, err)
+	}
+	if repository.saveCalls != 0 || repository.monthlyCalls != 0 || repository.resumeCalls != 1 {
+		t.Fatalf("SaveDaily calls=%d Monthly calls=%d ResumeDaily calls=%d", repository.saveCalls, repository.monthlyCalls, repository.resumeCalls)
+	}
+}
+
+func TestStartDailyResumesPlanFinishedEarlierToday(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	exerciseID := "bench"
+	for name, input := range map[string]StartDailyInput{"monthly": {}, "manual": {ExerciseID: &exerciseID}} {
+		t.Run(name, func(t *testing.T) {
+			repository := newStartDailyRepository(now)
+			repository.resumed = true
+			finished := PlanSession{ID: 7, WorkoutID: 9, PlanDate: now.Format("2006-01-02"), Status: "active", Plan: repository.basePlan()}
+			repository.attachResult = finished
+			aiClient := &stubPlanningAI{complete: func(context.Context, ai.Request) (string, error) {
+				t.Fatal("a resumed plan must not be refined again")
+				return "", nil
+			}}
+			service := NewService(repository, nil, aiClient, stubPlanningPrompts{}, clock.Fixed{Time: now}, time.Second)
+
+			result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), input)
+			if err != nil || !result.Resumed || result.WorkoutID != 9 || result.AIStatus != AIStatusNotRequested || !reflect.DeepEqual(result.Plan, finished.Plan) {
+				t.Fatalf("StartDaily() = %#v, %v", result, err)
+			}
+			if repository.resumeCalls != 1 || repository.saveCalls != 0 || repository.monthlyCalls != 0 || aiClient.calls != 0 {
+				t.Fatalf("ResumeDaily() calls = %d; SaveDaily() calls = %d; Monthly() calls = %d; AI calls = %d", repository.resumeCalls, repository.saveCalls, repository.monthlyCalls, aiClient.calls)
+			}
+		})
+	}
+}
+
+func TestStartDailyCreatesPlanWhenNothingWasFinishedToday(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	repository := newStartDailyRepository(now)
+	service := NewService(repository, nil, nil, nil, clock.Fixed{Time: now}, time.Second)
+	enabled := false
+
+	result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{UseAI: &enabled})
+	if err != nil || result.Resumed || result.WorkoutID == 0 {
+		t.Fatalf("StartDaily() = %#v, %v", result, err)
+	}
+	if repository.resumeCalls != 1 || repository.saveCalls != 1 {
+		t.Fatalf("ResumeDaily() calls = %d; SaveDaily() calls = %d", repository.resumeCalls, repository.saveCalls)
+	}
+}
+
+func TestStartDailyDoesNotResumeWhilePlanIsActive(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	repository := newStartDailyRepository(now)
+	repository.dailyErr = nil
+	repository.resumed = true
+	repository.attachResult = PlanSession{ID: 7, WorkoutID: 9, Plan: repository.basePlan()}
+	service := NewService(repository, nil, nil, nil, clock.Fixed{Time: now}, time.Second)
+
+	result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{})
+	if err != nil || result.Resumed || result.WorkoutID != 9 {
+		t.Fatalf("StartDaily() = %#v, %v", result, err)
+	}
+	if repository.resumeCalls != 0 || repository.saveCalls != 0 {
+		t.Fatalf("ResumeDaily() calls = %d; SaveDaily() calls = %d", repository.resumeCalls, repository.saveCalls)
+	}
+}
+
+func TestStartDailyDoesNotCreatePlanWhenResumeFails(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	repository := newStartDailyRepository(now)
+	repository.resumeErr = errors.New("database unavailable")
+	service := NewService(repository, nil, nil, nil, clock.Fixed{Time: now}, time.Second)
+	enabled := false
+
+	_, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{UseAI: &enabled})
+	if err == nil || apperr.As(err).Status != 500 {
+		t.Fatalf("StartDaily() error = %v, want an internal error", err)
+	}
+	if repository.saveCalls != 0 {
+		t.Fatalf("SaveDaily() calls = %d after a failed resume", repository.saveCalls)
+	}
 }
 
 func TestStartDailyPreservesPlanCommittedWhileAIWasRunning(t *testing.T) {

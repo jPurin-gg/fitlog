@@ -363,7 +363,7 @@ func (r *Repository) summary(ctx context.Context, userID, workoutID int) (workou
 		return summary, err
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT ws.exercise_id,COALESCE(e.name,ws.exercise_id),COUNT(*)::int,COALESCE(SUM(ws.reps),0)::int,
+		SELECT ws.exercise_id,COALESCE(e.name,ws.exercise_id),COUNT(*)::int,MAX(ws.set_order),COALESCE(SUM(ws.reps),0)::int,
 		       COALESCE(MAX(ws.weight),0),COALESCE(SUM(ws.weight*ws.reps),0),COALESCE(SUM(CASE WHEN ws.is_pr THEN 1 ELSE 0 END),0)::int
 		FROM workout_sets ws LEFT JOIN exercises e ON e.id=ws.exercise_id
 		WHERE ws.workout_id=$1 GROUP BY ws.exercise_id,e.name ORDER BY MIN(ws.created_at),MIN(ws.id)
@@ -375,7 +375,7 @@ func (r *Repository) summary(ctx context.Context, userID, workoutID int) (workou
 	for rows.Next() {
 		var item workout.SummaryExercise
 		var prCount int
-		if err := rows.Scan(&item.ExerciseID, &item.Name, &item.Sets, &item.TotalReps, &item.BestWeight, &item.TotalVolume, &prCount); err != nil {
+		if err := rows.Scan(&item.ExerciseID, &item.Name, &item.Sets, &item.LastSetOrder, &item.TotalReps, &item.BestWeight, &item.TotalVolume, &prCount); err != nil {
 			return summary, err
 		}
 		summary.TotalSets += item.Sets

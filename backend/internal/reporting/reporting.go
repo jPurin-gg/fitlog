@@ -3,10 +3,12 @@ package reporting
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jPurin-gg/myfitlog-backend/internal/apperr"
 	"github.com/jPurin-gg/myfitlog-backend/internal/clock"
+	"github.com/jPurin-gg/myfitlog-backend/internal/requestctx"
 )
 
 type Stat struct {
@@ -66,17 +68,33 @@ type Repository interface {
 type Service struct {
 	repository Repository
 	clock      clock.Clock
+	logger     *slog.Logger
 }
 
 func NewService(repository Repository, appClock clock.Clock) *Service {
 	return &Service{repository: repository, clock: appClock}
 }
 
+func (s *Service) WithLogger(logger *slog.Logger) *Service {
+	s.logger = logger
+	return s
+}
+
+// closeStaleWorkouts tidies up records left open on earlier days before they
+// are read. It is housekeeping: a failure is logged and the read continues, so
+// one bad row cannot take the dashboard and the calendar down with it.
+func (s *Service) closeStaleWorkouts(ctx context.Context, userID int, now time.Time) {
+	err := s.repository.CloseStaleWorkouts(ctx, userID, now)
+	if err == nil || s.logger == nil {
+		return
+	}
+	// Database errors can contain record values; keep them out of request logs.
+	s.logger.ErrorContext(ctx, "close stale workouts failed", "request_id", requestctx.RequestID(ctx))
+}
+
 func (s *Service) Dashboard(ctx context.Context, userID int) (Dashboard, error) {
 	now := s.clock.Now()
-	if err := s.repository.CloseStaleWorkouts(ctx, userID, now); err != nil {
-		return Dashboard{}, apperr.Internal(err)
-	}
+	s.closeStaleWorkouts(ctx, userID, now)
 	start := beginningOfDay(now).AddDate(0, 0, -6)
 	end := beginningOfDay(now).AddDate(0, 0, 1)
 	counts, err := s.repository.SetCounts(ctx, userID, start, end)
@@ -123,9 +141,7 @@ func (s *Service) Calendar(ctx context.Context, userID, year, month int) (Calend
 	if month < 1 || month > 12 || year < 2000 || year > 2200 {
 		return Calendar{}, apperr.Validation("年月の指定が不正です。", nil)
 	}
-	if err := s.repository.CloseStaleWorkouts(ctx, userID, now); err != nil {
-		return Calendar{}, apperr.Internal(err)
-	}
+	s.closeStaleWorkouts(ctx, userID, now)
 	calendar, err := s.repository.Calendar(ctx, userID, year, month, now.Location().String())
 	if err != nil {
 		return Calendar{}, apperr.Internal(err)

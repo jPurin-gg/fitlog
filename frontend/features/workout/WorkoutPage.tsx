@@ -25,7 +25,7 @@ import { WorkoutSummaryView, type WorkoutSummary } from "./components/WorkoutSum
 import { ApiError, apiErrorMessage } from "@/lib/api";
 import { displayPlanText, formatLocalDate } from "@/lib/fitlog";
 import { initialRecordFlowState, recordFlowReducer } from "./workoutFlow";
-import { finishWorkoutSession, getSetRecommendation, getSummaryComment, getTargetSets, recordWorkoutSet, startWorkoutPlan, updateTargetSets } from "./api";
+import { finishWorkoutSession, getSetRecommendation, getSummaryComment, getTargetSets, getWorkoutDetail, recordWorkoutSet, startWorkoutPlan, updateTargetSets } from "./api";
 import type { SetRecommendation, WorkoutPlanSession } from "./types";
 
 type SummaryCommentState = "idle" | "loading" | "ready" | "unavailable";
@@ -90,6 +90,7 @@ export default function WorkoutPage() {
   const summaryCommentAbortRef = React.useRef<AbortController | null>(null);
   const summaryCommentRequestRef = React.useRef(0);
   const nextSetByExerciseRef = React.useRef<Record<string, number>>({});
+  const savedSetsByExerciseRef = React.useRef<Record<string, number>>({});
   const recordTransitionLocked = saveState === "saving" || saveRetryLocked;
 
   React.useEffect(() => () => {
@@ -173,7 +174,7 @@ export default function WorkoutPage() {
     });
   };
 
-  const applyStartedWorkout = (data: WorkoutPlanSession, selected?: { id: string; name: string }) => {
+  const applyStartedWorkout = (data: WorkoutPlanSession, summary: WorkoutSummary, selected?: { id: string; name: string }) => {
     let index = selected ? data.plan.exercises.findIndex(ex => ex.exercise_id === selected.id) : 0;
     if (selected && index < 0) {
       // 記録画面だけに選択種目を追加し、保存済みの日次予定は変更しない。
@@ -187,10 +188,13 @@ export default function WorkoutPage() {
     }
     setWorkoutPlan(data);
     setWorkoutStarted(true);
-    nextSetByExerciseRef.current = {};
-    setStartNotice(isEnabled() && data.ai_status === "fallback"
-      ? "AI調整は利用できませんでしたが、記録できるメニューで開始しました。"
-      : null);
+    nextSetByExerciseRef.current = Object.fromEntries(summary.exercises.map(ex => [ex.exercise_id, (ex.last_set_order ?? ex.sets) + 1]));
+    savedSetsByExerciseRef.current = Object.fromEntries(summary.exercises.map(ex => [ex.exercise_id, ex.sets]));
+    setStartNotice(data.resumed
+      ? "今日のワークアウトを再開しました。保存済みのセットに追記します。"
+      : isEnabled() && data.ai_status === "fallback"
+        ? "AI調整は利用できませんでしたが、記録できるメニューで開始しました。"
+        : null);
     activatePlanExercise(data, index);
   };
 
@@ -215,20 +219,24 @@ export default function WorkoutPage() {
     finishedWorkoutIDRef.current = null;
     setSummaryCommentState("idle");
     setSummaryCommentError(null);
+    let planStarted = false;
     try {
       const data = await startWorkoutPlan(formatLocalDate(new Date()), {
         use_ai: exercise ? false : useAI,
         ...(exercise ? { exercise_id: exercise.id } : {}),
       }, controller.signal);
+      planStarted = true;
       if (controller.signal.aborted || startRequestRef.current !== requestID) return;
       if (useAI && !exercise && !isEnabled()) {
         restartWithoutAI();
         return;
       }
-      applyStartedWorkout(data, exercise);
+      const detail = await getWorkoutDetail(String(data.workout_id), controller.signal);
+      if (controller.signal.aborted || startRequestRef.current !== requestID) return;
+      applyStartedWorkout(data, detail.summary, exercise);
     } catch (e) {
       if (controller.signal.aborted || startRequestRef.current !== requestID) return;
-      if (!exercise && e instanceof ApiError && e.status === 404) {
+      if (!planStarted && !exercise && e instanceof ApiError && e.status === 404) {
         setShowManualExerciseSelector(true);
       } else {
         setStartError(apiErrorMessage(e, "ワークアウトを開始できませんでした。"));
@@ -314,6 +322,7 @@ export default function WorkoutPage() {
         nextSetByExerciseRef.current[currentExercise.id] || 1,
         currentSet + 1,
       );
+      savedSetsByExerciseRef.current[currentExercise.id] = (savedSetsByExerciseRef.current[currentExercise.id] || 0) + 1;
       setSaveRetryLocked(false);
       dispatchRecordFlow({ type: "SAVE_SUCCEEDED" });
       void fetchRecommendation(workoutID, recorded.id);
@@ -374,6 +383,7 @@ export default function WorkoutPage() {
 
   const finishWorkout = async () => {
     if (finishInFlightRef.current || saveInFlightRef.current || saveRetryLocked) return;
+    if (!window.confirm("ワークアウトを終了しますか？保存済みのセットで集計します。")) return;
     finishInFlightRef.current = true;
     setFinishing(true);
     setFinishError(null);
@@ -402,6 +412,7 @@ export default function WorkoutPage() {
       dispatchRecordFlow({ type: "RESET" });
       setCurrentSet(1);
       nextSetByExerciseRef.current = {};
+      savedSetsByExerciseRef.current = {};
       setCurrentExerciseIndex(0);
       setFormData({ weight: '', reps: '', feeling: '' });
       setRequestRef.current = null;
@@ -497,6 +508,7 @@ export default function WorkoutPage() {
             </div>
           )}
 
+          <p className="mb-3 text-sm text-white/50">同じ日に再開すると、今日の記録に追記します。</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               onClick={resetFinishedView}
@@ -634,7 +646,7 @@ export default function WorkoutPage() {
             </div>
         </header>
 
-        {aiEnabled && startNotice && (
+        {startNotice && (
           <div className="mb-5 flex items-start gap-3 rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100/80">
             <BrainCircuit className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-300" />
             <p>{startNotice}</p>
@@ -681,7 +693,7 @@ export default function WorkoutPage() {
                 <div
                   key={i}
                   className={`h-1.5 w-5 rounded-full transition-colors ${
-                    i < currentSet - 1 + (saveState === "saved" ? 1 : 0) ? 'bg-primary' : 'bg-white/10'
+                    i < (savedSetsByExerciseRef.current[currentExercise.id] || 0) ? 'bg-primary' : 'bg-white/10'
                   }`}
                 />
               ))}
