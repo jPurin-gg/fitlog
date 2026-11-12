@@ -48,7 +48,8 @@ func (r *Repository) MonthlyList(ctx context.Context, userID int) ([]planning.Mo
 
 func (r *Repository) SaveMonthly(ctx context.Context, userID int, month string, plan planning.MonthlyPlan) (planning.MonthlyPlan, error) {
 	restDays, _ := json.Marshal(planning.NormalizeWeekdays(plan.RestDays))
-	recommendedDays, _ := json.Marshal(planning.NormalizeWeekdays(plan.RecommendedDays))
+	// 曜日とルーティンはServiceで正規化済みの対応をそのまま保存する。
+	recommendedDays, _ := json.Marshal(plan.RecommendedDays)
 	routine, err := json.Marshal(plan.WeeklyRoutine)
 	if err != nil {
 		return planning.MonthlyPlan{}, err
@@ -67,7 +68,6 @@ func (r *Repository) SaveMonthly(ctx context.Context, userID int, month string, 
 	}
 	plan.PlanMonth = month
 	plan.RestDays = planning.NormalizeWeekdays(plan.RestDays)
-	plan.RecommendedDays = planning.NormalizeWeekdays(plan.RecommendedDays)
 	return plan, nil
 }
 

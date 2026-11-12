@@ -178,13 +178,14 @@ func (s *Service) SaveMonthly(ctx context.Context, userID int, month string, inp
 	if err := ValidateMonth(month); err != nil {
 		return MonthlyPlan{}, err
 	}
-	plan := MonthlyPlan{PlanMonth: month, PlanName: strings.TrimSpace(input.PlanName), Frequency: strings.TrimSpace(input.Frequency), Description: strings.TrimSpace(input.Description), Rationale: strings.TrimSpace(input.Rationale), RestDays: NormalizeWeekdays(input.RestDays), RecommendedDays: NormalizeWeekdays(input.RecommendedDays), WeeklyRoutine: input.WeeklyRoutine}
+	plan := MonthlyPlan{PlanMonth: month, PlanName: strings.TrimSpace(input.PlanName), Frequency: strings.TrimSpace(input.Frequency), Description: strings.TrimSpace(input.Description), Rationale: strings.TrimSpace(input.Rationale), RestDays: NormalizeWeekdays(input.RestDays), RecommendedDays: input.RecommendedDays, WeeklyRoutine: input.WeeklyRoutine}
 	if plan.PlanName == "" || len(plan.WeeklyRoutine) == 0 {
 		return MonthlyPlan{}, apperr.Validation("月間プラン名とルーティンが必要です。", nil)
 	}
 	if err := validateSavedPlan(plan); err != nil {
 		return MonthlyPlan{}, err
 	}
+	normalizeMonthlySchedule(&plan)
 	saved, err := s.repository.SaveMonthly(ctx, userID, month, plan)
 	if err != nil {
 		return MonthlyPlan{}, apperr.Internal(err)
@@ -246,6 +247,7 @@ func (s *Service) GenerateMonthly(ctx context.Context, userID int, month string,
 		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskMonthlyPlan, "invalid_output", aiStarted)
 		return MonthlyPlan{}, apperr.New(502, apperr.CodeAIUnavailable, "AIの月間プランが不完全です。")
 	}
+	normalizeMonthlySchedule(&plan)
 	saved, err := s.repository.SaveMonthly(ctx, userID, month, plan)
 	if err != nil {
 		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskMonthlyPlan, "storage_error", aiStarted)

@@ -188,6 +188,10 @@ func TestValidateSavedPlanRejectsInconsistentPlans(t *testing.T) {
 		wantStatus int
 	}{
 		{name: "valid", plan: MonthlyPlan{RestDays: []int{0}, RecommendedDays: []int{1}, WeeklyRoutine: []DayRoutine{routine}}},
+		{name: "valid unsorted weekdays", plan: MonthlyPlan{RecommendedDays: []int{5, 1}, WeeklyRoutine: []DayRoutine{routine, routine}}},
+		{name: "duplicate weekday", plan: MonthlyPlan{RecommendedDays: []int{1, 1}, WeeklyRoutine: []DayRoutine{routine, routine}}, wantStatus: 400},
+		{name: "negative weekday", plan: MonthlyPlan{RecommendedDays: []int{-1}, WeeklyRoutine: []DayRoutine{routine}}, wantStatus: 400},
+		{name: "weekday above six", plan: MonthlyPlan{RecommendedDays: []int{7}, WeeklyRoutine: []DayRoutine{routine}}, wantStatus: 400},
 		{name: "recommended days and routine count mismatch", plan: MonthlyPlan{RecommendedDays: []int{1, 3}, WeeklyRoutine: []DayRoutine{routine}}, wantStatus: 400},
 		{name: "recommended day is a rest day", plan: MonthlyPlan{RestDays: []int{1}, RecommendedDays: []int{1}, WeeklyRoutine: []DayRoutine{routine}}, wantStatus: 400},
 		{
