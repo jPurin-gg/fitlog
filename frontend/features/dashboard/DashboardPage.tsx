@@ -25,6 +25,7 @@ import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
 import { displayPlanText, formatPlanMonth } from "@/lib/fitlog";
 import { useMonthlyPromptDismissal } from "./useMonthlyPromptDismissal";
+import { WeeklyActivity } from "./WeeklyActivity";
 
 const WEEKDAY_OPTIONS = [
   { value: 0, label: "日" },
@@ -333,6 +334,8 @@ export default function DashboardPage() {
             </div>
           </div>
         </section>
+
+        <WeeklyActivity data={dashboardData} />
 
         {/* 最近の記録 */}
         <section className="glass rounded-[32px] p-6 md:p-10 border border-white/5">

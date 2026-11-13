@@ -101,6 +101,20 @@ it("今月のプランがあるときは自動で案内しない", async () => {
   await screen.findByRole("dialog");
 });
 
+it("ホームにダッシュボードAPIの直近7日の記録量と今週の実施・予定回数を表示する", async () => {
+  server.use(http.get("http://localhost:3000/api/dashboard", () => HttpResponse.json({
+    chart_data: [0, 3, 0, 0, 0, 5, 0],
+    chart_dates: ["2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01"],
+    this_week: { week_start: "2026-09-28", workout_count: 1, planned_count: 2 },
+    recent_workouts: [],
+  })));
+  show();
+  expect(await screen.findByTestId("weekly-progress")).toHaveTextContent("今週 1 回 / 予定 2 回");
+  const list = screen.getByRole("list", { name: "直近7日のセット数" });
+  expect(within(list).getAllByRole("listitem")).toHaveLength(7);
+  expect(within(list).getByRole("listitem", { name: "9月30日（水） 5セット" })).toBeInTheDocument();
+});
+
 it("プランの読み込み失敗を未作成と誤認して案内しない", async () => {
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
   server.use(http.get("http://localhost:3000/api/monthly-plans/:month", () => HttpResponse.json({ error: "unavailable" }, { status: 500 })));
