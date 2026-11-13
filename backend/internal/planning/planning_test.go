@@ -559,3 +559,130 @@ type stubPlanningPreferences struct{}
 func (stubPlanningPreferences) Get(context.Context, int) (profile.Preferences, error) {
 	return profile.Preferences{}, nil
 }
+
+// 月間プランの再生成は月間プランの行だけを置き換え、保存済みの日次予定は作り直さない。
+// 画面の「保存済みの日ごとの予定はそのまま残る」という説明はこの動作を前提にしている。
+func TestGenerateMonthlyKeepsSavedDailyPlans(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC) // 月曜
+	repository := newMemoryPlanningRepository(now)
+	repository.monthly = MonthlyPlan{
+		PlanMonth: "2026-08", PlanName: "旧プラン", Frequency: "週1-2回", Description: "旧", Rationale: "旧",
+		RecommendedDays: []int{1},
+		WeeklyRoutine:   []DayRoutine{{DayName: "1日目", Target: "胸の日", ExampleExercises: []string{"ベンチプレス"}, ExerciseIDs: []string{"bench"}}},
+	}
+	service := NewService(repository, stubPlanningPreferences{}, nil, stubPlanningPrompts{}, clock.Fixed{Time: now}, time.Second)
+	savedDate := "2026-08-24"
+	stored, err := service.SaveDaily(context.Background(), 1, savedDate, WorkoutPlan{
+		WorkoutTitle: "手で調整した胸の日", Exercises: []PlanExercise{{ExerciseID: "bench", PlannedSets: 5, TargetReps: 5, TargetWeight: 60}},
+	})
+	if err != nil {
+		t.Fatalf("SaveDaily() error = %v", err)
+	}
+
+	regenerated := MonthlyPlan{
+		PlanName: "新プラン", Frequency: "週3-4回", Description: "脚を中心にします。", Rationale: "下半身を優先します。",
+		RecommendedDays: []int{1, 3},
+		WeeklyRoutine: []DayRoutine{
+			{DayName: "1日目", Target: "脚の日A", ExampleExercises: []string{"スクワット"}, ExerciseIDs: []string{"squat"}},
+			{DayName: "2日目", Target: "脚の日B", ExampleExercises: []string{"スクワット"}, ExerciseIDs: []string{"squat"}},
+		},
+	}
+	encoded, err := json.Marshal(regenerated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.aiClient = &stubPlanningAI{complete: func(context.Context, ai.Request) (string, error) { return string(encoded), nil }}
+	dailyWritesBefore := repository.saveCalls
+	if _, err := service.GenerateMonthly(context.Background(), 1, "2026-08", GenerateMonthlyInput{Frequency: "週3-4回"}); err != nil {
+		t.Fatalf("GenerateMonthly() error = %v", err)
+	}
+	if repository.saveCalls != dailyWritesBefore {
+		t.Fatalf("GenerateMonthly() wrote daily plans %d times", repository.saveCalls-dailyWritesBefore)
+	}
+	if repository.monthly.PlanName != "新プラン" {
+		t.Fatalf("monthly plan = %#v, want regenerated plan", repository.monthly)
+	}
+
+	kept, err := service.Daily(context.Background(), 1, savedDate)
+	if err != nil {
+		t.Fatalf("Daily(saved) error = %v", err)
+	}
+	if kept.ID != stored.ID || kept.Status != "active" || !reflect.DeepEqual(kept.Plan, stored.Plan) {
+		t.Fatalf("saved daily plan changed after regeneration: got %#v, want %#v", kept, stored)
+	}
+	for date, wantTarget := range map[string]string{"2026-08-26": "脚の日B", "2026-08-31": "脚の日A"} {
+		draft, err := service.Daily(context.Background(), 1, date)
+		if err != nil {
+			t.Fatalf("Daily(%s) error = %v", date, err)
+		}
+		if draft.Status != "draft" || draft.Plan.Target != wantTarget || draft.Plan.Exercises[0].ExerciseID != "squat" {
+			t.Fatalf("Daily(%s) = %#v, want draft from regenerated plan (%s)", date, draft, wantTarget)
+		}
+	}
+}
+
+// memoryPlanningRepository keeps the monthly plan and daily plans separately,
+// mirroring the monthly_plans / workout_plans tables.
+type memoryPlanningRepository struct {
+	*startDailyRepository
+	monthly MonthlyPlan
+	daily   map[string]PlanSession
+}
+
+func newMemoryPlanningRepository(now time.Time) *memoryPlanningRepository {
+	repository := &memoryPlanningRepository{startDailyRepository: newStartDailyRepository(now), daily: map[string]PlanSession{}}
+	repository.candidates = []Candidate{
+		{ID: "bench", Name: "ベンチプレス", Equipment: "バーベル", PrimaryMuscles: []string{"胸"}},
+		{ID: "squat", Name: "スクワット", Equipment: "バーベル", PrimaryMuscles: []string{"脚"}},
+	}
+	return repository
+}
+
+func (r *memoryPlanningRepository) Monthly(context.Context, int, string) (MonthlyPlan, error) {
+	if r.monthly.PlanName == "" {
+		return MonthlyPlan{}, ErrNotFound
+	}
+	return r.monthly, nil
+}
+
+func (r *memoryPlanningRepository) SaveMonthly(_ context.Context, _ int, month string, plan MonthlyPlan) (MonthlyPlan, error) {
+	plan.PlanMonth = month
+	r.monthly = plan
+	return plan, nil
+}
+
+func (r *memoryPlanningRepository) Daily(_ context.Context, _ int, date time.Time) (PlanSession, error) {
+	session, ok := r.daily[date.Format("2006-01-02")]
+	if !ok {
+		return PlanSession{}, ErrNotFound
+	}
+	return session, nil
+}
+
+func (r *memoryPlanningRepository) SaveDaily(_ context.Context, _ int, date time.Time, plan WorkoutPlan) (PlanSession, error) {
+	r.saveCalls++
+	key := date.Format("2006-01-02")
+	session := PlanSession{ID: len(r.daily) + 1, PlanDate: key, Status: "active", Plan: plan}
+	if existing, ok := r.daily[key]; ok {
+		session.ID = existing.ID
+	}
+	r.daily[key] = session
+	return session, nil
+}
+
+func (r *memoryPlanningRepository) CreateDailyIfMissing(ctx context.Context, userID int, date time.Time, plan WorkoutPlan) (bool, error) {
+	if _, ok := r.daily[date.Format("2006-01-02")]; ok {
+		return false, nil
+	}
+	_, err := r.SaveDaily(ctx, userID, date, plan)
+	return err == nil, err
+}
+
+func (r *memoryPlanningRepository) ResolveExercise(_ context.Context, _ int, exerciseID, _ string) (ExerciseStats, string, error) {
+	for _, candidate := range r.candidates {
+		if candidate.ID == exerciseID {
+			return ExerciseStats{Name: candidate.Name, TargetSets: 3, TargetWeight: 40, TargetReps: 10}, candidate.ID, nil
+		}
+	}
+	return ExerciseStats{}, "", ErrExerciseNotFound
+}
