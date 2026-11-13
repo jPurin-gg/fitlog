@@ -112,6 +112,8 @@ JSON入力は1 MiBまでで、未知フィールドと複数JSON値を拒否し�
 | PUT | `/api/workout-plans/{YYYY-MM-DD}` | 日次予定を保存 |
 | POST | `/api/workout-plans/{YYYY-MM-DD}/start` | AI利用を選択して開始、または種目指定で手動開始 |
 
+日次予定の保存では、各種目の `planned_sets` に種目設定APIと同じ1〜20の整数を指定します。範囲外・未指定・`null` は400で拒否し、保存済みの予定は変更しません。
+
 開始APIはアプリ設定のタイムゾーンにおける当日だけ受け付けます。過去・未来の記録編集は `/api/workouts/by-date/{YYYY-MM-DD}` を使います。開始リクエストは任意のJSON本文を受け付けます。
 
 ```json

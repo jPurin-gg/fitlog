@@ -460,6 +460,9 @@ func (s *Service) normalizeDaily(ctx context.Context, userID int, plan *WorkoutP
 	}
 	for index := range plan.Exercises {
 		exercise := &plan.Exercises[index]
+		if exercise.PlannedSets < 1 || exercise.PlannedSets > 20 {
+			return apperr.Validation("予定のセット数は1〜20で指定してください。", map[string]string{"planned_sets": "must be between 1 and 20"})
+		}
 		if strings.TrimSpace(exercise.ExerciseID) == "" {
 			return apperr.Validation("種目IDが必要です。", map[string]string{"exercises": "exercise_id is required"})
 		}
@@ -471,9 +474,6 @@ func (s *Service) normalizeDaily(ctx context.Context, userID int, plan *WorkoutP
 			return apperr.Internal(err)
 		}
 		exercise.ExerciseID, exercise.Name, exercise.LastMaxWeight = resolvedID, stats.Name, stats.MaxWeight
-		if exercise.PlannedSets <= 0 {
-			exercise.PlannedSets = 3
-		}
 		if exercise.TargetReps <= 0 {
 			exercise.TargetReps = 10
 		}

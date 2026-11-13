@@ -7,7 +7,7 @@ import { motion } from "framer-motion";
 import { ExerciseSelectorModal } from "@/features/exercises/components/ExerciseSelectorModal";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
-import { displayPlanText, formatLocalDate, formatPlanMonth } from "@/lib/fitlog";
+import { displayPlanText, formatLocalDate, formatPlanMonth, MAX_TARGET_SETS, MIN_TARGET_SETS } from "@/lib/fitlog";
 import type { CalendarPlan, CalendarPlanExercise, CalendarWorkout, CalendarWorkoutSet, DayRoutine, MonthlyPlan, PlannedWorkoutDay, WorkedOutDay } from "./types";
 
 function dateFromPlanMonth(planMonth: string) {
@@ -754,6 +754,10 @@ export function CalendarPlanEditor({
   };
 
   const save = async () => {
+    if (exercises.some(ex => !Number.isInteger(ex.planned_sets) || ex.planned_sets < MIN_TARGET_SETS || ex.planned_sets > MAX_TARGET_SETS)) {
+      setError("予定のセット数は1〜20の整数で指定してください。");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -767,7 +771,7 @@ export function CalendarPlanEditor({
           exercises: exercises.map(ex => ({
             exercise_id: ex.exercise_id,
             name: ex.name,
-            planned_sets: Number(ex.planned_sets) || 3,
+            planned_sets: ex.planned_sets,
             target_weight: Number(ex.target_weight) || 0,
             target_reps: Number(ex.target_reps) || 10,
           })),
@@ -890,7 +894,8 @@ export function CalendarPlanEditor({
                           <span className="text-[10px] font-black text-white/40">セット</span>
                           <input
                             type="number"
-                            min="1"
+                            min={MIN_TARGET_SETS}
+                            max={MAX_TARGET_SETS}
                             step="1"
                             value={exercise.planned_sets}
                             onChange={e => updateExercise(index, { planned_sets: Number(e.target.value) })}

@@ -70,6 +70,30 @@ beforeEach(() => {
 });
 
 describe("WorkoutPage record-first flow", () => {
+  it.each([[1, 1], [20, 20], [21, 20], [4294967296, 20], [-1, 1]])(
+    "保存済み予定の%sセットで開始・再開しても安全な%sセットで記録できる",
+    async (plannedSets, displayedSets) => {
+      useCommonHandlers("not_requested");
+      server.use(
+        http.post(new RegExp(`${apiOrigin}/api/workout-plans/[^/]+/start`), () => HttpResponse.json({
+          ...startedPlan,
+          plan: {
+            ...startedPlan.plan,
+            exercises: [{ ...startedPlan.plan.exercises[0], planned_sets: plannedSets }],
+          },
+        })),
+        http.post(`${apiOrigin}/api/workouts/42/sets`, () => HttpResponse.json({ id: 100, workout_id: 42 })),
+      );
+      const user = userEvent.setup();
+      renderWorkout(false);
+      await user.click(screen.getByRole("button", { name: /ワークアウトを開始/ }));
+      expect(await screen.findByText(`セット 1 / ${displayedSets}`)).toBeInTheDocument();
+      expect(screen.getByText(`${displayedSets}セット / 60kg × 8回`)).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "セットを保存" }));
+      expect(await screen.findByText(/セットは保存済みです/)).toBeInTheDocument();
+    },
+  );
+
   it("セット保存を先に確定し、AIを待たずに次セットへ進める", async () => {
     useCommonHandlers();
     const recommendation = deferred<Response>();
