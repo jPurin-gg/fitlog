@@ -49,15 +49,71 @@ func (r *Repository) Search(ctx context.Context, filters exercise.Filters) ([]ex
 	return scanExercises(rows)
 }
 
-func (r *Repository) Create(ctx context.Context, item exercise.Exercise) error {
+// CreateUnique は同名判定と作成を1つのトランザクションで行う。
+// 名前の正規化は exercise.NormalizeName（Go側）で行うため、一意制約ではなく
+// トランザクション単位のアドバイザリーロックで同時作成を直列化する。
+// 既存データには正規化後に同名の種目が含まれうるため、一意インデックスは張らない。
+func (r *Repository) CreateUnique(ctx context.Context, item exercise.Exercise) (exercise.Exercise, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return exercise.Exercise{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('fitlog.exercises.create'))`); err != nil {
+		return exercise.Exercise{}, err
+	}
+	existingID, err := findSameName(ctx, tx, item.Name)
+	if err != nil {
+		return exercise.Exercise{}, err
+	}
+	if existingID != "" {
+		rows, err := tx.QueryContext(ctx, `SELECT id, name, force, level, mechanic, equipment, category, instructions, primary_muscles, secondary_muscles, images FROM exercises WHERE id = $1`, existingID)
+		if err != nil {
+			return exercise.Exercise{}, err
+		}
+		defer rows.Close()
+		found, err := scanExercises(rows)
+		if err != nil {
+			return exercise.Exercise{}, err
+		}
+		if len(found) == 0 {
+			return exercise.Exercise{}, fmt.Errorf("exercise %s disappeared during duplicate check", existingID)
+		}
+		return found[0], exercise.ErrDuplicateName
+	}
 	primary, _ := json.Marshal(item.PrimaryMuscles)
 	secondary, _ := json.Marshal(item.SecondaryMuscles)
 	instructions, _ := json.Marshal(item.Instructions)
-	_, err := r.db.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO exercises (id, name, category, equipment, primary_muscles, force, level, mechanic, instructions, secondary_muscles, images)
 		VALUES ($1, $2, $3, $4, $5::jsonb, NULL, $6, NULL, $7::jsonb, $8::jsonb, '[]'::jsonb)
-	`, item.ID, item.Name, item.Category, item.Equipment, string(primary), item.Level, string(instructions), string(secondary))
-	return err
+	`, item.ID, item.Name, item.Category, item.Equipment, string(primary), item.Level, string(instructions), string(secondary)); err != nil {
+		return exercise.Exercise{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return exercise.Exercise{}, err
+	}
+	return item, nil
+}
+
+// findSameName は正規化後の名前が一致する種目IDを返す。カタログの種目をカスタム種目より優先する。
+func findSameName(ctx context.Context, tx *sql.Tx, name string) (string, error) {
+	key := exercise.NormalizeName(name)
+	rows, err := tx.QueryContext(ctx, `SELECT id, name FROM exercises ORDER BY (id LIKE 'custom\_%'), id`)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, candidate string
+		if err := rows.Scan(&id, &candidate); err != nil {
+			return "", err
+		}
+		if exercise.NormalizeName(candidate) == key {
+			return id, nil
+		}
+	}
+	return "", rows.Err()
 }
 
 func (r *Repository) Favorites(ctx context.Context, userID int) ([]exercise.Exercise, error) {

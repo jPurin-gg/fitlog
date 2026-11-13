@@ -23,7 +23,9 @@ type Error struct {
 	Code   string
 	Detail string
 	Fields map[string]string
-	Cause  error
+	// Extensions は RFC 9457 の拡張メンバーとして問題詳細のトップレベルに出力する。
+	Extensions map[string]any
+	Cause      error
 }
 
 func (e *Error) Error() string {
@@ -37,6 +39,15 @@ func (e *Error) Error() string {
 }
 
 func (e *Error) Unwrap() error { return e.Cause }
+
+// WithExtension は問題詳細に載せる拡張メンバーを追加する。
+func (e *Error) WithExtension(key string, value any) *Error {
+	if e.Extensions == nil {
+		e.Extensions = map[string]any{}
+	}
+	e.Extensions[key] = value
+	return e
+}
 
 func New(status int, code, detail string) *Error {
 	return &Error{Status: status, Code: code, Detail: detail}

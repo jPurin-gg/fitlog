@@ -18,6 +18,9 @@ import (
 
 var ErrNotFound = errors.New("exercise not found")
 
+// ErrDuplicateName は正規化後の名前が同じ種目が既にあることを表す。
+var ErrDuplicateName = errors.New("exercise name already exists")
+
 type Exercise struct {
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
@@ -79,7 +82,9 @@ type AlternativeCandidate struct {
 
 type Repository interface {
 	Search(ctx context.Context, filters Filters) ([]Exercise, error)
-	Create(ctx context.Context, exercise Exercise) error
+	// CreateUnique は NormalizeName が一致する種目がなければ作成する。
+	// 一致する種目があれば作成せず、その種目と ErrDuplicateName を返す。
+	CreateUnique(ctx context.Context, exercise Exercise) (Exercise, error)
 	Favorites(ctx context.Context, userID int) ([]Exercise, error)
 	SetFavorite(ctx context.Context, userID int, exerciseID string, favorite bool) error
 	Recent(ctx context.Context, userID int) ([]Exercise, error)
@@ -120,29 +125,68 @@ func (s *Service) Search(ctx context.Context, filters Filters) ([]Exercise, erro
 }
 
 func (s *Service) Create(ctx context.Context, input CreateInput) (Exercise, error) {
-	input.Name = strings.TrimSpace(input.Name)
-	if input.Name == "" {
-		return Exercise{}, apperr.Validation("種目名は必須です。", map[string]string{"name": "required"})
+	exercise, err := newExercise(input)
+	if err != nil {
+		return Exercise{}, err
 	}
+	existing, err := s.repository.CreateUnique(ctx, exercise)
+	if errors.Is(err, ErrDuplicateName) {
+		return Exercise{}, apperr.Conflict(fmt.Sprintf("「%s」は既に辞書にあります。新しく追加せず、既存の種目を選んでください。", existing.Name)).
+			WithExtension("existing", existing)
+	}
+	if err != nil {
+		return Exercise{}, apperr.Internal(err)
+	}
+	return exercise, nil
+}
+
+// newExercise は作成入力を検証し、保存する種目を組み立てる。
+// どの画面から追加しても、分類はカタログ表記、メイン部位はカタログの部位から1つ以上になる。
+func newExercise(input CreateInput) (Exercise, error) {
+	name := strings.TrimSpace(input.Name)
 	primary := cleanStrings(input.PrimaryMuscles)
 	if len(primary) == 0 && strings.TrimSpace(input.Primary) != "" {
 		primary = []string{strings.TrimSpace(input.Primary)}
 	}
-	exercise := Exercise{
+	category, categoryOK := NormalizeCategory(input.Category)
+
+	fields := map[string]string{}
+	detail := ""
+	reject := func(field, reason, message string) {
+		fields[field] = reason
+		if detail == "" {
+			detail = message
+		}
+	}
+	if name == "" {
+		reject("name", "required", "種目名は必須です。")
+	}
+	if len(primary) == 0 {
+		reject("primary_muscles", "required", "メイン部位を選択してください。")
+	}
+	for _, muscle := range primary {
+		if !isKnownMuscle(muscle) {
+			reject("primary_muscles", "unknown", "メイン部位は一覧から選択してください。")
+			break
+		}
+	}
+	if !categoryOK {
+		reject("category", "unknown", "分類は一覧から選択してください。")
+	}
+	if len(fields) > 0 {
+		return Exercise{}, apperr.Validation(detail, fields)
+	}
+	return Exercise{
 		ID:               "custom_" + randomID(),
-		Name:             input.Name,
-		Category:         stringPointer(input.Category),
+		Name:             name,
+		Category:         &category,
 		Equipment:        stringPointer(input.Equipment),
 		Level:            stringPointer(input.Level),
 		Instructions:     cleanStrings(input.Instructions),
 		PrimaryMuscles:   primary,
 		SecondaryMuscles: cleanStrings(input.SecondaryMuscles),
 		Images:           []string{},
-	}
-	if err := s.repository.Create(ctx, exercise); err != nil {
-		return Exercise{}, apperr.Internal(err)
-	}
-	return exercise, nil
+	}, nil
 }
 
 func (s *Service) Favorites(ctx context.Context, userID int) ([]Exercise, error) {
