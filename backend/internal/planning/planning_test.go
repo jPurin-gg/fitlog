@@ -225,9 +225,17 @@ func TestStartDailySanitizesAIRefinement(t *testing.T) {
 			wantSaved:  base,
 		},
 		{
-			name: "exercise identity cannot be swapped",
+			name: "unknown exercise ID falls back",
 			response: with(func(plan *WorkoutPlan) {
 				plan.Exercises[0].ExerciseID, plan.Exercises[0].Name, plan.Exercises[0].LastMaxWeight = "squat", "スクワット", 999
+			}),
+			wantStatus: AIStatusFallback,
+			wantSaved:  base,
+		},
+		{
+			name: "exercise metadata uses base",
+			response: with(func(plan *WorkoutPlan) {
+				plan.Exercises[0].Name, plan.Exercises[0].LastMaxWeight = "スクワット", 999
 			}),
 			wantStatus: AIStatusApplied,
 			wantSaved:  base,
@@ -258,6 +266,92 @@ func TestStartDailySanitizesAIRefinement(t *testing.T) {
 			}
 			if repository.saveCalls != 1 || !reflect.DeepEqual(repository.savedPlan, test.wantSaved) {
 				t.Fatalf("saved plan = %#v; calls = %d; want %#v", repository.savedPlan, repository.saveCalls, test.wantSaved)
+			}
+		})
+	}
+}
+
+func TestStartDailyMatchesAIRefinementByExerciseID(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	exercises := []PlanExercise{
+		{ExerciseID: "bench", Name: "ベンチプレス", PlannedSets: 3, TargetWeight: 40, TargetReps: 10, LastMaxWeight: 50},
+		{ExerciseID: "squat", Name: "スクワット", PlannedSets: 4, TargetWeight: 100, TargetReps: 8, LastMaxWeight: 120},
+	}
+	bench := PlanExercise{ExerciseID: "bench", Name: "AIのベンチ", PlannedSets: 2, TargetWeight: 45, TargetReps: 12, LastMaxWeight: 999}
+	squat := PlanExercise{ExerciseID: "squat", Name: "AIのスクワット", PlannedSets: 5, TargetWeight: 110, TargetReps: 6, LastMaxWeight: 999}
+	invalidSquat := squat
+	invalidSquat.PlannedSets, invalidSquat.TargetWeight, invalidSquat.TargetReps = 0, 0, 0
+	tooManySets := bench
+	tooManySets.PlannedSets = 10
+	unknown := squat
+	unknown.ExerciseID = "unknown"
+	missingID := squat
+	missingID.ExerciseID = ""
+	duplicate := squat
+	duplicate.ExerciseID = bench.ExerciseID
+
+	tests := []struct {
+		name       string
+		response   []PlanExercise
+		wantStatus string
+		want       []PlanExercise
+	}{
+		{
+			name: "same order applies values by ID", response: []PlanExercise{bench, squat}, wantStatus: AIStatusApplied,
+			want: []PlanExercise{
+				{ExerciseID: "bench", Name: "ベンチプレス", PlannedSets: 2, TargetWeight: 45, TargetReps: 12, LastMaxWeight: 50},
+				{ExerciseID: "squat", Name: "スクワット", PlannedSets: 5, TargetWeight: 110, TargetReps: 6, LastMaxWeight: 120},
+			},
+		},
+		{
+			name: "reversed order applies values by ID", response: []PlanExercise{squat, bench}, wantStatus: AIStatusApplied,
+			want: []PlanExercise{
+				{ExerciseID: "bench", Name: "ベンチプレス", PlannedSets: 2, TargetWeight: 45, TargetReps: 12, LastMaxWeight: 50},
+				{ExerciseID: "squat", Name: "スクワット", PlannedSets: 5, TargetWeight: 110, TargetReps: 6, LastMaxWeight: 120},
+			},
+		},
+		{
+			name: "reversed order sanitizes values against matching base", response: []PlanExercise{invalidSquat, tooManySets}, wantStatus: AIStatusApplied,
+			want: []PlanExercise{
+				{ExerciseID: "bench", Name: "ベンチプレス", PlannedSets: 6, TargetWeight: 45, TargetReps: 12, LastMaxWeight: 50},
+				exercises[1],
+			},
+		},
+		{name: "unknown ID falls back", response: []PlanExercise{bench, unknown}, wantStatus: AIStatusFallback},
+		{name: "missing exercise falls back", response: []PlanExercise{bench}, wantStatus: AIStatusFallback},
+		{name: "empty ID falls back", response: []PlanExercise{bench, missingID}, wantStatus: AIStatusFallback},
+		{name: "duplicate ID falls back", response: []PlanExercise{bench, duplicate}, wantStatus: AIStatusFallback},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repository := newStartDailyRepository(now)
+			repository.exercises = exercises
+			base := repository.basePlan()
+			response := base
+			response.WorkoutTitle, response.CoachNote = "AIタイトル", "AIメモ"
+			response.Exercises = test.response
+			encoded, err := json.Marshal(response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			aiClient := &stubPlanningAI{complete: func(context.Context, ai.Request) (string, error) {
+				return string(encoded), nil
+			}}
+			service := NewService(repository, nil, aiClient, stubPlanningPrompts{}, clock.Fixed{Time: now}, time.Second)
+			result, err := service.StartDaily(context.Background(), 1, now.Format("2006-01-02"), StartDailyInput{})
+			if err != nil || result.AIStatus != test.wantStatus || result.WorkoutID == 0 {
+				t.Fatalf("StartDaily() = %#v, %v; want ai_status %q and a started workout", result, err, test.wantStatus)
+			}
+			want := base
+			if test.wantStatus == AIStatusApplied {
+				want.WorkoutTitle, want.CoachNote, want.Exercises = response.WorkoutTitle, response.CoachNote, test.want
+			}
+			if aiClient.calls != 1 || repository.saveCalls != 1 || repository.saveContextErr != nil {
+				t.Fatalf("AI calls = %d; save calls = %d; context error = %v", aiClient.calls, repository.saveCalls, repository.saveContextErr)
+			}
+			if !reflect.DeepEqual(repository.savedPlan, want) || !reflect.DeepEqual(result.Plan, want) {
+				t.Fatalf("saved plan = %#v; returned plan = %#v; want %#v", repository.savedPlan, result.Plan, want)
 			}
 		})
 	}
@@ -376,6 +470,7 @@ type startDailyRepository struct {
 	monthlyCalls     int
 	resolveErr       error
 	createdByOther   bool
+	exercises        []PlanExercise
 	now              time.Time
 	dailyResult      PlanSession
 	dailyErr         error
@@ -394,14 +489,18 @@ func newStartDailyRepository(now time.Time) *startDailyRepository {
 }
 
 func (r *startDailyRepository) basePlan() WorkoutPlan {
+	exercises := r.exercises
+	if exercises == nil {
+		exercises = []PlanExercise{{
+			ExerciseID: "bench", Name: "ベンチプレス", PlannedSets: 3, TargetWeight: 40, TargetReps: 10, LastMaxWeight: 50,
+		}}
+	}
 	return WorkoutPlan{
 		WorkoutTitle:         "胸",
 		Target:               "胸",
 		EstimatedDurationMin: 30,
 		CoachNote:            "月間プランの今日のメニューに、直近の重量と目標セット数を反映します。",
-		Exercises: []PlanExercise{{
-			ExerciseID: "bench", Name: "ベンチプレス", PlannedSets: 3, TargetWeight: 40, TargetReps: 10, LastMaxWeight: 50,
-		}},
+		Exercises:            exercises,
 	}
 }
 
@@ -410,11 +509,14 @@ func (r *startDailyRepository) Monthly(context.Context, int, string) (MonthlyPla
 	if r.monthlyErr != nil {
 		return MonthlyPlan{}, r.monthlyErr
 	}
+	routine := DayRoutine{DayName: "1日目", Target: "胸"}
+	for _, exercise := range r.basePlan().Exercises {
+		routine.ExampleExercises = append(routine.ExampleExercises, exercise.Name)
+		routine.ExerciseIDs = append(routine.ExerciseIDs, exercise.ExerciseID)
+	}
 	return MonthlyPlan{
 		RecommendedDays: []int{int(r.now.Weekday())},
-		WeeklyRoutine: []DayRoutine{{
-			DayName: "1日目", Target: "胸", ExampleExercises: []string{"ベンチプレス"}, ExerciseIDs: []string{"bench"},
-		}},
+		WeeklyRoutine:   []DayRoutine{routine},
 	}, nil
 }
 
@@ -481,11 +583,16 @@ func TestStartDailyPreservesPlanCommittedWhileAIWasRunning(t *testing.T) {
 	}
 }
 
-func (r *startDailyRepository) ResolveExercise(context.Context, int, string, string) (ExerciseStats, string, error) {
+func (r *startDailyRepository) ResolveExercise(_ context.Context, _ int, id, name string) (ExerciseStats, string, error) {
 	if r.resolveErr != nil {
 		return ExerciseStats{}, "", r.resolveErr
 	}
-	return ExerciseStats{Name: "ベンチプレス", TargetSets: 3, TargetWeight: 40, TargetReps: 10, MaxWeight: 50}, "bench", nil
+	for _, exercise := range r.basePlan().Exercises {
+		if exercise.ExerciseID == id || (id == "" && exercise.Name == name) {
+			return ExerciseStats{Name: exercise.Name, TargetSets: exercise.PlannedSets, TargetWeight: exercise.TargetWeight, TargetReps: exercise.TargetReps, MaxWeight: exercise.LastMaxWeight}, exercise.ExerciseID, nil
+		}
+	}
+	return ExerciseStats{}, "", ErrExerciseNotFound
 }
 
 func TestManualStartNeverNeedsMonthlyPlanOrAI(t *testing.T) {
