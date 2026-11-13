@@ -2,6 +2,7 @@ package workout
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -407,6 +408,24 @@ func TestSummaryCommentAIFailureDoesNotSave(t *testing.T) {
 	}
 }
 
+func TestSummaryCommentEncodesLargeRepetitionTotals(t *testing.T) {
+	for _, reps := range []int64{2000, 4294967294} {
+		repository := &stubRepository{detail: Detail{ID: 2, Status: "completed", Summary: Summary{
+			TotalReps: reps, TotalVolume: 2000 * float64(reps),
+			Exercises: []SummaryExercise{{TotalReps: reps, TotalVolume: 2000 * float64(reps)}},
+		}}}
+		prompts := &summaryPromptRecorder{}
+		client := &stubAIClient{complete: func(context.Context, ai.Request) (string, error) {
+			return `{"comment":"その調子です。"}`, nil
+		}}
+		service := NewService(repository, client, prompts, nil, time.Second)
+		_, err := service.SummaryComment(context.Background(), 1, 2)
+		if err != nil || prompts.summary.TotalReps != reps || len(prompts.summary.Exercises) != 1 || prompts.summary.Exercises[0].TotalReps != reps || prompts.summary.TotalVolume != 2000*float64(reps) {
+			t.Fatalf("SummaryComment() error = %v; prompt summary = %+v", err, prompts.summary)
+		}
+	}
+}
+
 func TestSummaryCommentReturnsCommentSavedByConcurrentRequestWhenAIFails(t *testing.T) {
 	repository := &stubRepository{detail: Detail{ID: 2, Status: "completed"}}
 	aiClient := &stubAIClient{complete: func(context.Context, ai.Request) (string, error) {
@@ -535,4 +554,12 @@ type stubPrompts struct{}
 
 func (stubPrompts) Pair(systemFilename, userFilename string, _ any) (string, string, error) {
 	return systemFilename, userFilename, nil
+}
+
+type summaryPromptRecorder struct{ summary Summary }
+
+func (p *summaryPromptRecorder) Pair(_, _ string, data any) (string, string, error) {
+	encoded := data.(map[string]any)["SummaryJSON"].(string)
+	err := json.Unmarshal([]byte(encoded), &p.summary)
+	return "system", encoded, err
 }

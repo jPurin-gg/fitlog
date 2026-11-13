@@ -82,14 +82,14 @@ type SummaryExercise struct {
 	ExerciseID  string  `json:"exercise_id"`
 	Name        string  `json:"name"`
 	Sets        int     `json:"sets"`
-	TotalReps   int     `json:"total_reps"`
+	TotalReps   int64   `json:"total_reps"`
 	BestWeight  float64 `json:"best_weight"`
 	TotalVolume float64 `json:"total_volume"`
 }
 
 type Summary struct {
 	TotalSets   int               `json:"total_sets"`
-	TotalReps   int               `json:"total_reps"`
+	TotalReps   int64             `json:"total_reps"`
 	TotalVolume float64           `json:"total_volume"`
 	DurationMin int               `json:"duration_min"`
 	PRCount     int               `json:"pr_count"`
