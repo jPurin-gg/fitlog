@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -22,6 +23,12 @@ var (
 )
 
 var idempotencyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,128}$`)
+
+// Keep these limits aligned with the frontend and AI recommendation contract.
+const (
+	MaxReps   = 1000
+	MaxWeight = 2000
+)
 
 type SetInput struct {
 	ExerciseID string  `json:"exercise_id"`
@@ -75,14 +82,14 @@ type SummaryExercise struct {
 	ExerciseID  string  `json:"exercise_id"`
 	Name        string  `json:"name"`
 	Sets        int     `json:"sets"`
-	TotalReps   int     `json:"total_reps"`
+	TotalReps   int64   `json:"total_reps"`
 	BestWeight  float64 `json:"best_weight"`
 	TotalVolume float64 `json:"total_volume"`
 }
 
 type Summary struct {
 	TotalSets   int               `json:"total_sets"`
-	TotalReps   int               `json:"total_reps"`
+	TotalReps   int64             `json:"total_reps"`
 	TotalVolume float64           `json:"total_volume"`
 	DurationMin int               `json:"duration_min"`
 	PRCount     int               `json:"pr_count"`
@@ -183,11 +190,8 @@ func (s *Service) RecordSet(ctx context.Context, userID, workoutID int, key stri
 	if input.SetOrder <= 0 {
 		fields["set_order"] = "must be positive"
 	}
-	if input.Weight < 0 {
-		fields["weight"] = "must be non-negative"
-	}
-	if input.Reps <= 0 {
-		fields["reps"] = "must be positive"
+	for field, message := range validateSetValues(input.Weight, input.Reps) {
+		fields[field] = message
 	}
 	if len(fields) > 0 {
 		return Set{}, false, apperr.Validation("セット記録の入力を確認してください。", fields)
@@ -203,6 +207,17 @@ func (s *Service) RecordSet(ctx context.Context, userID, workoutID int, key stri
 		return Set{}, false, apperr.Internal(err)
 	}
 	return set, replayed, nil
+}
+
+func validateSetValues(weight float64, reps int) map[string]string {
+	fields := map[string]string{}
+	if math.IsNaN(weight) || math.IsInf(weight, 0) || weight < 0 || weight > MaxWeight {
+		fields["weight"] = fmt.Sprintf("must be finite and between 0 and %d", MaxWeight)
+	}
+	if reps <= 0 || reps > MaxReps {
+		fields["reps"] = fmt.Sprintf("must be between 1 and %d", MaxReps)
+	}
+	return fields
 }
 
 func (s *Service) Recommend(ctx context.Context, userID, workoutID, setID int) (Recommendation, error) {
@@ -250,7 +265,7 @@ func validateRecommendation(response *Recommendation) error {
 	if response.NextAction != "CONTINUE" && response.NextAction != "STOP" && response.NextAction != "ADJUST" {
 		return apperr.New(502, apperr.CodeAIUnavailable, "AIの提案が不正です。")
 	}
-	if response.Recommendation == "" || response.Reason == "" || response.TargetWeight < 0 || response.TargetWeight > 2000 || response.TargetReps < 0 || response.TargetReps > 1000 {
+	if response.Recommendation == "" || response.Reason == "" || math.IsNaN(response.TargetWeight) || math.IsInf(response.TargetWeight, 0) || response.TargetWeight < 0 || response.TargetWeight > MaxWeight || response.TargetReps < 0 || response.TargetReps > MaxReps {
 		return apperr.New(502, apperr.CodeAIUnavailable, "AIの提案が不完全です。")
 	}
 	if response.NextAction != "STOP" && response.TargetReps == 0 {
@@ -413,7 +428,7 @@ func (s *Service) SaveCalendarWorkout(ctx context.Context, userID int, dateText 
 		set := &input.Sets[index]
 		set.ExerciseID = strings.TrimSpace(set.ExerciseID)
 		set.Feeling = strings.TrimSpace(set.Feeling)
-		if set.ExerciseID == "" || set.Reps <= 0 || set.Weight < 0 {
+		if set.ExerciseID == "" || len(validateSetValues(set.Weight, set.Reps)) > 0 {
 			return CalendarWorkout{}, apperr.Validation("セットの種目・重量・回数を確認してください。", map[string]string{"sets": "invalid set"})
 		}
 		if set.SetOrder <= 0 {

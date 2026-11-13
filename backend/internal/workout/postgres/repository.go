@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math"
 	"sort"
 	"time"
 
@@ -194,17 +195,27 @@ func (r *Repository) Finish(ctx context.Context, userID, workoutID int) (workout
 	if _, err := tx.ExecContext(ctx, `UPDATE workout_plans SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE workout_id=$1 AND user_id=$2 AND status='active'`, workoutID, userID); err != nil {
 		return workout.Detail{}, err
 	}
+	// Build the response before committing so an aggregation failure also rolls
+	// back the completion updates. Use the locked transaction for every query.
+	detail, err := workoutDetail(ctx, tx, userID, workoutID)
+	if err != nil {
+		return workout.Detail{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return workout.Detail{}, err
 	}
-	return r.Detail(ctx, userID, workoutID)
+	return detail, nil
 }
 
 func (r *Repository) Detail(ctx context.Context, userID, workoutID int) (workout.Detail, error) {
+	return workoutDetail(ctx, r.db, userID, workoutID)
+}
+
+func workoutDetail(ctx context.Context, query summaryQueryer, userID, workoutID int) (workout.Detail, error) {
 	var detail workout.Detail
 	var startedAt time.Time
 	var endedAt sql.NullTime
-	err := r.db.QueryRowContext(ctx, `
+	err := query.QueryRowContext(ctx, `
 		SELECT id,COALESCE(notes,'ワークアウト'),started_at,ended_at,CASE WHEN ended_at IS NULL THEN 'active' ELSE 'completed' END
 		FROM workouts WHERE id=$1 AND user_id=$2
 	`, workoutID, userID).Scan(&detail.ID, &detail.Title, &startedAt, &endedAt, &detail.Status)
@@ -218,7 +229,7 @@ func (r *Repository) Detail(ctx context.Context, userID, workoutID int) (workout
 	if endedAt.Valid {
 		detail.EndedAt = endedAt.Time.Format(time.RFC3339)
 	}
-	detail.Summary, err = r.summary(ctx, userID, workoutID)
+	detail.Summary, err = workoutSummary(ctx, query, userID, workoutID)
 	return detail, err
 }
 
@@ -353,18 +364,18 @@ func (r *Repository) SaveCalendarWorkout(ctx context.Context, userID int, date t
 	return r.CalendarWorkout(ctx, userID, date)
 }
 
-func (r *Repository) summary(ctx context.Context, userID, workoutID int) (workout.Summary, error) {
+func workoutSummary(ctx context.Context, query summaryQueryer, userID, workoutID int) (workout.Summary, error) {
 	summary := workout.Summary{Exercises: []workout.SummaryExercise{}}
-	err := r.db.QueryRowContext(ctx, `
+	err := query.QueryRowContext(ctx, `
 		SELECT GREATEST(1,CEIL(EXTRACT(EPOCH FROM (COALESCE(ended_at,CURRENT_TIMESTAMP)-started_at))/60))::int,COALESCE(summary_comment,'')
 		FROM workouts WHERE id=$1 AND user_id=$2
 	`, workoutID, userID).Scan(&summary.DurationMin, &summary.AIComment)
 	if err != nil {
 		return summary, err
 	}
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT ws.exercise_id,COALESCE(e.name,ws.exercise_id),COUNT(*)::int,COALESCE(SUM(ws.reps),0)::int,
-		       COALESCE(MAX(ws.weight),0),COALESCE(SUM(ws.weight*ws.reps),0),COALESCE(SUM(CASE WHEN ws.is_pr THEN 1 ELSE 0 END),0)::int
+	rows, err := query.QueryContext(ctx, `
+		SELECT ws.exercise_id,COALESCE(e.name,ws.exercise_id),COUNT(*),COALESCE(SUM(ws.reps),0),
+		       COALESCE(MAX(ws.weight),0),COALESCE(SUM(ws.weight*ws.reps),0),COALESCE(SUM(CASE WHEN ws.is_pr THEN 1 ELSE 0 END),0)
 		FROM workout_sets ws LEFT JOIN exercises e ON e.id=ws.exercise_id
 		WHERE ws.workout_id=$1 GROUP BY ws.exercise_id,e.name ORDER BY MIN(ws.created_at),MIN(ws.id)
 	`, workoutID)
@@ -383,6 +394,12 @@ func (r *Repository) summary(ctx context.Context, userID, workoutID int) (workou
 		summary.TotalVolume += item.TotalVolume
 		summary.PRCount += prCount
 		summary.Exercises = append(summary.Exercises, item)
+		// Legacy weights can be outside today's input limits. Reject non-finite
+		// aggregates (including an overflow across exercises) before JSON encoding
+		// or committing Finish, which would otherwise leave completion persisted.
+		if math.IsNaN(item.BestWeight) || math.IsInf(item.BestWeight, 0) || math.IsNaN(item.TotalVolume) || math.IsInf(item.TotalVolume, 0) || math.IsNaN(summary.TotalVolume) || math.IsInf(summary.TotalVolume, 0) {
+			return workout.Summary{}, errors.New("non-finite workout weight or volume")
+		}
 	}
 	return summary, rows.Err()
 }
@@ -410,6 +427,11 @@ func (r *Repository) calendarSets(ctx context.Context, userID, workoutID int) ([
 
 type queryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+type summaryQueryer interface {
+	queryer
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
 func findSetByKey(ctx context.Context, query queryer, userID, workoutID int, key string) (workout.Set, bool, error) {
