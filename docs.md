@@ -169,6 +169,8 @@ OFFでは開始リクエストに `use_ai: false` を送り、セット保存後
 
 HTTPログは `request_id`、method、生のIDを含まないroute pattern、status、response bytes、所要時間を記録します。AIログは同じ `request_id` で相関でき、provider段階の最終outcome・試行回数・総時間と、feature段階の `applied`、`fallback`、`invalid_output`、`unavailable`、`replayed` などを分けて記録します。
 
+共通エラー応答の5xxは、アクセスログとは別にリクエストごとに1件だけ診断ログを記録します。`request_id`、method、route pattern、status、`stage`（通常は `handler`、panic回復は `recovery`）、`error_class` で追跡でき、通常の4xxは診断ログの対象外です。DBエラーは検証済みの5文字の `sqlstate` と制約・接続・認証・トランザクションなどの分類を記録します。SQLSTATEのない接続エラーはDB・ネットワークのエラー型で分類し、未知の原因は `internal` にまとめます。エラーメッセージ、DBの詳細・SQLパラメータ・DSN、認証情報、リクエストの入力、panicの値は診断ログへ出しません。レスポンスの汎用500は維持します。
+
 プロバイダーを追加する場合も、機能Serviceではなく `internal/ai` 配下へ新しいアダプターを追加します。現時点では自動ルーティングや複数キー管理は行いません。
 
 ## 月間プランの案内

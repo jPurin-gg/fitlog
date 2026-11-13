@@ -83,7 +83,14 @@ func RespondNoContent(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 func WriteError(w http.ResponseWriter, r *http.Request, err error) {
+	writeError(w, r, err, "handler")
+}
+
+func writeError(w http.ResponseWriter, r *http.Request, err error, stage string) {
 	appErr := apperr.As(err)
+	if appErr.Status >= 500 && appErr.Status < 600 {
+		logServerError(r, appErr, stage)
+	}
 	problem := Problem{
 		Type:      "/problems/" + strings.ToLower(strings.ReplaceAll(appErr.Code, "_", "-")),
 		Title:     titleForStatus(appErr.Status),
@@ -104,10 +111,10 @@ func WriteProblem(w http.ResponseWriter, problem Problem) {
 
 func Recover(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = withErrorLogger(r, logger)
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				logger.Error("http panic recovered", "request_id", RequestID(r.Context()), "panic", recovered)
-				WriteError(w, r, apperr.Internal(errors.New("panic recovered")))
+				writeError(w, r, apperr.Internal(errPanicRecovered), "recovery")
 			}
 		}()
 		next.ServeHTTP(w, r)

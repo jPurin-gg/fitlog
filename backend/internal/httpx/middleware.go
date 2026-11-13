@@ -30,6 +30,7 @@ func WithRequestID(next http.Handler) http.Handler {
 
 func LogRequests(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = withErrorLogger(r, logger)
 		started := time.Now()
 		writer := &accessLogWriter{ResponseWriter: w}
 		defer func() {
