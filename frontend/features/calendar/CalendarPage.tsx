@@ -4,11 +4,13 @@ import React, { useEffect, useState } from "react";
 import { ArrowLeft, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Dumbbell, Sparkles, Check, Plus, Trash2, Save, Loader2, X, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { NumericInput } from "@/components/NumericInput";
 import { ExerciseSelectorModal } from "@/features/exercises/components/ExerciseSelectorModal";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
 import { displayPlanText, formatLocalDate, formatPlanMonth } from "@/lib/fitlog";
-import type { CalendarPlan, CalendarPlanExercise, CalendarWorkout, CalendarWorkoutSet, DayRoutine, MonthlyPlan, PlannedWorkoutDay, WorkedOutDay } from "./types";
+import { fieldKey, numberToInput, toPlanExerciseDraft, toWorkoutSetDraft, validatePlanDraft, validateWorkoutSets, withoutFieldError, type FieldErrors, type PlanExerciseDraft, type WorkoutSetDraft } from "./editorDrafts";
+import type { CalendarPlan, CalendarWorkout, DayRoutine, MonthlyPlan, PlannedWorkoutDay, WorkedOutDay } from "./types";
 
 function dateFromPlanMonth(planMonth: string) {
   const [year, month] = planMonth.split("-").map(Number);
@@ -446,6 +448,10 @@ export default function CalendarPage() {
   );
 }
 
+function numericFieldClass(invalid: boolean) {
+  return `w-full bg-white/5 border rounded-xl px-3 py-2 focus:outline-none ${invalid ? "border-red-400/70 focus:border-red-300" : "border-white/10 focus:border-primary/50"}`;
+}
+
 export function CalendarWorkoutEditor({
   date,
   onClose,
@@ -458,11 +464,13 @@ export function CalendarWorkoutEditor({
   useBodyScrollLock();
   const [workout, setWorkout] = useState<CalendarWorkout | null>(null);
   const [title, setTitle] = useState("筋トレ");
-  const [sets, setSets] = useState<CalendarWorkoutSet[]>([]);
+  const [sets, setSets] = useState<WorkoutSetDraft[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [showExerciseSelector, setShowExerciseSelector] = useState(false);
+  const fieldID = React.useId();
 
   useEffect(() => {
     setLoading(true);
@@ -471,7 +479,7 @@ export function CalendarWorkoutEditor({
       .then((data: CalendarWorkout) => {
         setWorkout(data);
         setTitle(data.title || "筋トレ");
-        setSets(Array.isArray(data.sets) ? data.sets : []);
+        setSets(Array.isArray(data.sets) ? data.sets.map(toWorkoutSetDraft) : []);
       })
       .catch(err => {
         if (err instanceof ApiError && err.status === 404) {
@@ -492,8 +500,9 @@ export function CalendarWorkoutEditor({
       {
         exercise_id: exercise.id,
         exercise_name: exercise.name,
-        weight: 0,
-        reps: 10,
+        // 0から始めると続けて打った値が「060」になるため、重量は空欄から入力する。
+        weight: "",
+        reps: "10",
         set_order: prev.length + 1,
         feeling: "",
       },
@@ -501,28 +510,28 @@ export function CalendarWorkoutEditor({
     setShowExerciseSelector(false);
   };
 
-  const updateSet = (index: number, patch: Partial<CalendarWorkoutSet>) => {
+  const updateSet = (index: number, patch: Partial<WorkoutSetDraft>) => {
     setSets(prev => prev.map((set, i) => i === index ? { ...set, ...patch } : set));
+    setFieldErrors(prev => Object.keys(patch).reduce((next, field) => withoutFieldError(next, fieldKey(index, field)), prev));
   };
 
   const removeSet = (index: number) => {
     setSets(prev => prev.filter((_, i) => i !== index).map((set, i) => ({ ...set, set_order: i + 1 })));
+    setFieldErrors({});
   };
 
   const save = async () => {
+    if (saving) return;
+    const { payload: validSets, errors } = validateWorkoutSets(sets);
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setError("入力内容を確認してください。空欄の数値は保存できません。");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
-      const payload = {
-        title,
-        sets: sets.map((set, i) => ({
-          exercise_id: set.exercise_id,
-          weight: Number(set.weight) || 0,
-          reps: Number(set.reps) || 0,
-          set_order: i + 1,
-          feeling: set.feeling || "",
-        })),
-      };
+      const payload = { title, sets: validSets };
       await apiFetch<CalendarWorkout>(`/api/workouts/by-date/${date}`, {
         method: "PUT",
         body: JSON.stringify(payload),
@@ -616,28 +625,31 @@ export function CalendarWorkoutEditor({
                       </div>
 
                       <div className="grid grid-cols-2 md:grid-cols-[120px_120px_1fr] gap-3">
-                        <label className="space-y-1">
-                          <span className="text-[10px] font-black text-white/40">重量 kg</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.5"
+                        <div className="space-y-1">
+                          <label htmlFor={`${fieldID}-${index}-weight`} className="text-[10px] font-black text-white/40">重量 kg</label>
+                          <NumericInput
+                            id={`${fieldID}-${index}-weight`}
+                            kind="decimal"
                             value={set.weight}
-                            onChange={e => updateSet(index, { weight: Number(e.target.value) })}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus:outline-none focus:border-primary/50"
+                            onValueChange={weight => updateSet(index, { weight })}
+                            onEnter={() => void save()}
+                            error={fieldErrors[fieldKey(index, "weight")]}
+                            placeholder="0"
+                            className={numericFieldClass(Boolean(fieldErrors[fieldKey(index, "weight")]))}
                           />
-                        </label>
-                        <label className="space-y-1">
-                          <span className="text-[10px] font-black text-white/40">回数</span>
-                          <input
-                            type="number"
-                            min="1"
-                            step="1"
+                        </div>
+                        <div className="space-y-1">
+                          <label htmlFor={`${fieldID}-${index}-reps`} className="text-[10px] font-black text-white/40">回数</label>
+                          <NumericInput
+                            id={`${fieldID}-${index}-reps`}
+                            kind="integer"
                             value={set.reps}
-                            onChange={e => updateSet(index, { reps: Number(e.target.value) })}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus:outline-none focus:border-primary/50"
+                            onValueChange={reps => updateSet(index, { reps })}
+                            onEnter={() => void save()}
+                            error={fieldErrors[fieldKey(index, "reps")]}
+                            className={numericFieldClass(Boolean(fieldErrors[fieldKey(index, "reps")]))}
                           />
-                        </label>
+                        </div>
                         <label className="space-y-1 col-span-2 md:col-span-1">
                           <span className="text-[10px] font-black text-white/40">感想</span>
                           <input
@@ -704,13 +716,15 @@ export function CalendarPlanEditor({
   const [plan, setPlan] = useState<CalendarPlan | null>(null);
   const [title, setTitle] = useState("筋トレ");
   const [target, setTarget] = useState("筋トレ");
-  const [duration, setDuration] = useState(45);
+  const [duration, setDuration] = useState("45");
   const [coachNote, setCoachNote] = useState("");
-  const [exercises, setExercises] = useState<CalendarPlanExercise[]>([]);
+  const [exercises, setExercises] = useState<PlanExerciseDraft[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [showExerciseSelector, setShowExerciseSelector] = useState(false);
+  const fieldID = React.useId();
 
   useEffect(() => {
     setLoading(true);
@@ -720,9 +734,9 @@ export function CalendarPlanEditor({
         setPlan(data);
         setTitle(data.plan?.workout_title || "筋トレ");
         setTarget(data.plan?.target || data.plan?.workout_title || "筋トレ");
-        setDuration(data.plan?.estimated_duration_min || 45);
+        setDuration(numberToInput(data.plan?.estimated_duration_min || 45));
         setCoachNote(data.plan?.coach_note || "");
-        setExercises(Array.isArray(data.plan?.exercises) ? data.plan.exercises : []);
+        setExercises(Array.isArray(data.plan?.exercises) ? data.plan.exercises.map(toPlanExerciseDraft) : []);
       })
       .catch(err => {
         console.error(err);
@@ -737,23 +751,38 @@ export function CalendarPlanEditor({
       {
         exercise_id: exercise.id,
         name: exercise.name,
-        planned_sets: 3,
-        target_weight: 0,
-        target_reps: 10,
+        planned_sets: "3",
+        target_weight: "",
+        target_reps: "10",
       },
     ]);
     setShowExerciseSelector(false);
   };
 
-  const updateExercise = (index: number, patch: Partial<CalendarPlanExercise>) => {
+  const updateExercise = (index: number, patch: Partial<PlanExerciseDraft>) => {
     setExercises(prev => prev.map((exercise, i) => i === index ? { ...exercise, ...patch } : exercise));
+    setFieldErrors(prev => Object.keys(patch).reduce((next, field) => withoutFieldError(next, fieldKey(index, field)), prev));
+  };
+
+  const updateDuration = (value: string) => {
+    setDuration(value);
+    setFieldErrors(prev => withoutFieldError(prev, "duration"));
   };
 
   const removeExercise = (index: number) => {
     setExercises(prev => prev.filter((_, i) => i !== index));
+    // 種目ごとのエラーは位置がずれるため消し、目安分のエラーだけ残す。
+    setFieldErrors((prev): FieldErrors => (prev.duration ? { duration: prev.duration } : {}));
   };
 
   const save = async () => {
+    if (saving) return;
+    const validated = validatePlanDraft(duration, exercises);
+    setFieldErrors(validated.errors);
+    if (Object.keys(validated.errors).length > 0) {
+      setError("入力内容を確認してください。空欄の数値は保存できません。");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -762,15 +791,9 @@ export function CalendarPlanEditor({
         body: JSON.stringify({
           workout_title: title,
           target,
-          estimated_duration_min: Number(duration) || 45,
+          estimated_duration_min: validated.estimatedDurationMin,
           coach_note: coachNote,
-          exercises: exercises.map(ex => ({
-            exercise_id: ex.exercise_id,
-            name: ex.name,
-            planned_sets: Number(ex.planned_sets) || 3,
-            target_weight: Number(ex.target_weight) || 0,
-            target_reps: Number(ex.target_reps) || 10,
-          })),
+          exercises: validated.exercises,
         }),
       });
       onSaved();
@@ -822,17 +845,18 @@ export function CalendarPlanEditor({
                     placeholder="例: 胸・肩"
                   />
                 </label>
-                <label className="space-y-2">
-                  <span className="text-[10px] font-black text-white/40">目安分</span>
-                  <input
-                    type="number"
-                    min="15"
-                    step="5"
+                <div className="space-y-2">
+                  <label htmlFor={`${fieldID}-duration`} className="block text-[10px] font-black text-white/40">目安分</label>
+                  <NumericInput
+                    id={`${fieldID}-duration`}
+                    kind="integer"
                     value={duration}
-                    onChange={e => setDuration(Number(e.target.value))}
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 focus:outline-none focus:border-primary/50"
+                    onValueChange={updateDuration}
+                    onEnter={() => void save()}
+                    error={fieldErrors.duration}
+                    className={`w-full bg-black/40 border rounded-2xl px-4 py-3 focus:outline-none ${fieldErrors.duration ? "border-red-400/70 focus:border-red-300" : "border-white/10 focus:border-primary/50"}`}
                   />
-                </label>
+                </div>
               </div>
 
               <label className="space-y-2 block">
@@ -886,39 +910,43 @@ export function CalendarPlanEditor({
                       </div>
 
                       <div className="grid grid-cols-3 gap-3">
-                        <label className="space-y-1">
-                          <span className="text-[10px] font-black text-white/40">セット</span>
-                          <input
-                            type="number"
-                            min="1"
-                            step="1"
+                        <div className="space-y-1">
+                          <label htmlFor={`${fieldID}-${index}-planned_sets`} className="text-[10px] font-black text-white/40">セット</label>
+                          <NumericInput
+                            id={`${fieldID}-${index}-planned_sets`}
+                            kind="integer"
                             value={exercise.planned_sets}
-                            onChange={e => updateExercise(index, { planned_sets: Number(e.target.value) })}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus:outline-none focus:border-primary/50"
+                            onValueChange={value => updateExercise(index, { planned_sets: value })}
+                            onEnter={() => void save()}
+                            error={fieldErrors[fieldKey(index, "planned_sets")]}
+                            className={numericFieldClass(Boolean(fieldErrors[fieldKey(index, "planned_sets")]))}
                           />
-                        </label>
-                        <label className="space-y-1">
-                          <span className="text-[10px] font-black text-white/40">重量 kg</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.5"
+                        </div>
+                        <div className="space-y-1">
+                          <label htmlFor={`${fieldID}-${index}-target_weight`} className="text-[10px] font-black text-white/40">重量 kg</label>
+                          <NumericInput
+                            id={`${fieldID}-${index}-target_weight`}
+                            kind="decimal"
                             value={exercise.target_weight}
-                            onChange={e => updateExercise(index, { target_weight: Number(e.target.value) })}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus:outline-none focus:border-primary/50"
+                            onValueChange={value => updateExercise(index, { target_weight: value })}
+                            onEnter={() => void save()}
+                            error={fieldErrors[fieldKey(index, "target_weight")]}
+                            placeholder="0"
+                            className={numericFieldClass(Boolean(fieldErrors[fieldKey(index, "target_weight")]))}
                           />
-                        </label>
-                        <label className="space-y-1">
-                          <span className="text-[10px] font-black text-white/40">回数</span>
-                          <input
-                            type="number"
-                            min="1"
-                            step="1"
+                        </div>
+                        <div className="space-y-1">
+                          <label htmlFor={`${fieldID}-${index}-target_reps`} className="text-[10px] font-black text-white/40">回数</label>
+                          <NumericInput
+                            id={`${fieldID}-${index}-target_reps`}
+                            kind="integer"
                             value={exercise.target_reps}
-                            onChange={e => updateExercise(index, { target_reps: Number(e.target.value) })}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 focus:outline-none focus:border-primary/50"
+                            onValueChange={value => updateExercise(index, { target_reps: value })}
+                            onEnter={() => void save()}
+                            error={fieldErrors[fieldKey(index, "target_reps")]}
+                            className={numericFieldClass(Boolean(fieldErrors[fieldKey(index, "target_reps")]))}
                           />
-                        </label>
+                        </div>
                       </div>
                     </div>
                   ))}
