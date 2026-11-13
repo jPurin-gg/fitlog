@@ -105,15 +105,18 @@ function escapeRegExp(value: string) {
 
 /**
  * 種目選択モーダルを開き、実際の種目カタログを名前で検索して選ぶ。
- * モーダルは開いた300ms後に絞り込みなしの一覧を取得し、古い応答を破棄しない。
- * 遅れて届いた一覧で検索結果が上書きされないよう、最初の一覧を受け取ってから検索する。
+ * モーダルは開いた300ms後に絞り込みなしの全件（約1MB）を取得し、古い応答を破棄しない。
+ * 遅れて読み終えた全件で検索結果が上書きされないよう、全件の本文を受信し終えてから検索する
+ * （応答の待機はヘッダー受信で解決するため、finished() で本文の受信完了まで待つ）。
  */
 export async function chooseExercise(page: Page, opener: Locator, exercise: CatalogExercise) {
   const selectorHeading = page.getByRole("heading", { name: "種目を選択" });
   const initialList = page.waitForResponse(response => isExerciseSearch(response, null));
   await opener.click();
   await expect(selectorHeading).toBeVisible();
-  expect((await initialList).ok()).toBe(true);
+  const initial = await initialList;
+  expect(initial.ok()).toBe(true);
+  await initial.finished();
 
   const searched = page.waitForResponse(response => isExerciseSearch(response, exercise.name));
   await page.getByPlaceholder("種目名で検索...", { exact: true }).fill(exercise.name);
@@ -126,11 +129,15 @@ export async function chooseExercise(page: Page, opener: Locator, exercise: Cata
   await expect(selectorHeading).toBeHidden();
 }
 
-/** compose のスモーク環境ではAIの通信先をスタブに向けている。AI OFFの操作だけなので、1回も呼ばれていないことを確認する。 */
+/**
+ * compose のスモーク環境ではAIの通信先をスタブに向けている。全テストがAI OFFの操作だけなので、
+ * 実行全体で1回も呼ばれていないことを確認する（記録は globalSetup で初期化し、テスト間で共有する）。
+ * SMOKE_AI_STUB_URL がない環境（SMOKE_BASE_URL で起動済みの環境に向ける場合）では確認しない。
+ */
 export async function expectNoAICalls(request: APIRequestContext) {
   const stubURL = process.env.SMOKE_AI_STUB_URL;
   if (!stubURL) return;
   const response = await request.get(new URL("/__stub/calls", stubURL).toString());
   expect(response.ok()).toBe(true);
-  expect((await response.json()).calls, "AI OFFの操作でAIのスタブが呼ばれていない").toEqual([]);
+  expect((await response.json()).calls, "AI OFFのスモーク実行中にAIのスタブが呼ばれた（どのテストの操作かは呼び出し時刻とtraceで確認する）").toEqual([]);
 }

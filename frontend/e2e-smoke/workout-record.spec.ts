@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
-import { BENCH_PRESS, apiResponse, chooseExercise, dismissMonthlyPrompt, expectNoAICalls, localDateKey, registerUser, type CatalogExercise } from "./support";
+import { BENCH_PRESS, apiResponse, chooseExercise, dismissMonthlyPrompt, expectNoAICalls, registerUser, type CatalogExercise } from "./support";
+
+const startPath = /^\/api\/workout-plans\/\d{4}-\d{2}-\d{2}\/start$/;
 
 async function saveWorkoutSet(page: Page, workoutID: number, set: { exercise: CatalogExercise; setOrder: number; weight: number; reps: number }) {
   await page.getByPlaceholder("80", { exact: true }).fill(String(set.weight));
@@ -32,21 +34,22 @@ async function saveWorkoutSet(page: Page, workoutID: number, set: { exercise: Ca
 test("新規登録から手動開始・セット保存・終了までを実APIで記録し、履歴とカレンダーに反映される", async ({ page, request }) => {
   await registerUser(page, "record");
   await dismissMonthlyPrompt(page);
-  const today = await localDateKey(page);
 
   await page.goto("/workout");
   await expect(page.getByRole("heading", { name: "今日の筋トレを始めますか？" })).toBeVisible();
   await expect(page.getByRole("switch", { name: "AIを使う" })).toHaveAttribute("aria-checked", "false");
 
-  // 組み込み種目のIDで手動開始し、サーバー側の「当日」判定を通る。
-  const started = page.waitForResponse(apiResponse("POST", `/api/workout-plans/${today}/start`));
+  // 組み込み種目のIDで手動開始する。画面はブラウザのローカル日付をパスに入れ、
+  // サーバーは APP_TIMEZONE の当日だけを受け付ける（タイムゾーンがずれていれば400になる）。
+  const started = page.waitForResponse(response => response.request().method() === "POST" && startPath.test(new URL(response.url()).pathname));
   await chooseExercise(page, page.getByRole("button", { name: "自分で種目を選んで始める" }), BENCH_PRESS);
   const start = await started;
   expect(start.status()).toBe(200);
   expect(start.request().postDataJSON()).toEqual({ use_ai: false, exercise_id: BENCH_PRESS.id });
   const session = await start.json();
+  const today: string = session.plan_date;
+  expect(new URL(start.url()).pathname, "画面が送った日付を、サーバーが当日の予定として返す").toBe(`/api/workout-plans/${today}/start`);
   expect(session).toMatchObject({
-    plan_date: today,
     ai_status: "not_requested",
     plan: { exercises: [{ exercise_id: BENCH_PRESS.id, name: BENCH_PRESS.name }] },
   });

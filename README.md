@@ -240,7 +240,7 @@ docker compose -f compose.test.yml --profile e2e down
 
 GitHub Actionsでは `.github/workflows/e2e-smoke.yml` が、mainへのpushと手動実行（Actions → E2E smoke → Run workflow）で同じスモークを実行します。失敗時はサービスのログを表示し、`frontend/smoke-results/` をArtifactsに保存します（保持7日）。
 
-テストは `frontend/e2e-smoke/`、設定は `frontend/playwright.smoke.config.ts` にあります。起動済みの環境に向けて実行する場合は、`frontend` で `SMOKE_BASE_URL=http://localhost:3000 npm run test:e2e:smoke` を使えます。このときはホストにChromiumが必要で、バックエンドの `FRONTEND_URL` を `SMOKE_BASE_URL` と同じオリジンにします。テスト用のユーザーはそのDBに残ります。
+テストは `frontend/e2e-smoke/`、設定は `frontend/playwright.smoke.config.ts` にあります。起動済みの環境に向けて実行する場合は、`frontend` で `SMOKE_BASE_URL=http://localhost:3000 npm run test:e2e:smoke` を使えます。このときはホストにChromiumが必要で、バックエンドの `FRONTEND_URL` を `SMOKE_BASE_URL` と同じオリジンにします。AIスタブの呼び出し確認は行わず、テスト用のユーザーはそのDBに残ります。
 
 ### ブラウザE2E（APIモック）
 
