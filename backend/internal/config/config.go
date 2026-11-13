@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -16,11 +17,21 @@ type Config struct {
 	Timezone            *time.Location
 	DB                  DBConfig
 	AI                  AIConfig
+	Login               LoginConfig
+	TrustedProxyCIDRs   []netip.Prefix
 	SessionSecret       []byte
 	SessionCookieName   string
 	SessionCookieSecure bool
 	SessionTTL          time.Duration
 	PromptDir           string
+}
+
+type LoginConfig struct {
+	SourceAttempts      int
+	AccountAttempts     int
+	Window              time.Duration
+	MaxConcurrentHashes int
+	MaxEntries          int
 }
 
 type DBConfig struct {
@@ -59,12 +70,22 @@ func Load() (Config, error) {
 	if len(secret) < 32 {
 		return Config{}, fmt.Errorf("SESSION_SECRET must be at least 32 bytes")
 	}
+	login, err := loadLoginConfig()
+	if err != nil {
+		return Config{}, err
+	}
+	trustedProxies, err := loadTrustedProxyCIDRs()
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		Environment:         envString("APP_ENV", "development"),
 		Port:                envString("PORT", "8080"),
 		FrontendURL:         envString("FRONTEND_URL", "http://localhost:3000"),
 		Timezone:            location,
+		Login:               login,
+		TrustedProxyCIDRs:   trustedProxies,
 		SessionSecret:       secret,
 		SessionCookieName:   envString("SESSION_COOKIE_NAME", "fitlog_session"),
 		SessionCookieSecure: envBool("SESSION_COOKIE_SECURE", false),
@@ -95,6 +116,63 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("DB_USER and DB_NAME are required")
 	}
 	return cfg, nil
+}
+
+func loadLoginConfig() (LoginConfig, error) {
+	var cfg LoginConfig
+	for _, setting := range []struct {
+		name     string
+		fallback int
+		target   *int
+	}{
+		{"AUTH_LOGIN_SOURCE_ATTEMPTS", 20, &cfg.SourceAttempts},
+		{"AUTH_LOGIN_ACCOUNT_ATTEMPTS", 5, &cfg.AccountAttempts},
+		{"AUTH_LOGIN_MAX_CONCURRENT_HASHES", 2, &cfg.MaxConcurrentHashes},
+		{"AUTH_LOGIN_MAX_ENTRIES", 10000, &cfg.MaxEntries},
+	} {
+		value, err := positiveEnvInt(setting.name, setting.fallback)
+		if err != nil {
+			return LoginConfig{}, err
+		}
+		*setting.target = value
+	}
+	seconds, err := positiveEnvInt("AUTH_LOGIN_WINDOW_SECONDS", 300)
+	if err != nil {
+		return LoginConfig{}, err
+	}
+	if int64(seconds) > int64((1<<63-1)/time.Second) {
+		return LoginConfig{}, fmt.Errorf("AUTH_LOGIN_WINDOW_SECONDS is too large")
+	}
+	cfg.Window = time.Duration(seconds) * time.Second
+	return cfg, nil
+}
+
+func positiveEnvInt(name string, fallback int) (int, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", name)
+	}
+	return parsed, nil
+}
+
+func loadTrustedProxyCIDRs() ([]netip.Prefix, error) {
+	value := strings.TrimSpace(os.Getenv("AUTH_TRUSTED_PROXY_CIDRS"))
+	if value == "" {
+		return nil, nil
+	}
+	var prefixes []netip.Prefix
+	for _, item := range strings.Split(value, ",") {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(item))
+		if err != nil {
+			return nil, fmt.Errorf("AUTH_TRUSTED_PROXY_CIDRS must contain comma-separated IP CIDRs")
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes, nil
 }
 
 func envString(name, fallback string) string {

@@ -169,6 +169,8 @@ docker compose stop
 
 - 初回ログイン時、未登録のニックネームは新しいユーザーとして登録されます。
 - ログイン成功時にHMAC-SHA256署名済みの `HttpOnly` Cookieを発行します。
+- ログイン・自動登録は既定で5分間に送信元IPあたり20回、ニックネームあたり5回までです。成功・失敗を合算し、パスワード処理より前に制限します。パスワード処理の同時実行上限は2件です。
+- 制限時は `429` と再試行可能時刻を示す `Retry-After` を返します。制限状態はプロセス内で保持し、再起動でリセットします。
 - 保護APIのユーザーはCookieから確定し、リクエストで `user_id` は受け付けません。
 - APIの成功レスポンスはリソースJSONを直接返します。
 - エラーは `application/problem+json` 形式で返します。
@@ -179,6 +181,8 @@ docker compose stop
 - 当日開始レスポンスの `ai_status` は `applied`、`fallback`、`not_requested` のいずれかです。
 
 エンドポイントやリクエスト形式の詳細は [docs.md](./docs.md) を参照してください。
+
+試行制限は `AUTH_LOGIN_SOURCE_ATTEMPTS`、`AUTH_LOGIN_ACCOUNT_ATTEMPTS`、`AUTH_LOGIN_WINDOW_SECONDS`、`AUTH_LOGIN_MAX_CONCURRENT_HASHES`、`AUTH_LOGIN_MAX_ENTRIES` で設定できます。送信元は既定でバックエンドへの接続相手です。Next.jsやリバースプロキシ経由で利用者IPを識別する場合は、実際の中継経路を `AUTH_TRUSTED_PROXY_CIDRS` に明示し、外部からの転送ヘッダーを前段で適正化してください。未設定なら中継元のIPで試行数を共有します。設定と信頼経路の詳細は [認証の技術仕様](./docs.md#ログイン自動登録の試行制限) を参照してください。
 
 ## DBマイグレーション
 

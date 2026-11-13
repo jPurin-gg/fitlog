@@ -36,8 +36,15 @@ func NewHandler(db *sql.DB, cfg config.Config, logger *slog.Logger) http.Handler
 	aiClient := openaicompat.New(cfg.AI, logger)
 
 	authRepository := authpostgres.New(db)
-	authService := authcore.NewService(authRepository)
-	authHandler := authhttp.NewHandler(authService, authcore.NewTokenSigner(cfg.SessionSecret, cfg.SessionTTL), appClock, cfg.SessionCookieName, cfg.SessionCookieSecure, cfg.SessionTTL)
+	authService := authcore.NewService(authRepository).WithLoginLimits(authcore.LoginLimits{
+		SourceAttempts:      cfg.Login.SourceAttempts,
+		AccountAttempts:     cfg.Login.AccountAttempts,
+		Window:              cfg.Login.Window,
+		MaxConcurrentHashes: cfg.Login.MaxConcurrentHashes,
+		MaxEntries:          cfg.Login.MaxEntries,
+	}, appClock)
+	authHandler := authhttp.NewHandler(authService, authcore.NewTokenSigner(cfg.SessionSecret, cfg.SessionTTL), appClock, cfg.SessionCookieName, cfg.SessionCookieSecure, cfg.SessionTTL).
+		WithTrustedProxies(cfg.TrustedProxyCIDRs)
 
 	profileService := profilecore.NewService(profilepostgres.New(db))
 	profileHandler := profilehttp.NewHandler(profileService)
