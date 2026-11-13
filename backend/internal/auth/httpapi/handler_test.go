@@ -12,7 +12,9 @@ import (
 	"github.com/jPurin-gg/myfitlog-backend/internal/clock"
 )
 
-func TestLoginIssuesSignedCookieUsedByMiddleware(t *testing.T) {
+const credentialsBody = `{"nickname":"Mitsuki","password":"password"}`
+
+func TestRegisterAndLoginIssueSignedCookieUsedByMiddleware(t *testing.T) {
 	repository := &authRepository{}
 	service := auth.NewService(repository).WithPasswordHashIterations(1)
 	now := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
@@ -25,27 +27,33 @@ func TestLoginIssuesSignedCookieUsedByMiddleware(t *testing.T) {
 		time.Hour,
 	)
 
-	loginRequest := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"nickname":"Mitsuki","password":"password"}`))
-	loginRecorder := httptest.NewRecorder()
-	handler.Login(loginRecorder, loginRequest)
-	if loginRecorder.Code != http.StatusCreated {
-		t.Fatalf("Login() status = %d, body = %s", loginRecorder.Code, loginRecorder.Body.String())
+	registerRecorder := httptest.NewRecorder()
+	handler.Register(registerRecorder, httptest.NewRequest(http.MethodPost, "/api/auth/register", strings.NewReader(credentialsBody)))
+	if registerRecorder.Code != http.StatusCreated || !strings.Contains(registerRecorder.Body.String(), `"created":true`) {
+		t.Fatalf("Register() = %d, body = %s", registerRecorder.Code, registerRecorder.Body.String())
 	}
-	cookies := loginRecorder.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].Name != "fitlog_session" || !cookies[0].HttpOnly || cookies[0].Secure || cookies[0].SameSite != http.SameSiteLaxMode || cookies[0].MaxAge != 3600 {
-		t.Fatalf("session cookie = %#v", cookies)
+	loginRecorder := httptest.NewRecorder()
+	handler.Login(loginRecorder, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(credentialsBody)))
+	if loginRecorder.Code != http.StatusOK || !strings.Contains(loginRecorder.Body.String(), `"created":false`) {
+		t.Fatalf("Login() = %d, body = %s", loginRecorder.Code, loginRecorder.Body.String())
 	}
 
-	meRequest := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
-	meRequest.AddCookie(cookies[0])
-	meRecorder := httptest.NewRecorder()
-	handler.Authenticate(http.HandlerFunc(handler.Me)).ServeHTTP(meRecorder, meRequest)
-	if meRecorder.Code != http.StatusOK || !strings.Contains(meRecorder.Body.String(), `"nickname":"Mitsuki"`) {
-		t.Fatalf("authenticated Me() = %d, %s", meRecorder.Code, meRecorder.Body.String())
+	for name, recorder := range map[string]*httptest.ResponseRecorder{"Register": registerRecorder, "Login": loginRecorder} {
+		cookies := recorder.Result().Cookies()
+		if len(cookies) != 1 || cookies[0].Name != "fitlog_session" || !cookies[0].HttpOnly || cookies[0].Secure || cookies[0].SameSite != http.SameSiteLaxMode || cookies[0].MaxAge != 3600 {
+			t.Fatalf("%s() session cookie = %#v", name, cookies)
+		}
+		meRequest := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+		meRequest.AddCookie(cookies[0])
+		meRecorder := httptest.NewRecorder()
+		handler.Authenticate(http.HandlerFunc(handler.Me)).ServeHTTP(meRecorder, meRequest)
+		if meRecorder.Code != http.StatusOK || !strings.Contains(meRecorder.Body.String(), `"nickname":"Mitsuki"`) {
+			t.Fatalf("authenticated Me() after %s() = %d, %s", name, meRecorder.Code, meRecorder.Body.String())
+		}
 	}
 }
 
-func TestLoginSetsSecureCookieWhenConfigured(t *testing.T) {
+func TestRegisterSetsSecureCookieWhenConfigured(t *testing.T) {
 	now := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
 	handler := NewHandler(
 		auth.NewService(&authRepository{}).WithPasswordHashIterations(1),
@@ -57,14 +65,37 @@ func TestLoginSetsSecureCookieWhenConfigured(t *testing.T) {
 	)
 
 	recorder := httptest.NewRecorder()
-	handler.Login(recorder, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"nickname":"Mitsuki","password":"password"}`)))
+	handler.Register(recorder, httptest.NewRequest(http.MethodPost, "/api/auth/register", strings.NewReader(credentialsBody)))
 	cookies := recorder.Result().Cookies()
 	if recorder.Code != http.StatusCreated || len(cookies) != 1 || !cookies[0].Secure || !cookies[0].HttpOnly {
-		t.Fatalf("Login() = %d, Set-Cookie = %q", recorder.Code, recorder.Header().Get("Set-Cookie"))
+		t.Fatalf("Register() = %d, Set-Cookie = %q", recorder.Code, recorder.Header().Get("Set-Cookie"))
 	}
 }
 
-func TestLoginRejectsMalformedBodyAndWrongPassword(t *testing.T) {
+// Regression test for #89: POST /api/auth/login must not register an unknown nickname.
+func TestLoginRejectsUnknownNicknameWithoutCreatingUser(t *testing.T) {
+	repository := &authRepository{}
+	now := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
+	handler := NewHandler(
+		auth.NewService(repository).WithPasswordHashIterations(1),
+		auth.NewTokenSigner([]byte("0123456789abcdef0123456789abcdef"), time.Hour),
+		clock.Fixed{Time: now},
+		"fitlog_session",
+		false,
+		time.Hour,
+	)
+
+	recorder := httptest.NewRecorder()
+	handler.Login(recorder, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(credentialsBody)))
+	if recorder.Code != http.StatusUnauthorized || !strings.Contains(recorder.Body.String(), `"code":"UNAUTHENTICATED"`) || len(recorder.Result().Cookies()) != 0 {
+		t.Fatalf("Login(unknown) = %d, %q; Set-Cookie = %q", recorder.Code, recorder.Body.String(), recorder.Header().Get("Set-Cookie"))
+	}
+	if repository.user.ID != 0 {
+		t.Fatalf("Login(unknown) created %#v", repository.user)
+	}
+}
+
+func TestLoginAndRegisterRejectBadRequestsWithoutCookie(t *testing.T) {
 	repository := &authRepository{}
 	now := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
 	handler := NewHandler(
@@ -76,26 +107,34 @@ func TestLoginRejectsMalformedBodyAndWrongPassword(t *testing.T) {
 		time.Hour,
 	)
 	registerRecorder := httptest.NewRecorder()
-	handler.Login(registerRecorder, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"nickname":"Mitsuki","password":"password"}`)))
+	handler.Register(registerRecorder, httptest.NewRequest(http.MethodPost, "/api/auth/register", strings.NewReader(credentialsBody)))
 	if registerRecorder.Code != http.StatusCreated || repository.user.PasswordHash == "" {
-		t.Fatalf("register Login() = %d, stored = %#v", registerRecorder.Code, repository.user)
+		t.Fatalf("Register() = %d, stored = %#v", registerRecorder.Code, repository.user)
 	}
+	registered := repository.user
 
 	tests := []struct {
 		name   string
+		serve  http.HandlerFunc
 		body   string
 		status int
 		code   string
 	}{
-		{name: "invalid json", body: `{"nickname":"Mitsuki",`, status: http.StatusBadRequest, code: "VALIDATION_ERROR"},
-		{name: "wrong password", body: `{"nickname":"Mitsuki","password":"wrong"}`, status: http.StatusUnauthorized, code: "UNAUTHENTICATED"},
+		{name: "login invalid json", serve: handler.Login, body: `{"nickname":"Mitsuki",`, status: http.StatusBadRequest, code: "VALIDATION_ERROR"},
+		{name: "login wrong password", serve: handler.Login, body: `{"nickname":"Mitsuki","password":"wrong"}`, status: http.StatusUnauthorized, code: "UNAUTHENTICATED"},
+		{name: "register invalid json", serve: handler.Register, body: `{"nickname":"Mitsuki",`, status: http.StatusBadRequest, code: "VALIDATION_ERROR"},
+		{name: "register unknown field", serve: handler.Register, body: `{"nickname":"Mitsuki","password":"password","password_confirmation":"password"}`, status: http.StatusBadRequest, code: "VALIDATION_ERROR"},
+		{name: "register nickname in use", serve: handler.Register, body: `{"nickname":"Mitsuki","password":"another-password"}`, status: http.StatusConflict, code: "CONFLICT"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
-			handler.Login(recorder, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(test.body)))
+			test.serve(recorder, httptest.NewRequest(http.MethodPost, "/api/auth", strings.NewReader(test.body)))
 			if recorder.Code != test.status || recorder.Header().Get("Content-Type") != "application/problem+json; charset=utf-8" || !strings.Contains(recorder.Body.String(), `"code":"`+test.code+`"`) || len(recorder.Result().Cookies()) != 0 {
-				t.Fatalf("Login() = %d, %q, %q; Set-Cookie = %q", recorder.Code, recorder.Header().Get("Content-Type"), recorder.Body.String(), recorder.Header().Get("Set-Cookie"))
+				t.Fatalf("response = %d, %q, %q; Set-Cookie = %q", recorder.Code, recorder.Header().Get("Content-Type"), recorder.Body.String(), recorder.Header().Get("Set-Cookie"))
+			}
+			if repository.user != registered {
+				t.Fatalf("stored user changed to %#v", repository.user)
 			}
 		})
 	}
@@ -178,6 +217,13 @@ func (r *authRepository) FindByNickname(_ context.Context, nickname string) (aut
 		return auth.StoredUser{}, auth.ErrUserNotFound
 	}
 	return r.user, nil
+}
+
+func (r *authRepository) FindSimilarNicknames(_ context.Context, nickname string) ([]auth.StoredUser, error) {
+	if r.user.ID == 0 || !strings.EqualFold(r.user.Nickname, nickname) {
+		return nil, nil
+	}
+	return []auth.StoredUser{r.user}, nil
 }
 
 func (r *authRepository) FindByID(_ context.Context, userID int) (auth.User, error) {

@@ -71,4 +71,13 @@ func TestNewHandlerRegistersProtectedRoutes(t *testing.T) {
 			t.Fatalf("%s %s = %d, %q", test.method, test.path, recorder.Code, recorder.Header().Get("Content-Type"))
 		}
 	}
+
+	// Signing in and registering are separate public routes; an empty body is rejected before any lookup.
+	for _, path := range []string{"/api/auth/login", "/api/auth/register"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, path, nil))
+		if recorder.Code != http.StatusBadRequest || !strings.HasPrefix(recorder.Header().Get("Content-Type"), "application/problem+json") {
+			t.Fatalf("POST %s = %d, %q", path, recorder.Code, recorder.Header().Get("Content-Type"))
+		}
+	}
 }
