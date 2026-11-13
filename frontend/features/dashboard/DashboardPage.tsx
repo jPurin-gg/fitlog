@@ -24,6 +24,10 @@ import { AIToggle, useAISettings } from "@/components/AISettings";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
 import { displayPlanText, formatPlanMonth } from "@/lib/fitlog";
+import type { TodayPlanSession } from "@/features/today/api";
+import { formatDateKey } from "@/features/today/date";
+import { useToday } from "@/features/today/useToday";
+import type { WorkoutPlanExercise } from "@/features/workout/types";
 import { useMonthlyPromptDismissal } from "./useMonthlyPromptDismissal";
 
 const WEEKDAY_OPTIONS = [
@@ -39,23 +43,22 @@ const WEEKDAY_OPTIONS = [
 const EQUIPMENT_OPTIONS = ["ダンベル", "バーベル", "マシン", "ケーブル", "自重", "チューブ・バンド", "ケトルベル", "メディシンボール", "EZバー", "その他"];
 const ENVIRONMENT_OPTIONS = ["ジム", "家", "どちらも"];
 
-function weekdayLabels(days?: number[]) {
-  if (!days || days.length === 0) return "";
-  return WEEKDAY_OPTIONS
-    .filter(day => days.includes(day.value))
-    .map(day => `${day.label}曜`)
-    .join("・");
+function exerciseTargetText(exercise: WorkoutPlanExercise) {
+  const weight = exercise.target_weight > 0 ? `${exercise.target_weight}kg × ` : "";
+  return `${exercise.planned_sets}セット / ${weight}${exercise.target_reps}回`;
 }
 
 export default function DashboardPage() {
   const { user } = useAuth();
   const [showMonthlyModal, setShowMonthlyModal] = React.useState(false);
   const [showPreferencesModal, setShowPreferencesModal] = React.useState(false);
-  const [monthlyPlan, setMonthlyPlan] = React.useState<any>(null);
   const [preferences, setPreferences] = React.useState<any>(null);
   const [dashboardData, setDashboardData] = React.useState<any>(null);
-  const [altModalData, setAltModalData] = React.useState<{dayIdx: number, exIdx: number, exName: string, exId?: string} | null>(null);
-  const [today, setToday] = React.useState<Date | null>(null);
+  const [altModalData, setAltModalData] = React.useState<{exIdx: number, exName: string, exId?: string} | null>(null);
+  const { today, error: todayError, refresh: refreshToday } = useToday();
+  const [menuSaving, setMenuSaving] = React.useState(false);
+  const [menuError, setMenuError] = React.useState("");
+  // 月間プランの案内はブラウザの年月で判定する（docs.md「月間プランの案内」）。
   const [currentMonth, setCurrentMonth] = React.useState(() => formatPlanMonth(new Date()));
   const promptScope = `${user.id}:${currentMonth}`;
   const [monthlyLoad, setMonthlyLoad] = React.useState({ scope: "", missing: false });
@@ -67,34 +70,43 @@ export default function DashboardPage() {
     setShowMonthlyModal(false);
   };
 
-  const saveMonthlyPlan = async (plan: any) => {
-    const planToSave = { ...plan, plan_month: plan.plan_month || currentMonth };
-    setMonthlyPlan(planToSave);
+  // ホームの「種目を変更」は今日の日次予定を保存し、開始される内容と表示をそろえる。
+  const replaceTodayExercise = async (index: number, replacement: string | { id?: string; name?: string }) => {
+    const plan = today?.plan;
+    if (!today || !plan || menuSaving) return;
+    if (typeof replacement === "string" || !replacement.id) {
+      setMenuError("辞書にある種目を選んでください。");
+      return;
+    }
+    const replacementID = replacement.id;
+    const replacementName = replacement.name || "";
+    setMenuSaving(true);
+    setMenuError("");
     try {
-      const input = {
-        plan_name: planToSave.plan_name,
-        frequency: planToSave.frequency,
-        description: planToSave.description,
-        rationale: planToSave.rationale,
-        rest_days: planToSave.rest_days || [],
-        recommended_days: planToSave.recommended_days || [],
-        weekly_routine: planToSave.weekly_routine || [],
-      };
-      const saved = await apiFetch<any>(`/api/monthly-plans/${currentMonth}`, {
-        method: 'PUT',
-        body: JSON.stringify(input)
+      await apiFetch<TodayPlanSession>(`/api/workout-plans/${today.date}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          workout_title: plan.plan.workout_title,
+          target: plan.plan.target,
+          estimated_duration_min: plan.plan.estimated_duration_min,
+          coach_note: plan.plan.coach_note,
+          exercises: plan.plan.exercises.map((exercise, i) => i === index
+            ? { exercise_id: replacementID, name: replacementName, planned_sets: exercise.planned_sets, target_weight: 0, target_reps: exercise.target_reps }
+            : { exercise_id: exercise.exercise_id, name: exercise.name, planned_sets: exercise.planned_sets, target_weight: exercise.target_weight, target_reps: exercise.target_reps }),
+        }),
       });
-      setMonthlyPlan(saved);
+      await refreshToday();
     } catch (e) {
-      console.error("Failed to save monthly plan:", e);
+      console.error("Failed to save today's plan:", e);
+      setMenuError(apiErrorMessage(e, "今日の予定を保存できませんでした。"));
+    } finally {
+      setMenuSaving(false);
     }
   };
 
   React.useEffect(() => {
     const refreshDate = () => {
-      const now = new Date();
-      setToday(now);
-      setCurrentMonth(formatPlanMonth(now));
+      setCurrentMonth(formatPlanMonth(new Date()));
     };
     refreshDate();
     window.addEventListener("focus", refreshDate);
@@ -121,12 +133,10 @@ export default function DashboardPage() {
 
   React.useEffect(() => {
     const controller = new AbortController();
-    setMonthlyPlan(null);
     setShowMonthlyModal(false);
     apiFetch<any>(`/api/monthly-plans/${currentMonth}`, { signal: controller.signal })
-      .then(data => {
+      .then(() => {
         if (controller.signal.aborted) return;
-        setMonthlyPlan(data);
         setMonthlyLoad({ scope: promptScope, missing: false });
       })
       .catch(err => {
@@ -157,11 +167,11 @@ export default function DashboardPage() {
             month={currentMonth}
             onClose={closeMonthlyModal}
             onDismissMonth={() => { dismiss(); closeMonthlyModal(); }}
-            onPlanGenerated={(plan: any) => {
-              setMonthlyPlan(plan);
+            onPlanGenerated={() => {
               setMonthlyLoad({ scope: promptScope, missing: false });
               closeMonthlyModal();
-            }} 
+              void refreshToday();
+            }}
           />
         )}
         {showPreferencesModal && (
@@ -180,15 +190,7 @@ export default function DashboardPage() {
             exerciseName={altModalData.exName}
             onClose={() => setAltModalData(null)}
             onReplace={(newExercise: string | { id?: string; name?: string }) => {
-              const newExName = typeof newExercise === "string" ? newExercise : newExercise.name || altModalData.exName;
-              const updatedPlan = { ...monthlyPlan };
-              updatedPlan.weekly_routine[altModalData.dayIdx].example_exercises[altModalData.exIdx] = newExName;
-              if (typeof newExercise !== "string" && newExercise.id) {
-                const routine = updatedPlan.weekly_routine[altModalData.dayIdx];
-                routine.exercise_ids = Array.isArray(routine.exercise_ids) ? [...routine.exercise_ids] : [];
-                routine.exercise_ids[altModalData.exIdx] = newExercise.id;
-              }
-              saveMonthlyPlan(updatedPlan);
+              void replaceTodayExercise(altModalData.exIdx, newExercise);
               setAltModalData(null);
             }}
           />
@@ -252,12 +254,52 @@ export default function DashboardPage() {
                 </div>
                 <div>
                   <h2 className="text-2xl font-bold tracking-tight">今日のメニュー</h2>
-                  <p className="text-white/50 text-sm font-medium">{today ? today.toLocaleDateString('ja-JP', { weekday: 'long', month: 'long', day: 'numeric' }) : ''}</p>
+                  <p className="text-white/50 text-sm font-medium">{today ? formatDateKey(today.date, { weekday: 'long', month: 'long', day: 'numeric' }) : ''}</p>
                 </div>
               </div>
 
+              {today?.workout && (
+                <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm">
+                  <span className="text-white/70">
+                    {today.workout.status === "active" ? "今日のワークアウトは進行中です。" : "今日のワークアウトは記録済みです。"}
+                  </span>
+                  <Link href={`/workouts/${today.workout.id}`} className="font-bold text-primary hover:text-white transition-colors">
+                    記録を見る
+                  </Link>
+                </div>
+              )}
+
               {(() => {
-                if (!monthlyPlan) {
+                if (!today) {
+                  return todayError ? (
+                    <div className="text-center py-12">
+                      <h3 className="text-lg font-bold mb-2">今日の予定を読み込めませんでした</h3>
+                      <p className="text-white/50 text-sm mb-6">{apiErrorMessage(todayError, "時間をおいて再度お試しください。")}</p>
+                      <Link href="/workout" className="inline-flex px-6 py-3 bg-primary text-black font-bold rounded-2xl">
+                        記録を始める
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="py-12 text-center text-white/30 text-sm flex items-center justify-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" /> 今日の予定を読み込み中...
+                    </div>
+                  );
+                }
+
+                if (today.rest_day) {
+                  return (
+                    <div className="bg-white/5 rounded-3xl p-8 text-center border border-white/10 relative overflow-hidden">
+                      <div className="relative z-10">
+                        <span className="text-4xl mb-4 block">☕️</span>
+                        <h3 className="text-2xl font-black text-white mb-2">休息日</h3>
+                        <p className="text-white/60">今日はオフの日です。しっかり休んで回復しましょう。</p>
+                      </div>
+                    </div>
+                  );
+                }
+
+                const plan = today.plan;
+                if (!plan) {
                   return (
                     <div className="text-center py-12">
                       <div className="inline-block p-4 rounded-full bg-white/5 mb-4">
@@ -272,33 +314,18 @@ export default function DashboardPage() {
                   );
                 }
 
-                const dayOfWeek = today ? today.getDay() : -1;
-                const days = monthlyPlan.recommended_days || [1, 3, 5];
-                const idx = days.indexOf(dayOfWeek);
-                if (idx === -1) {
-                  return (
-                    <div className="bg-white/5 rounded-3xl p-8 text-center border border-white/10 relative overflow-hidden">
-                      <div className="relative z-10">
-                        <span className="text-4xl mb-4 block">☕️</span>
-                        <h3 className="text-2xl font-black text-white mb-2">休息日</h3>
-                        <p className="text-white/60">今日はオフの日です。しっかり休んで回復しましょう。</p>
-                      </div>
-                    </div>
-                  );
-                }
-
-                const routine = monthlyPlan.weekly_routine[idx];
+                const isDraft = plan.status === "draft";
                 return (
                   <div className="bg-primary/10 rounded-3xl p-6 lg:p-8 border border-primary/20">
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
                       <div>
                         <span className="text-[10px] font-black tracking-widest text-primary bg-primary/20 px-3 py-1 rounded-full mb-3 inline-block">
-                          {displayPlanText(routine.day_name)}
+                          {isDraft ? "月間プランより" : "今日の予定"}
                         </span>
-                        <h3 className="text-3xl md:text-4xl font-black tracking-tight text-white mb-2">{displayPlanText(routine.target)}</h3>
+                        <h3 className="text-3xl md:text-4xl font-black tracking-tight text-white mb-2">{displayPlanText(plan.plan.workout_title)}</h3>
                         <p className="text-white/50 text-sm">
-                          AIコーチが選んだ本日の最適メニュー
-                          {monthlyPlan.rest_days?.length > 0 ? ` / 休息日: ${weekdayLabels(monthlyPlan.rest_days)}` : ""}
+                          {isDraft ? "月間プランから組んだ今日のメニューです。カレンダーで調整できます。" : "保存済みの今日の予定です。"}
+                          {plan.plan.target && plan.plan.target !== plan.plan.workout_title ? ` / 狙い: ${displayPlanText(plan.plan.target)}` : ""}
                         </p>
                       </div>
                       <Link href="/workout" className="w-full md:w-auto px-8 py-4 bg-primary text-black font-black rounded-2xl hover:scale-105 transition-transform flex justify-center items-center gap-2 shadow-[0_0_20px_rgba(255,170,0,0.3)]">
@@ -307,25 +334,32 @@ export default function DashboardPage() {
                     </div>
                     
                     <div className="space-y-3">
-                      <p className="text-xs font-black text-white/30 tracking-widest mb-4">おすすめ種目</p>
+                      <p className="text-xs font-black text-white/30 tracking-widest mb-4">今日の種目</p>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {routine.example_exercises.map((ex: string, i: number) => (
-                          <div key={i} className="flex flex-col p-4 bg-black/40 rounded-2xl border border-white/5 transition-colors group">
+                        {plan.plan.exercises.map((ex, i) => (
+                          <div key={`${ex.exercise_id}-${i}`} className="flex flex-col p-4 bg-black/40 rounded-2xl border border-white/5 transition-colors group">
                             <div className="flex items-center gap-4 mb-3">
                               <div className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center text-white/20 group-hover:text-primary transition-all">
                                 <Dumbbell className="w-6 h-6" />
                               </div>
-                              <span className="font-bold text-lg text-white/90">{ex}</span>
+                              <div className="min-w-0">
+                                <span className="block font-bold text-lg text-white/90">{ex.name}</span>
+                                <span className="block text-xs text-white/45">{exerciseTargetText(ex)}</span>
+                              </div>
                             </div>
-                            <button 
-                              onClick={() => setAltModalData({dayIdx: idx, exIdx: i, exName: ex, exId: routine.exercise_ids?.[i]})}
-                              className="text-xs font-bold text-primary opacity-60 hover:opacity-100 flex items-center gap-1 mt-auto self-start bg-primary/10 px-3 py-1.5 rounded-lg border border-primary/20 transition-all"
+                            <button
+                              onClick={() => setAltModalData({exIdx: i, exName: ex.name, exId: ex.exercise_id})}
+                              disabled={menuSaving}
+                              className="text-xs font-bold text-primary opacity-60 hover:opacity-100 flex items-center gap-1 mt-auto self-start bg-primary/10 px-3 py-1.5 rounded-lg border border-primary/20 transition-all disabled:pointer-events-none disabled:opacity-30"
                             >
                               <RefreshCw className="w-3 h-3" /> 種目を変更・AIに相談
                             </button>
                           </div>
                         ))}
                       </div>
+                      {menuError && (
+                        <p role="alert" className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{menuError}</p>
+                      )}
                     </div>
                   </div>
                 );

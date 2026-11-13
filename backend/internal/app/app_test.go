@@ -39,6 +39,7 @@ func TestNewHandlerRegistersProtectedRoutes(t *testing.T) {
 		{http.MethodDelete, "/api/auth/session"},
 		{http.MethodGet, "/api/dashboard"},
 		{http.MethodGet, "/api/calendar?year=2026&month=8"},
+		{http.MethodGet, "/api/today"},
 		{http.MethodGet, "/api/preferences"},
 		{http.MethodPut, "/api/preferences"},
 		{http.MethodGet, "/api/exercises"},

@@ -7,20 +7,14 @@ import { motion } from "framer-motion";
 import { ExerciseSelectorModal } from "@/features/exercises/components/ExerciseSelectorModal";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
-import { displayPlanText, formatLocalDate, formatPlanMonth } from "@/lib/fitlog";
+import { displayPlanText, formatPlanMonth } from "@/lib/fitlog";
+import { isFutureDateKey, monthKeyOf, toDateKey } from "@/features/today/date";
+import { useToday } from "@/features/today/useToday";
 import type { CalendarPlan, CalendarPlanExercise, CalendarWorkout, CalendarWorkoutSet, DayRoutine, MonthlyPlan, PlannedWorkoutDay, WorkedOutDay } from "./types";
 
 function dateFromPlanMonth(planMonth: string) {
   const [year, month] = planMonth.split("-").map(Number);
   return new Date(year, (month || 1) - 1, 1);
-}
-
-function isFutureDateKey(dateKey: string) {
-  const [year, month, day] = dateKey.split("-").map(Number);
-  const target = new Date(year, (month || 1) - 1, day || 1);
-  const today = new Date();
-  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  return target > todayStart;
 }
 
 const WEEKDAY_OPTIONS = [
@@ -51,6 +45,23 @@ export default function CalendarPage() {
   const [plannedDays, setPlannedDays] = useState<PlannedWorkoutDay[]>([]);
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const selectedPlanMonth = formatPlanMonth(currentDate);
+  // 「今日」と過去・未来の判定はサーバー（APP_TIMEZONE）の日付だけを使う。
+  const { today: serverToday } = useToday();
+  const todayKey = serverToday?.date ?? null;
+  const todayMonth = todayKey ? monthKeyOf(todayKey) : null;
+  const initialMonthRef = React.useRef(selectedPlanMonth);
+
+  useEffect(() => {
+    const initialMonth = initialMonthRef.current;
+    if (!todayMonth || !initialMonth) return;
+    initialMonthRef.current = "";
+    // 初期表示の月だけサーバーの今月に合わせる。利用者が移動した後は動かさない。
+    setCurrentDate(prev => (
+      formatPlanMonth(prev) === initialMonth && todayMonth !== initialMonth
+        ? dateFromPlanMonth(todayMonth)
+        : prev
+    ));
+  }, [todayMonth]);
 
   const refreshCalendarData = React.useCallback(() => {
     return apiFetch<{ worked_out_dates?: number[]; worked_out_days?: WorkedOutDay[]; planned_days?: PlannedWorkoutDay[] }>(`/api/calendar?year=${currentDate.getFullYear()}&month=${currentDate.getMonth() + 1}`)
@@ -100,7 +111,7 @@ export default function CalendarPage() {
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
-  const isSelectedCurrentMonth = selectedPlanMonth === formatPlanMonth(new Date());
+  const isSelectedCurrentMonth = selectedPlanMonth === todayMonth;
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDayOfMonth = new Date(year, month, 1).getDay();
@@ -113,13 +124,11 @@ export default function CalendarPage() {
     days.push(i);
   }
 
-  const today = new Date();
-  const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
-
   const getDayStatus = (dateNum: number | null) => {
     if (!dateNum) return { isToday: false, isWorkedOut: false, isPlanned: false, type: "", workoutId: null as number | null };
     const dateObj = new Date(year, month, dateNum);
-    const isToday = isCurrentMonth && dateNum === today.getDate();
+    const dateKey = toDateKey(year, month, dateNum);
+    const isToday = dateKey === todayKey;
     const isWorkedOut = workedOutDates.includes(dateNum);
     
     const plannedDay = plannedDays.find(d => d.date === dateNum);
@@ -148,7 +157,7 @@ export default function CalendarPage() {
       type,
       workoutId,
       plannedTarget,
-      isPlanned: isPlanned && !isWorkedOut && (!isCurrentMonth || dateObj >= new Date(today.getFullYear(), today.getMonth(), today.getDate())) 
+      isPlanned: isPlanned && !isWorkedOut && (!isSelectedCurrentMonth || (todayKey !== null && dateKey >= todayKey))
     };
   };
 
@@ -177,8 +186,9 @@ export default function CalendarPage() {
             </div>
           </div>
           <button
-            onClick={() => setCurrentDate(new Date())}
-            className="self-start sm:self-auto px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-xs font-bold text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+            onClick={() => todayMonth && setCurrentDate(dateFromPlanMonth(todayMonth))}
+            disabled={!todayMonth}
+            className="self-start sm:self-auto px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-xs font-bold text-white/60 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-40 disabled:pointer-events-none"
           >
             今月へ戻る
           </button>
@@ -306,6 +316,7 @@ export default function CalendarPage() {
                       type="button"
                       onClick={() => openDayEditor(day)}
                       aria-label={`${selectedPlanMonth}-${String(day).padStart(2, "0")} の記録を編集`}
+                      aria-current={status.isToday ? "date" : undefined}
                       className="block text-left"
                     >
                       {dayContent}
@@ -347,7 +358,7 @@ export default function CalendarPage() {
                             <div className="text-xs font-black text-primary mb-1">{historyPlan.plan_month}</div>
                             <div className="text-sm font-bold leading-tight">{displayPlanText(historyPlan.plan_name)}</div>
                           </div>
-                          {historyPlan.plan_month === formatPlanMonth(new Date()) && (
+                          {historyPlan.plan_month === todayMonth && (
                             <span className="text-[9px] font-black text-black bg-primary px-2 py-0.5 rounded-full">今月</span>
                           )}
                         </div>
@@ -408,7 +419,7 @@ export default function CalendarPage() {
             <motion.div 
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              onClick={() => setEditingDate(formatLocalDate(today))}
+              onClick={() => todayKey && setEditingDate(todayKey)}
               className="glass rounded-2xl p-6 bg-gradient-to-r from-green-500/10 to-transparent border-green-500/30 cursor-pointer flex justify-between items-center group"
             >
               <div>
@@ -422,7 +433,7 @@ export default function CalendarPage() {
           </div>
         </div>
       </main>
-      {editingDate && isFutureDateKey(editingDate) && (
+      {editingDate && todayKey && isFutureDateKey(editingDate, todayKey) && (
         <CalendarPlanEditor
           date={editingDate}
           onClose={() => setEditingDate(null)}
@@ -432,7 +443,7 @@ export default function CalendarPage() {
           }}
         />
       )}
-      {editingDate && !isFutureDateKey(editingDate) && (
+      {editingDate && todayKey && !isFutureDateKey(editingDate, todayKey) && (
         <CalendarWorkoutEditor
           date={editingDate}
           onClose={() => setEditingDate(null)}

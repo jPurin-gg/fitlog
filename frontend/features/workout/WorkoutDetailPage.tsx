@@ -6,23 +6,17 @@ import { useParams } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { WorkoutSummaryView } from "./components/WorkoutSummaryView";
 import { apiErrorMessage } from "@/lib/api";
+import { formatDateTime } from "@/features/today/date";
+import { useToday } from "@/features/today/useToday";
 import { getWorkoutDetail } from "./api";
 import type { WorkoutDetail } from "./types";
 
-function formatDateTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("ja-JP", {
-    month: "long",
-    day: "numeric",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 export default function WorkoutDetailPage() {
   const params = useParams<{ id: string }>();
+  // 時刻はカレンダーの日付振り分けと同じアプリのタイムゾーンで表示する。
+  const { today, error: todayError } = useToday();
+  const timeZone = today?.timezone;
+  const timeZoneResolved = Boolean(timeZone) || Boolean(todayError);
   const [workout, setWorkout] = React.useState<WorkoutDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
@@ -63,10 +57,10 @@ export default function WorkoutDetailPage() {
             )}
           </div>
           <p className="text-white/50 text-sm">
-            {workout
+            {workout && timeZoneResolved
               ? workout.status === "active"
-                ? `${formatDateTime(workout.started_at)} から継続中`
-                : `${formatDateTime(workout.started_at)} から ${workout.ended_at ? formatDateTime(workout.ended_at) : ""} まで`
+                ? `${formatDateTime(workout.started_at, timeZone)} から継続中`
+                : `${formatDateTime(workout.started_at, timeZone)} から ${workout.ended_at ? formatDateTime(workout.ended_at, timeZone) : ""} まで`
               : "記録を確認しています。"}
           </p>
         </header>

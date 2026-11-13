@@ -58,6 +58,7 @@ func NewHandler(db *sql.DB, cfg config.Config, logger *slog.Logger) http.Handler
 	protected := func(handler http.HandlerFunc) http.Handler { return authHandler.Authenticate(handler) }
 	mux.Handle("GET /api/dashboard", protected(reportingHandler.Dashboard))
 	mux.Handle("GET /api/calendar", protected(reportingHandler.Calendar))
+	mux.Handle("GET /api/today", protected(planningHandler.Today))
 	mux.Handle("GET /api/preferences", protected(profileHandler.Get))
 	mux.Handle("PUT /api/preferences", protected(profileHandler.Put))
 

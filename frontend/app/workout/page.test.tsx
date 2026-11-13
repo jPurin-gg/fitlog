@@ -9,7 +9,11 @@ import WorkoutPage from "./page";
 import { AISettingsProvider } from "@/components/AISettings";
 
 const apiOrigin = "http://localhost:3000";
-const server = setupServer();
+const server = setupServer(
+  http.get(`${apiOrigin}/api/today`, () => HttpResponse.json({
+    date: "2026-08-24", timezone: "Asia/Tokyo", rest_day: false, plan: null, workout: null,
+  })),
+);
 
 const startedPlan = {
   id: 10,
@@ -429,6 +433,48 @@ describe("WorkoutPage record-first flow", () => {
     await waitFor(() => expect(delayedFinished).toBe(true));
     expect(screen.queryByText("遅い種目")).not.toBeInTheDocument();
     expect(screen.getByRole("switch")).not.toBeChecked();
+  });
+
+  it("ブラウザの日付ではなくサーバーが返した今日の日付で開始する", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // 2026-08-24T12:00Z はどのタイムゾーンでも8/24か8/25。テスト実行環境のTZに依存せず
+    // ブラウザ由来の日付と区別できるよう、サーバーの今日にはそのどちらでもない日付を返す。
+    vi.setSystemTime(new Date("2026-08-24T12:00:00Z"));
+    const startedDates: string[] = [];
+    server.use(
+      http.get(`${apiOrigin}/api/today`, () => HttpResponse.json({
+        date: "2026-08-26", timezone: "Asia/Tokyo", rest_day: false, plan: null, workout: null,
+      })),
+      http.get(`${apiOrigin}/api/exercises/:exerciseID/settings`, () => HttpResponse.json({ target_sets: 3 })),
+      http.post(`${apiOrigin}/api/workout-plans/:date/start`, ({ params }) => {
+        startedDates.push(String(params.date));
+        return HttpResponse.json({ ...startedPlan, plan_date: String(params.date) });
+      }),
+    );
+    try {
+      const user = userEvent.setup();
+      await startWorkout(user);
+      expect(startedDates).toEqual(["2026-08-26"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("今日の日付を取得できなければ開始せずにエラーを表示する", async () => {
+    let starts = 0;
+    server.use(
+      http.get(`${apiOrigin}/api/today`, () => HttpResponse.json(
+        { status: 500, detail: "処理中にエラーが発生しました。" },
+        { status: 500, headers: { "Content-Type": "application/problem+json" } },
+      )),
+      http.get(`${apiOrigin}/api/exercises/:exerciseID/settings`, () => HttpResponse.json({ target_sets: 3 })),
+      http.post(`${apiOrigin}/api/workout-plans/:date/start`, () => { starts++; return HttpResponse.json(startedPlan); }),
+    );
+    const user = userEvent.setup();
+    renderWorkout();
+    await user.click(screen.getByRole("button", { name: /ワークアウトを開始/ }));
+    expect(await screen.findByText("処理中にエラーが発生しました。")).toBeInTheDocument();
+    expect(starts).toBe(0);
   });
 
   it("種目を往復しても次のセット番号を保つ", async () => {

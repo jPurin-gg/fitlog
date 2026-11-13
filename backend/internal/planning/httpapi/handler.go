@@ -34,6 +34,11 @@ func (h *Handler) GenerateMonthly(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) Today(w http.ResponseWriter, r *http.Request) {
+	result, err := h.service.Today(r.Context(), authhttp.UserID(r.Context()))
+	httpx.Respond(w, r, http.StatusOK, result, err)
+}
+
 func (h *Handler) Daily(w http.ResponseWriter, r *http.Request) {
 	result, err := h.service.Daily(r.Context(), authhttp.UserID(r.Context()), r.PathValue("date"))
 	httpx.Respond(w, r, http.StatusOK, result, err)
