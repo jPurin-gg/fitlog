@@ -344,6 +344,7 @@ func TestSaveSummaryCommentConcurrentReplay(t *testing.T) {
 				context.Background(),
 				fixture.userID,
 				workoutID,
+				1,
 				fmt.Sprintf("comment-%d", index),
 			)
 			if err != nil {
@@ -398,7 +399,7 @@ func TestSaveSummaryCommentRejectsActiveWorkout(t *testing.T) {
 	fixture := newIntegrationFixture(t)
 	workoutID := fixture.createWorkout(t)
 
-	comment, replayed, err := fixture.repository.SaveSummaryComment(context.Background(), fixture.userID, workoutID, "進行中の総評")
+	comment, replayed, err := fixture.repository.SaveSummaryComment(context.Background(), fixture.userID, workoutID, 1, "進行中の総評")
 	if !errors.Is(err, workout.ErrConflict) {
 		t.Fatalf("active SaveSummaryComment() = (%q, %v, %v), want ErrConflict", comment, replayed, err)
 	}
@@ -413,7 +414,7 @@ func TestSaveSummaryCommentRejectsActiveWorkout(t *testing.T) {
 	if _, err := fixture.repository.Finish(context.Background(), fixture.userID, workoutID); err != nil {
 		t.Fatalf("Finish() error = %v", err)
 	}
-	comment, replayed, err = fixture.repository.SaveSummaryComment(context.Background(), fixture.userID, workoutID, "完了後の総評")
+	comment, replayed, err = fixture.repository.SaveSummaryComment(context.Background(), fixture.userID, workoutID, 1, "完了後の総評")
 	if err != nil || replayed || comment != "完了後の総評" {
 		t.Fatalf("finished SaveSummaryComment() = (%q, %v, %v), want saved comment", comment, replayed, err)
 	}
@@ -426,11 +427,11 @@ func TestSaveSummaryCommentKeepsFirstComment(t *testing.T) {
 		t.Fatalf("Finish() error = %v", err)
 	}
 
-	first, replayed, err := fixture.repository.SaveSummaryComment(context.Background(), fixture.userID, workoutID, "最初の総評")
+	first, replayed, err := fixture.repository.SaveSummaryComment(context.Background(), fixture.userID, workoutID, 1, "最初の総評")
 	if err != nil || replayed || first != "最初の総評" {
 		t.Fatalf("first SaveSummaryComment() = (%q, %v, %v), want saved comment", first, replayed, err)
 	}
-	second, replayed, err := fixture.repository.SaveSummaryComment(context.Background(), fixture.userID, workoutID, "二番目の総評")
+	second, replayed, err := fixture.repository.SaveSummaryComment(context.Background(), fixture.userID, workoutID, 1, "二番目の総評")
 	if err != nil || !replayed || second != "最初の総評" {
 		t.Fatalf("second SaveSummaryComment() = (%q, %v, %v), want replay of %q", second, replayed, err, "最初の総評")
 	}
@@ -441,6 +442,51 @@ func TestSaveSummaryCommentKeepsFirstComment(t *testing.T) {
 	}
 	if stored != "最初の総評" {
 		t.Fatalf("stored summary comment = %q, want %q", stored, "最初の総評")
+	}
+}
+
+func TestSaveSummaryCommentRejectsEditedWorkout(t *testing.T) {
+	fixture := newIntegrationFixture(t)
+	ctx := context.Background()
+	date := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
+	input := workout.CalendarWorkoutInput{Title: "記録", Sets: []workout.CalendarSet{
+		{ExerciseID: fixture.exerciseID, SetOrder: 1, Weight: 40, Reps: 10},
+	}}
+	created, err := fixture.repository.SaveCalendarWorkout(ctx, fixture.userID, date, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := fixture.repository.SummaryContext(ctx, fixture.userID, created.WorkoutID)
+	if err != nil || before.Detail.Summary.TotalVolume != 400 || len(before.WorkoutSets) != 1 || before.WorkoutSets[0].Weight != 40 {
+		t.Fatalf("initial SummaryContext() = %#v, %v", before, err)
+	}
+	input.Sets[0].Weight, input.Sets[0].Reps = 55, 6
+	edited, err := fixture.repository.SaveCalendarWorkout(ctx, fixture.userID, date, input)
+	if err != nil || edited.WorkoutID != created.WorkoutID {
+		t.Fatalf("edit SaveCalendarWorkout() = %#v, %v", edited, err)
+	}
+	after, err := fixture.repository.SummaryContext(ctx, fixture.userID, created.WorkoutID)
+	if err != nil || after.Version != before.Version+1 || after.Detail.Summary.TotalVolume != 330 || len(after.WorkoutSets) != 1 || after.WorkoutSets[0].Weight != 55 {
+		t.Fatalf("edited SummaryContext() = %#v, %v", after, err)
+	}
+	comment, replayed, err := fixture.repository.SaveSummaryComment(ctx, fixture.userID, created.WorkoutID, before.Version, "旧内容の総評")
+	if !errors.Is(err, workout.ErrSummaryChanged) || comment != "" || replayed {
+		t.Fatalf("stale SaveSummaryComment() = (%q, %v, %v)", comment, replayed, err)
+	}
+	detail, err := fixture.repository.Detail(ctx, fixture.userID, created.WorkoutID)
+	if err != nil || detail.Summary.AIComment != "" {
+		t.Fatalf("stale comment persisted: %#v, %v", detail, err)
+	}
+	comment, replayed, err = fixture.repository.SaveSummaryComment(ctx, fixture.userID, created.WorkoutID, after.Version, "最新内容の総評")
+	if err != nil || replayed || comment != "最新内容の総評" {
+		t.Fatalf("current SaveSummaryComment() = (%q, %v, %v)", comment, replayed, err)
+	}
+	if _, _, err := fixture.repository.SaveSummaryComment(ctx, fixture.userID, created.WorkoutID, before.Version, "後着の総評"); !errors.Is(err, workout.ErrSummaryChanged) {
+		t.Fatalf("stale SaveSummaryComment() after retry error = %v", err)
+	}
+	comment, replayed, err = fixture.repository.SaveSummaryComment(ctx, fixture.userID, created.WorkoutID, after.Version, "重複総評")
+	if err != nil || !replayed || comment != "最新内容の総評" {
+		t.Fatalf("replayed SaveSummaryComment() = (%q, %v, %v)", comment, replayed, err)
 	}
 }
 
@@ -461,6 +507,9 @@ func TestWorkoutRepositoryDoesNotExposeAnotherUsersWorkout(t *testing.T) {
 	if _, err := fixture.repository.Detail(context.Background(), otherUserID, workoutID); !errors.Is(err, workout.ErrNotFound) {
 		t.Fatalf("other user Detail() error = %v, want ErrNotFound", err)
 	}
+	if _, err := fixture.repository.SummaryContext(context.Background(), otherUserID, workoutID); !errors.Is(err, workout.ErrNotFound) {
+		t.Fatalf("other user SummaryContext() error = %v, want ErrNotFound", err)
+	}
 	if _, _, err := fixture.repository.RecordSet(context.Background(), otherUserID, workoutID, "other_user_key", input); !errors.Is(err, workout.ErrNotFound) {
 		t.Fatalf("other user RecordSet() error = %v, want ErrNotFound", err)
 	}
@@ -470,7 +519,7 @@ func TestWorkoutRepositoryDoesNotExposeAnotherUsersWorkout(t *testing.T) {
 	if _, err := fixture.repository.Finish(context.Background(), otherUserID, workoutID); !errors.Is(err, workout.ErrNotFound) {
 		t.Fatalf("other user Finish() error = %v, want ErrNotFound", err)
 	}
-	if _, _, err := fixture.repository.SaveSummaryComment(context.Background(), otherUserID, workoutID, "見えてはいけない総評"); !errors.Is(err, workout.ErrNotFound) {
+	if _, _, err := fixture.repository.SaveSummaryComment(context.Background(), otherUserID, workoutID, 1, "見えてはいけない総評"); !errors.Is(err, workout.ErrNotFound) {
 		t.Fatalf("other user SaveSummaryComment() error = %v, want ErrNotFound", err)
 	}
 
