@@ -139,6 +139,8 @@ JSON入力は1 MiBまでで、未知フィールドと複数JSON値を拒否し�
 | PUT | `/api/workouts/by-date/{YYYY-MM-DD}` | 指定日の記録を置換保存 |
 | GET | `/api/workouts/{workoutID}` | 記録詳細と集計 |
 | POST | `/api/workouts/{workoutID}/sets` | 1セット保存 |
+| PATCH | `/api/workouts/{workoutID}/sets/{setID}` | 進行中のワークアウトの保存済みセットを修正 |
+| DELETE | `/api/workouts/{workoutID}/sets/{setID}` | 進行中のワークアウトの保存済みセットを取り消し |
 | POST | `/api/workouts/{workoutID}/sets/{setID}/recommendation` | 保存済みセットを基にAI提案 |
 | POST | `/api/workouts/{workoutID}/finish` | 終了とDB集計（AIは呼び出さない） |
 | POST | `/api/workouts/{workoutID}/summary-comment` | 完了済み記録のAI総評を生成。保存済みなら再利用 |
@@ -149,6 +151,8 @@ JSON入力は1 MiBまでで、未知フィールドと複数JSON値を拒否し�
 通常のセット保存とカレンダーの置換保存は、回数を1セットあたり **1〜1,000回の整数**、重量を **0〜2,000kgの有限値**に制限します。既存のAI提案と同じ上限で、筋トレ記録として十分な余裕を持たせつつ誤入力と集計のオーバーフローを防ぎます。範囲外は保存・集計の更新前に `400 Bad Request` とします。フロントエンドも同じ上限を使用します。
 
 セットの新規保存と終了は同じworkout行をロックして直列化します。保存が先なら終了集計に必ず含まれ、終了が先なら新規保存を拒否します。
+
+記録中の誤入力は、セット単位の修正・取り消しAPIで直します。PATCHは `{ "weight": 80, "reps": 10, "feeling": "..." }` のうち送ったフィールドだけを更新し（種目とセット番号は変更不可）、上限と整数の検証は新規保存と同じです。DELETEは `204 No Content` を返します。どちらも新規保存・終了と同じworkout行をロックし、終了済みのワークアウトは `409 Conflict`（カレンダーの置換保存で編集）、他ユーザーや別ワークアウトのセットは `404 Not Found` です。修正・取り消しの後は同じトランザクション内で、その種目の自己ベスト判定を日時順（それ以前のすべてのセットより重い場合に自己ベスト）で付け直し、`recalculateStats` で最終重量・最大重量を再計算します。次回の目標重量・過去の最大重量・AIへの入力に誤入力値は残りません。
 
 AI総評は `{ "comment": "...", "replayed": false }` を返します。同じワークアウトの保存済み総評がある場合は `replayed: true` です。未完了のワークアウトは `409 Conflict` です。AI障害でこのAPIが失敗しても、先に完了した記録とDB集計は変更しません。
 

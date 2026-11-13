@@ -102,6 +102,70 @@ func (r *Repository) RecordSet(ctx context.Context, userID, workoutID int, key s
 	return result, false, nil
 }
 
+// UpdateSet corrects a saved set of an active workout and recalculates the
+// exercise's PR flags and stats from the corrected history.
+func (r *Repository) UpdateSet(ctx context.Context, userID, workoutID, setID int, patch workout.SetPatch) (workout.Set, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return workout.Set{}, err
+	}
+	defer tx.Rollback()
+	if err := lockActiveWorkout(ctx, tx, userID, workoutID); err != nil {
+		return workout.Set{}, err
+	}
+	var exerciseID string
+	err = tx.QueryRowContext(ctx, `
+		UPDATE workout_sets SET
+			weight=COALESCE($1::double precision,weight),
+			reps=COALESCE($2::integer,reps),
+			feeling=COALESCE($3::text,feeling)
+		WHERE id=$4 AND workout_id=$5
+		RETURNING exercise_id
+	`, patch.Weight, patch.Reps, patch.Feeling, setID, workoutID).Scan(&exerciseID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return workout.Set{}, workout.ErrNotFound
+	}
+	if err != nil {
+		return workout.Set{}, err
+	}
+	if err := recalculateAfterSetEdit(ctx, tx, userID, exerciseID); err != nil {
+		return workout.Set{}, err
+	}
+	set, err := findSetByID(ctx, tx, workoutID, setID)
+	if err != nil {
+		return workout.Set{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return workout.Set{}, err
+	}
+	return set, nil
+}
+
+// DeleteSet cancels a saved set of an active workout and recalculates the
+// exercise's PR flags and stats without it.
+func (r *Repository) DeleteSet(ctx context.Context, userID, workoutID, setID int) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := lockActiveWorkout(ctx, tx, userID, workoutID); err != nil {
+		return err
+	}
+	var exerciseID string
+	err = tx.QueryRowContext(ctx, `DELETE FROM workout_sets WHERE id=$1 AND workout_id=$2 RETURNING exercise_id`, setID, workoutID).Scan(&exerciseID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return workout.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if err := recalculateAfterSetEdit(ctx, tx, userID, exerciseID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (r *Repository) RecommendationContext(ctx context.Context, userID, workoutID, setID int) (workout.RecommendationContext, error) {
 	var result workout.RecommendationContext
 	var exists bool
@@ -430,6 +494,44 @@ func findSetByKey(ctx context.Context, query queryer, userID, workoutID int, key
 	return set, true, nil
 }
 
+// lockActiveWorkout serializes set corrections with RecordSet and Finish. A
+// completed workout is edited through the calendar replacement API.
+func lockActiveWorkout(ctx context.Context, tx *sql.Tx, userID, workoutID int) error {
+	var endedAt sql.NullTime
+	err := tx.QueryRowContext(ctx, `
+		SELECT ended_at FROM workouts
+		WHERE id=$1 AND user_id=$2
+		FOR UPDATE
+	`, workoutID, userID).Scan(&endedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return workout.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if endedAt.Valid {
+		return workout.ErrConflict
+	}
+	return nil
+}
+
+func findSetByID(ctx context.Context, query queryer, workoutID, setID int) (workout.Set, error) {
+	var set workout.Set
+	var createdAt time.Time
+	err := query.QueryRowContext(ctx, `
+		SELECT id,workout_id,exercise_id,set_order,weight,reps,COALESCE(feeling,''),is_pr,created_at
+		FROM workout_sets WHERE id=$1 AND workout_id=$2
+	`, setID, workoutID).Scan(&set.ID, &set.WorkoutID, &set.ExerciseID, &set.SetOrder, &set.Weight, &set.Reps, &set.Feeling, &set.IsPR, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return workout.Set{}, workout.ErrNotFound
+	}
+	if err != nil {
+		return workout.Set{}, err
+	}
+	set.CreatedAt = createdAt.Format(time.RFC3339)
+	return set, nil
+}
+
 func sameSet(existing workout.Set, input workout.SetInput) bool {
 	return existing.ExerciseID == input.ExerciseID && existing.SetOrder == input.SetOrder && existing.Weight == input.Weight && existing.Reps == input.Reps && existing.Feeling == input.Feeling
 }
@@ -444,6 +546,29 @@ func scanHistory(rows *sql.Rows) ([]workout.HistorySet, error) {
 		result = append(result, item)
 	}
 	return result, rows.Err()
+}
+
+// recalculateAfterSetEdit re-evaluates every PR flag of the exercise in
+// chronological order (a PR beats all earlier sets) and then refreshes the
+// latest and max weights with recalculateStats, so a corrected or cancelled
+// typo no longer counts as a PR, next target weight, or max weight.
+func recalculateAfterSetEdit(ctx context.Context, tx *sql.Tx, userID int, exerciseID string) error {
+	if _, err := tx.ExecContext(ctx, `
+		WITH ordered_sets AS (
+			SELECT ws.id,ws.weight > COALESCE(MAX(ws.weight) OVER (
+				ORDER BY w.started_at,ws.created_at,ws.id
+				ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+			),0) AS is_pr
+			FROM workout_sets ws JOIN workouts w ON w.id=ws.workout_id
+			WHERE w.user_id=$1 AND ws.exercise_id=$2
+		)
+		UPDATE workout_sets ws SET is_pr=ordered_sets.is_pr
+		FROM ordered_sets WHERE ws.id=ordered_sets.id
+		  AND ws.is_pr IS DISTINCT FROM ordered_sets.is_pr
+	`, userID, exerciseID); err != nil {
+		return err
+	}
+	return recalculateStats(ctx, tx, userID, exerciseID)
 }
 
 func recalculateStats(ctx context.Context, tx *sql.Tx, userID int, exerciseID string) error {

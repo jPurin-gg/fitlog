@@ -38,6 +38,14 @@ type SetInput struct {
 	Feeling    string  `json:"feeling"`
 }
 
+// SetPatch corrects a saved set while its workout is still active. Omitted
+// (or null) fields keep their saved values.
+type SetPatch struct {
+	Weight  *float64 `json:"weight"`
+	Reps    *int     `json:"reps"`
+	Feeling *string  `json:"feeling"`
+}
+
 type Set struct {
 	ID         int     `json:"id"`
 	WorkoutID  int     `json:"workout_id"`
@@ -143,6 +151,8 @@ type CalendarWorkoutInput struct {
 
 type Repository interface {
 	RecordSet(ctx context.Context, userID, workoutID int, key string, input SetInput) (Set, bool, error)
+	UpdateSet(ctx context.Context, userID, workoutID, setID int, patch SetPatch) (Set, error)
+	DeleteSet(ctx context.Context, userID, workoutID, setID int) error
 	RecommendationContext(ctx context.Context, userID, workoutID, setID int) (RecommendationContext, error)
 	Finish(ctx context.Context, userID, workoutID int) (Detail, error)
 	Detail(ctx context.Context, userID, workoutID int) (Detail, error)
@@ -207,6 +217,55 @@ func (s *Service) RecordSet(ctx context.Context, userID, workoutID int, key stri
 		return Set{}, false, apperr.Internal(err)
 	}
 	return set, replayed, nil
+}
+
+// UpdateSet corrects a saved set of an active workout. Completed workouts are
+// edited through the calendar replacement API instead.
+func (s *Service) UpdateSet(ctx context.Context, userID, workoutID, setID int, patch SetPatch) (Set, error) {
+	fields := map[string]string{}
+	if patch.Weight == nil && patch.Reps == nil && patch.Feeling == nil {
+		fields["body"] = "weight, reps or feeling is required"
+	}
+	weight, reps := 0.0, 1
+	if patch.Weight != nil {
+		weight = *patch.Weight
+	}
+	if patch.Reps != nil {
+		reps = *patch.Reps
+	}
+	for field, message := range validateSetValues(weight, reps) {
+		fields[field] = message
+	}
+	if len(fields) > 0 {
+		return Set{}, apperr.Validation("セットの修正内容を確認してください。", fields)
+	}
+	if patch.Feeling != nil {
+		feeling := strings.TrimSpace(*patch.Feeling)
+		patch.Feeling = &feeling
+	}
+	set, err := s.repository.UpdateSet(ctx, userID, workoutID, setID, patch)
+	if err != nil {
+		return Set{}, setEditError(err)
+	}
+	return set, nil
+}
+
+// DeleteSet cancels a saved set of an active workout.
+func (s *Service) DeleteSet(ctx context.Context, userID, workoutID, setID int) error {
+	if err := s.repository.DeleteSet(ctx, userID, workoutID, setID); err != nil {
+		return setEditError(err)
+	}
+	return nil
+}
+
+func setEditError(err error) error {
+	if errors.Is(err, ErrNotFound) {
+		return apperr.NotFound("対象のセットが見つかりません。")
+	}
+	if errors.Is(err, ErrConflict) {
+		return apperr.Conflict("終了したワークアウトのセットはカレンダーから編集してください。")
+	}
+	return apperr.Internal(err)
 }
 
 func validateSetValues(weight float64, reps int) map[string]string {

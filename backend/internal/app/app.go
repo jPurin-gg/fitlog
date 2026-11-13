@@ -83,6 +83,8 @@ func NewHandler(db *sql.DB, cfg config.Config, logger *slog.Logger) http.Handler
 	mux.Handle("PUT /api/workouts/by-date/{date}", protected(workoutHandler.PutCalendarWorkout))
 	mux.Handle("GET /api/workouts/{workoutID}", protected(workoutHandler.Detail))
 	mux.Handle("POST /api/workouts/{workoutID}/sets", protected(workoutHandler.RecordSet))
+	mux.Handle("PATCH /api/workouts/{workoutID}/sets/{setID}", protected(workoutHandler.UpdateSet))
+	mux.Handle("DELETE /api/workouts/{workoutID}/sets/{setID}", protected(workoutHandler.DeleteSet))
 	mux.Handle("POST /api/workouts/{workoutID}/sets/{setID}/recommendation", protected(workoutHandler.Recommendation))
 	mux.Handle("POST /api/workouts/{workoutID}/finish", protected(workoutHandler.Finish))
 	mux.Handle("POST /api/workouts/{workoutID}/summary-comment", protected(workoutHandler.SummaryComment))
