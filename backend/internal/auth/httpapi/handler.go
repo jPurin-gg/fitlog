@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"net/netip"
 	"time"
 
 	"github.com/jPurin-gg/myfitlog-backend/internal/apperr"
@@ -16,12 +18,13 @@ type contextKey string
 const userIDKey contextKey = "auth_user_id"
 
 type Handler struct {
-	service      *auth.Service
-	signer       *auth.TokenSigner
-	clock        clock.Clock
-	cookieName   string
-	cookieSecure bool
-	cookieTTL    time.Duration
+	service        *auth.Service
+	signer         *auth.TokenSigner
+	clock          clock.Clock
+	cookieName     string
+	cookieSecure   bool
+	cookieTTL      time.Duration
+	trustedProxies []netip.Prefix
 }
 
 func NewHandler(service *auth.Service, signer *auth.TokenSigner, appClock clock.Clock, cookieName string, secure bool, ttl time.Duration) *Handler {
@@ -45,8 +48,18 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	user, created, err := h.service.Login(r.Context(), request.Nickname, request.Password)
+	user, created, err := h.service.LoginFrom(r.Context(), h.loginSource(r), request.Nickname, request.Password)
 	if err != nil {
+		var limited *auth.RateLimitError
+		if errors.As(err, &limited) {
+			// HTTP-date has whole-second precision; never advertise an earlier retry.
+			retryAt := limited.RetryAt.UTC()
+			if retryAt.Nanosecond() != 0 {
+				retryAt = retryAt.Truncate(time.Second).Add(time.Second)
+			}
+			w.Header().Set("Retry-After", retryAt.Format(http.TimeFormat))
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		httpx.WriteError(w, r, err)
 		return
 	}

@@ -44,10 +44,27 @@ type Repository interface {
 type Service struct {
 	repository     Repository
 	hashIterations int
+	loginGuard     *loginGuard
+	passwords      passwordHasher
 }
 
 func NewService(repository Repository) *Service {
-	return &Service{repository: repository, hashIterations: passwordHashIterations}
+	return &Service{repository: repository, hashIterations: passwordHashIterations, loginGuard: newLoginGuard(LoginLimits{}, nil), passwords: pbkdf2Passwords{}}
+}
+
+type passwordHasher interface {
+	hash(password string, iterations int) (string, error)
+	verify(password, stored string) (bool, error)
+}
+
+type pbkdf2Passwords struct{}
+
+func (pbkdf2Passwords) hash(password string, iterations int) (string, error) {
+	return hashPassword(password, iterations)
+}
+
+func (pbkdf2Passwords) verify(password, stored string) (bool, error) {
+	return VerifyPassword(password, stored)
 }
 
 // WithPasswordHashIterations lowers the PBKDF2 cost for tests; at the default every login takes ~0.6s under -race.
@@ -57,6 +74,11 @@ func (s *Service) WithPasswordHashIterations(iterations int) *Service {
 }
 
 func (s *Service) Login(ctx context.Context, nickname, password string) (User, bool, error) {
+	return s.LoginFrom(ctx, "unknown", nickname, password)
+}
+
+// LoginFrom requires a source resolved by the HTTP adapter's proxy trust policy.
+func (s *Service) LoginFrom(ctx context.Context, source, nickname, password string) (User, bool, error) {
 	nickname = strings.TrimSpace(nickname)
 	if nickname == "" || password == "" {
 		return User{}, false, apperr.Validation("ニックネームとパスワードを入力してください。", map[string]string{
@@ -74,12 +96,20 @@ func (s *Service) Login(ctx context.Context, nickname, password string) (User, b
 	if len(fields) > 0 {
 		return User{}, false, apperr.Validation("ニックネームまたはパスワードが長すぎます。", fields)
 	}
+	if err := ctx.Err(); err != nil {
+		return User{}, false, apperr.Internal(err)
+	}
+	release, err := s.loginGuard.begin(source, nickname)
+	if err != nil {
+		return User{}, false, err
+	}
+	defer release()
 
 	stored, err := s.repository.FindByNickname(ctx, nickname)
 	switch {
 	case err == nil:
 		if stored.PasswordHash == "" {
-			hash, hashErr := hashPassword(password, s.hashIterations)
+			hash, hashErr := s.passwords.hash(password, s.hashIterations)
 			if hashErr != nil {
 				return User{}, false, apperr.Internal(hashErr)
 			}
@@ -88,7 +118,7 @@ func (s *Service) Login(ctx context.Context, nickname, password string) (User, b
 			}
 			return stored.User, false, nil
 		}
-		valid, verifyErr := VerifyPassword(password, stored.PasswordHash)
+		valid, verifyErr := s.passwords.verify(password, stored.PasswordHash)
 		if verifyErr != nil {
 			return User{}, false, apperr.Internal(verifyErr)
 		}
@@ -100,7 +130,7 @@ func (s *Service) Login(ctx context.Context, nickname, password string) (User, b
 		return User{}, false, apperr.Internal(err)
 	}
 
-	hash, err := hashPassword(password, s.hashIterations)
+	hash, err := s.passwords.hash(password, s.hashIterations)
 	if err != nil {
 		return User{}, false, apperr.Internal(err)
 	}
