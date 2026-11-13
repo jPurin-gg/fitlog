@@ -420,22 +420,35 @@ func (s *Service) refineDaily(ctx context.Context, base WorkoutPlan) (WorkoutPla
 	if err := json.Unmarshal([]byte(prompt.JSONText(result)), &refined); err != nil || len(refined.Exercises) != len(base.Exercises) || refined.WorkoutTitle == "" {
 		return WorkoutPlan{}, apperr.Wrap(err, 502, apperr.CodeAIUnavailable, "AIのワークアウト計画を解析できません。")
 	}
-	for i := range refined.Exercises {
-		refined.Exercises[i].ExerciseID = base.Exercises[i].ExerciseID
-		refined.Exercises[i].Name = base.Exercises[i].Name
-		refined.Exercises[i].LastMaxWeight = base.Exercises[i].LastMaxWeight
-		if refined.Exercises[i].PlannedSets < 1 {
-			refined.Exercises[i].PlannedSets = base.Exercises[i].PlannedSets
+	refinedByID := make(map[string]PlanExercise, len(refined.Exercises))
+	for _, exercise := range refined.Exercises {
+		if _, exists := refinedByID[exercise.ExerciseID]; exercise.ExerciseID == "" || exists {
+			return WorkoutPlan{}, apperr.New(502, apperr.CodeAIUnavailable, "AIのワークアウト計画の種目が一致しません。")
 		}
-		if refined.Exercises[i].PlannedSets > 6 {
-			refined.Exercises[i].PlannedSets = 6
+		refinedByID[exercise.ExerciseID] = exercise
+	}
+	// Preserve the base order and match AI values by ID without modifying the fallback plan.
+	for i, baseExercise := range base.Exercises {
+		exercise, exists := refinedByID[baseExercise.ExerciseID]
+		if !exists {
+			return WorkoutPlan{}, apperr.New(502, apperr.CodeAIUnavailable, "AIのワークアウト計画の種目が一致しません。")
 		}
-		if refined.Exercises[i].TargetWeight <= 0 {
-			refined.Exercises[i].TargetWeight = base.Exercises[i].TargetWeight
+		delete(refinedByID, baseExercise.ExerciseID)
+		exercise.Name = baseExercise.Name
+		exercise.LastMaxWeight = baseExercise.LastMaxWeight
+		if exercise.PlannedSets < 1 {
+			exercise.PlannedSets = baseExercise.PlannedSets
 		}
-		if refined.Exercises[i].TargetReps <= 0 {
-			refined.Exercises[i].TargetReps = base.Exercises[i].TargetReps
+		if exercise.PlannedSets > 6 {
+			exercise.PlannedSets = 6
 		}
+		if exercise.TargetWeight <= 0 {
+			exercise.TargetWeight = baseExercise.TargetWeight
+		}
+		if exercise.TargetReps <= 0 {
+			exercise.TargetReps = baseExercise.TargetReps
+		}
+		refined.Exercises[i] = exercise
 	}
 	if refined.EstimatedDurationMin <= 0 {
 		refined.EstimatedDurationMin = base.EstimatedDurationMin
