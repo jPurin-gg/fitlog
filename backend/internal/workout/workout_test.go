@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/jPurin-gg/myfitlog-backend/internal/ai"
 	"github.com/jPurin-gg/myfitlog-backend/internal/apperr"
+	"github.com/jPurin-gg/myfitlog-backend/internal/clock"
 )
 
 func TestRecordSetRequiresIdempotencyKey(t *testing.T) {
@@ -104,6 +106,56 @@ func TestRecordSetMapsRepositoryErrors(t *testing.T) {
 				t.Fatalf("RecordSet() error = %#v; repository calls = %d", appErr, repository.recordCalls)
 			}
 		})
+	}
+}
+
+func TestSetValueLimitsApplyToRecordAndCalendar(t *testing.T) {
+	tests := []struct {
+		name   string
+		reps   int
+		weight float64
+		valid  bool
+	}{
+		{name: "minimum", reps: 1, weight: 0, valid: true},
+		{name: "maximum", reps: 1000, weight: 2000, valid: true},
+		{name: "fractional_weight", reps: 10, weight: 2.5, valid: true},
+		{name: "zero_reps", reps: 0, weight: 80},
+		{name: "negative_reps", reps: -1, weight: 80},
+		{name: "too_many_reps", reps: 1001, weight: 80},
+		{name: "legacy_max_reps", reps: math.MaxInt32, weight: 80},
+		{name: "negative_weight", reps: 10, weight: -0.5},
+		{name: "too_much_weight", reps: 10, weight: 2000.01},
+		{name: "overflowing_product", reps: 1000, weight: math.MaxFloat64},
+		{name: "nan_weight", reps: 10, weight: math.NaN()},
+		{name: "positive_infinite_weight", reps: 10, weight: math.Inf(1)},
+		{name: "negative_infinite_weight", reps: 10, weight: math.Inf(-1)},
+	}
+	for _, test := range tests {
+		for _, calendar := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/calendar=%v", test.name, calendar), func(t *testing.T) {
+				repository := &stubRepository{}
+				service := NewService(repository, nil, nil, clock.Fixed{Time: time.Now()}, 0)
+				var err error
+				if calendar {
+					_, err = service.SaveCalendarWorkout(context.Background(), 1, "2026-11-13", CalendarWorkoutInput{Sets: []CalendarSet{
+						{ExerciseID: "bench", Weight: 40, Reps: 10},
+						{ExerciseID: "bench", Weight: test.weight, Reps: test.reps},
+					}})
+				} else {
+					_, _, err = service.RecordSet(context.Background(), 1, 2, "request_123", SetInput{
+						ExerciseID: "bench", SetOrder: 1, Weight: test.weight, Reps: test.reps,
+					})
+				}
+				calls := repository.recordCalls + repository.saveCalendarCalls
+				if test.valid {
+					if err != nil || calls != 1 {
+						t.Fatalf("save error = %v; repository calls = %d", err, calls)
+					}
+				} else if appErr := apperr.As(err); appErr == nil || appErr.Status != http.StatusBadRequest || appErr.Code != apperr.CodeValidation || calls != 0 {
+					t.Fatalf("save error = %#v; repository calls = %d", appErr, calls)
+				}
+			})
+		}
 	}
 }
 
@@ -408,6 +460,7 @@ func TestRecommendHonorsOptionalAITimeout(t *testing.T) {
 
 type stubRepository struct {
 	recordCalls         int
+	saveCalendarCalls   int
 	key                 string
 	input               SetInput
 	recorded            Set
@@ -460,7 +513,8 @@ func (*stubRepository) CalendarWorkout(context.Context, int, time.Time) (Calenda
 	return CalendarWorkout{}, nil
 }
 
-func (*stubRepository) SaveCalendarWorkout(context.Context, int, time.Time, CalendarWorkoutInput) (CalendarWorkout, error) {
+func (r *stubRepository) SaveCalendarWorkout(context.Context, int, time.Time, CalendarWorkoutInput) (CalendarWorkout, error) {
+	r.saveCalendarCalls++
 	return CalendarWorkout{}, nil
 }
 
