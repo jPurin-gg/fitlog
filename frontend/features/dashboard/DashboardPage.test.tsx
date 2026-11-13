@@ -9,9 +9,33 @@ import DashboardPage from "./DashboardPage";
 
 const auth = vi.hoisted(() => ({ user: { id: 1, nickname: "テスト" } }));
 vi.mock("@/components/AuthGate", () => ({ useAuth: () => auth, LogoutButton: () => null }));
+vi.mock("@/features/exercises/components/AlternativeCoachModal", () => ({
+  AlternativeCoachModal: ({ onReplace }: { onReplace: (exercise: { id: string; name: string }) => void }) => (
+    <button onClick={() => onReplace({ id: "incline_press", name: "インクラインプレス" })}>代替種目を選ぶ</button>
+  ),
+}));
+
+const emptyToday = { date: "2026-10-01", timezone: "Asia/Tokyo", rest_day: false, plan: null, workout: null };
+const savedPlan = {
+  id: 7,
+  plan_date: "2026-10-02",
+  status: "active",
+  ai_status: "not_requested",
+  plan: {
+    workout_title: "カレンダーで編集した背中の日",
+    target: "背中",
+    estimated_duration_min: 40,
+    coach_note: "丁寧に",
+    exercises: [
+      { exercise_id: "row", name: "ベントオーバーロウ", planned_sets: 4, target_weight: 55, target_reps: 8, last_max_weight: 60 },
+      { exercise_id: "pulldown", name: "ラットプルダウン", planned_sets: 3, target_weight: 40, target_reps: 12 },
+    ],
+  },
+};
 
 let monthlyCalls = 0;
 const server = setupServer(
+  http.get("http://localhost:3000/api/today", () => HttpResponse.json(emptyToday)),
   http.get("http://localhost:3000/api/dashboard", () => HttpResponse.json({ recent_workouts: [] })),
   http.get("http://localhost:3000/api/preferences", () => HttpResponse.json({})),
   http.get("http://localhost:3000/api/monthly-plans/:month", () => {
@@ -93,9 +117,16 @@ it("別ユーザーには今月の非表示を引き継がない", async () => {
 });
 
 it("今月のプランがあるときは自動で案内しない", async () => {
-  server.use(http.get("http://localhost:3000/api/monthly-plans/:month", () => HttpResponse.json({ recommended_days: [], weekly_routine: [] })));
+  server.use(
+    http.get("http://localhost:3000/api/monthly-plans/:month", () => {
+      monthlyCalls++;
+      return HttpResponse.json({ recommended_days: [], weekly_routine: [] });
+    }),
+    http.get("http://localhost:3000/api/today", () => HttpResponse.json({ ...emptyToday, rest_day: true })),
+  );
   show();
   await screen.findByText("休息日");
+  await waitFor(() => expect(monthlyCalls).toBe(1));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "月間プランを作成／見直す" }));
   await screen.findByRole("dialog");
@@ -107,5 +138,55 @@ it("プランの読み込み失敗を未作成と誤認して案内しない", a
   show();
   await waitFor(() => expect(error).toHaveBeenCalled());
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "プランなしで記録を始める" })).toHaveAttribute("href", "/workout");
+  expect(await screen.findByRole("link", { name: "プランなしで記録を始める" })).toHaveAttribute("href", "/workout");
+});
+
+it("今日のメニューは保存済みの日次予定を種目・セット・重量・回数つきで表示する", async () => {
+  // 月間プランなし（404）＋日次予定あり。ブラウザは10/1でもサーバーの今日（10/2）を表示する。
+  server.use(http.get("http://localhost:3000/api/today", () => HttpResponse.json({ ...emptyToday, date: "2026-10-02", plan: savedPlan })));
+  show();
+  expect(await screen.findByText("カレンダーで編集した背中の日")).toBeInTheDocument();
+  expect(screen.getByText("ベントオーバーロウ")).toBeInTheDocument();
+  expect(screen.getByText("4セット / 55kg × 8回")).toBeInTheDocument();
+  expect(screen.getByText("ラットプルダウン")).toBeInTheDocument();
+  expect(screen.getByText("3セット / 40kg × 12回")).toBeInTheDocument();
+  expect(screen.getByText("10月2日金曜日")).toBeInTheDocument();
+  expect(screen.queryByText("月間プランは任意です")).not.toBeInTheDocument();
+  expect(screen.queryByText("休息日")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "筋トレを開始" })).toHaveAttribute("href", "/workout");
+});
+
+it("サーバーが休息日と判定した日だけ休息日を表示する", async () => {
+  server.use(http.get("http://localhost:3000/api/today", () => HttpResponse.json({ ...emptyToday, rest_day: true })));
+  show();
+  expect(await screen.findByText("休息日")).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "筋トレを開始" })).not.toBeInTheDocument();
+});
+
+it("種目の変更はサーバーの日付の日次予定として保存し、表示を取り直す", async () => {
+  let current: { plan: object } & Record<string, unknown> = { ...emptyToday, date: "2026-10-02", plan: { ...savedPlan, status: "draft" } };
+  let savedPath = "";
+  let savedBody: { exercises?: unknown[] } | undefined;
+  server.use(
+    http.get("http://localhost:3000/api/today", () => HttpResponse.json(current)),
+    http.put("http://localhost:3000/api/workout-plans/:date", async ({ request, params }) => {
+      savedPath = String(params.date);
+      savedBody = await request.json() as { exercises?: unknown[] };
+      current = { ...current, plan: { ...savedPlan, status: "active", plan: { ...savedPlan.plan, exercises: savedBody.exercises } } };
+      return HttpResponse.json(current.plan);
+    }),
+  );
+  show();
+  await screen.findByText("月間プランより");
+  await userEvent.click(screen.getAllByRole("button", { name: /種目を変更/ })[0]);
+  await userEvent.click(await screen.findByRole("button", { name: "代替種目を選ぶ" }));
+
+  expect(await screen.findByText("インクラインプレス")).toBeInTheDocument();
+  expect(savedPath).toBe("2026-10-02");
+  expect(savedBody?.exercises).toEqual([
+    { exercise_id: "incline_press", name: "インクラインプレス", planned_sets: 4, target_weight: 0, target_reps: 8 },
+    { exercise_id: "pulldown", name: "ラットプルダウン", planned_sets: 3, target_weight: 40, target_reps: 12 },
+  ]);
+  expect(screen.getByText("今日の予定")).toBeInTheDocument();
+  expect(screen.getByText("4セット / 8回")).toBeInTheDocument();
 });
