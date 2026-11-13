@@ -4,19 +4,18 @@
 import React from "react";
 import { AIToggle, useAISettings } from "@/components/AISettings";
 import { motion } from "framer-motion";
-import { Loader2, X, MessageSquare, BrainCircuit, ArrowRight, AlertCircle } from "lucide-react";
+import { Loader2, X, MessageSquare, BrainCircuit, ArrowRight, AlertCircle, Search } from "lucide-react";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { apiErrorMessage, apiFetch } from "@/lib/api";
+import { ExerciseSelectorModal } from "./ExerciseSelectorModal";
 
 export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onReplace }: any) {
   const { enabled: aiEnabled, isEnabled } = useAISettings();
   const [loading, setLoading] = React.useState(false);
   const [reason, setReason] = React.useState("");
-  const [customName, setCustomName] = React.useState("");
   const [result, setResult] = React.useState<any>(null);
-  const [error, setError] = React.useState("");
   const [aiError, setAIError] = React.useState("");
-  const [customLoading, setCustomLoading] = React.useState(false);
+  const [showSelector, setShowSelector] = React.useState(false);
   const inFlightRef = React.useRef(false);
   const abortRef = React.useRef<AbortController | null>(null);
   const requestRef = React.useRef(0);
@@ -65,24 +64,17 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
     }
   };
 
-  const saveCustomExercise = async () => {
-    const name = customName.trim();
-    if (!name || customLoading) return;
-    setCustomLoading(true);
-    setError("");
-    try {
-      const created = await apiFetch<{ id: string; name: string }>("/api/exercises", {
-        method: "POST",
-        body: JSON.stringify({ name, category: "strength", equipment: "その他" }),
-      });
-      onReplace(created);
-    } catch (e) {
-      console.error(e);
-      setError(apiErrorMessage(e, "種目の追加に失敗しました。"));
-    } finally {
-      setCustomLoading(false);
-    }
-  };
+  // 手動変更は辞書の種目セレクターから選ぶ（見つからなければセレクター内の共通フォームで追加する）
+  const selectorButton = (label: string) => (
+    <button
+      type="button"
+      onClick={() => setShowSelector(true)}
+      className="w-full py-3 bg-white/10 text-white font-bold rounded-xl hover:bg-white/20 transition-colors flex items-center justify-center gap-2"
+    >
+      <Search className="w-4 h-4" />
+      {label}
+    </button>
+  );
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center p-4 overflow-hidden overscroll-none">
@@ -113,7 +105,6 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
 
         <div className="mb-4"><AIToggle /></div>
         {!aiEnabled && <p className="mb-4 text-sm text-white/50">AIはOFFです。種目は手動で変更できます。</p>}
-        {error && <p role="alert" className="mb-4 text-sm text-red-300">{error}</p>}
 
         <div className="bg-white/5 rounded-2xl p-4 mb-6 border border-white/5 flex items-center justify-between">
           <div className="text-sm font-medium text-white/40">変更対象</div>
@@ -166,22 +157,7 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
               </div>
             </div>
 
-            <div className="flex gap-2">
-              <input 
-                type="text" 
-                value={customName}
-                onChange={(e) => setCustomName(e.target.value)}
-                className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-white/30 text-sm"
-                placeholder="好きな種目名を入力"
-              />
-              <button 
-                onClick={saveCustomExercise}
-                disabled={!customName.trim() || customLoading}
-                className="px-6 bg-white/10 text-white font-bold rounded-xl hover:bg-white/20 transition-colors disabled:opacity-30"
-              >
-                {customLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "決定"}
-              </button>
-            </div>
+            {selectorButton("辞書から種目を選ぶ")}
           </div>
         ) : (
           <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
@@ -206,25 +182,20 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
               ))}
             </div>
 
-            <div className="flex gap-2 mt-4">
-              <input 
-                type="text" 
-                value={customName}
-                onChange={(e) => setCustomName(e.target.value)}
-                className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-white/30 text-sm"
-                placeholder="リストにない種目を手動で入力"
-              />
-              <button 
-                onClick={saveCustomExercise}
-                disabled={!customName.trim() || customLoading}
-                className="px-6 bg-white/10 text-white font-bold rounded-xl hover:bg-white/20 transition-colors disabled:opacity-30"
-              >
-                {customLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "決定"}
-              </button>
-            </div>
+            <div className="mt-4">{selectorButton("候補以外の種目を辞書から選ぶ")}</div>
           </div>
         )}
       </motion.div>
+
+      {showSelector && (
+        <ExerciseSelectorModal
+          onClose={() => setShowSelector(false)}
+          onSelect={(exercise) => {
+            setShowSelector(false);
+            onReplace(exercise);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -73,11 +73,22 @@ func decodeExerciseFeatureLog(t *testing.T, data []byte) map[string]any {
 type stubExerciseRepository struct {
 	alternativeContext AlternativeContext
 	alternativeErr     error
+	existing           []Exercise
+	created            []Exercise
 }
 
 func (*stubExerciseRepository) Search(context.Context, Filters) ([]Exercise, error) { return nil, nil }
-func (*stubExerciseRepository) Create(context.Context, Exercise) error              { return nil }
-func (*stubExerciseRepository) Favorites(context.Context, int) ([]Exercise, error)  { return nil, nil }
+func (r *stubExerciseRepository) CreateUnique(_ context.Context, item Exercise) (Exercise, error) {
+	for _, existing := range r.existing {
+		if NormalizeName(existing.Name) == NormalizeName(item.Name) {
+			return existing, ErrDuplicateName
+		}
+	}
+	r.created = append(r.created, item)
+	r.existing = append(r.existing, item)
+	return item, nil
+}
+func (*stubExerciseRepository) Favorites(context.Context, int) ([]Exercise, error) { return nil, nil }
 func (*stubExerciseRepository) SetFavorite(context.Context, int, string, bool) error {
 	return nil
 }

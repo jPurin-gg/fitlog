@@ -21,6 +21,28 @@ type Problem struct {
 	Code      string            `json:"code"`
 	RequestID string            `json:"request_id"`
 	Errors    map[string]string `json:"errors,omitempty"`
+	// Extensions はトップレベルに展開する。標準メンバーと同名のキーは無視する。
+	Extensions map[string]any `json:"-"`
+}
+
+func (p Problem) MarshalJSON() ([]byte, error) {
+	type standard Problem
+	base, err := json.Marshal(standard(p))
+	if err != nil || len(p.Extensions) == 0 {
+		return base, err
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(base, &members); err != nil {
+		return nil, err
+	}
+	merged := make(map[string]any, len(members)+len(p.Extensions))
+	for key, value := range p.Extensions {
+		merged[key] = value
+	}
+	for key, value := range members {
+		merged[key] = value
+	}
+	return json.Marshal(merged)
 }
 
 func DecodeJSON(w http.ResponseWriter, r *http.Request, destination any) error {
@@ -85,13 +107,14 @@ func RespondNoContent(w http.ResponseWriter, r *http.Request, err error) {
 func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	appErr := apperr.As(err)
 	problem := Problem{
-		Type:      "/problems/" + strings.ToLower(strings.ReplaceAll(appErr.Code, "_", "-")),
-		Title:     titleForStatus(appErr.Status),
-		Status:    appErr.Status,
-		Detail:    appErr.Detail,
-		Code:      appErr.Code,
-		RequestID: RequestID(r.Context()),
-		Errors:    appErr.Fields,
+		Type:       "/problems/" + strings.ToLower(strings.ReplaceAll(appErr.Code, "_", "-")),
+		Title:      titleForStatus(appErr.Status),
+		Status:     appErr.Status,
+		Detail:     appErr.Detail,
+		Code:       appErr.Code,
+		RequestID:  RequestID(r.Context()),
+		Errors:     appErr.Fields,
+		Extensions: appErr.Extensions,
 	}
 	WriteProblem(w, problem)
 }

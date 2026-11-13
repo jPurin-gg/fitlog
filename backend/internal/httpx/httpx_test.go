@@ -59,6 +59,24 @@ func TestRespondUsesProblemDetailsForServiceErrors(t *testing.T) {
 	}
 }
 
+func TestRespondWritesProblemExtensionsAtTopLevel(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	httpRequest := httptest.NewRequest(http.MethodPost, "/test", nil)
+	err := apperr.Conflict("重複しています。").
+		WithExtension("existing", map[string]string{"id": "bench"}).
+		WithExtension("code", "OVERRIDE")
+	Respond(recorder, httpRequest, http.StatusCreated, struct{}{}, err)
+
+	var body map[string]any
+	if decodeErr := json.Unmarshal(recorder.Body.Bytes(), &body); decodeErr != nil {
+		t.Fatalf("decode problem: %v; body = %q", decodeErr, recorder.Body.String())
+	}
+	existing, _ := body["existing"].(map[string]any)
+	if recorder.Code != http.StatusConflict || body["code"] != "CONFLICT" || body["status"] != float64(http.StatusConflict) || existing["id"] != "bench" {
+		t.Fatalf("response = %d, %#v", recorder.Code, body)
+	}
+}
+
 func TestLogRequestsRecordsRouteAndResponseMetadata(t *testing.T) {
 	var output bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&output, nil))

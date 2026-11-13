@@ -1,27 +1,16 @@
 "use client"
 
 import React, { useState, useEffect } from 'react'
-import { Search, Filter, Dumbbell, Activity, Shield, Plus, Loader2 } from 'lucide-react'
-import { apiErrorMessage, apiFetch } from '@/lib/api'
+import { Search, Filter, Dumbbell, Activity, Shield, Plus } from 'lucide-react'
+import { apiFetch } from '@/lib/api'
+import { ExerciseCreateForm } from './components/ExerciseCreateForm'
+import { EQUIPMENT_OPTIONS, MUSCLE_OPTIONS } from './exerciseOptions'
 import type { Exercise } from './types'
 
 // 今回のマスターデータ（tmpkin_jp.jsonベース）の構造
-const MUSCLE_GROUPS = [
-  "すべて", "大胸筋", "背中中部", "広背筋", "下背部", "肩", "上腕二頭筋", "上腕三頭筋", 
-  "前腕", "腹筋", "大臀筋", "大腿四頭筋", "ハムストリングス", "ふくらはぎ", "首", "僧帽筋"
-]
+const MUSCLE_GROUPS = ["すべて", ...MUSCLE_OPTIONS]
 
-const EQUIPMENTS = [
-  "自重", "ダンベル", "バーベル", "マシン", "ケーブル", "バンド", "ケトルベル", "メディシンボール", "バランスボール", "その他"
-]
-
-const CATEGORY_OPTIONS = [
-  { value: "strength", label: "筋力トレーニング" },
-  { value: "cardio", label: "有酸素" },
-  { value: "stretching", label: "ストレッチ" },
-  { value: "plyometrics", label: "瞬発系" },
-  { value: "その他", label: "その他" },
-]
+const EQUIPMENTS = EQUIPMENT_OPTIONS
 
 const DIFFICULTY_OPTIONS = [
   { value: "すべて", label: "すべて" },
@@ -62,18 +51,7 @@ export default function ExercisesPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
-  const [isAdding, setIsAdding] = useState(false)
-  const [addError, setAddError] = useState('')
   const [reloadToken, setReloadToken] = useState(0)
-  const [newExercise, setNewExercise] = useState({
-    name: '',
-    primaryMuscle: '大胸筋',
-    secondaryMuscles: '',
-    equipment: 'その他',
-    category: 'strength',
-    level: '初級',
-    instructions: '',
-  })
 
   const toggleEquipment = (eq: string) => {
     if (selectedEquipments.includes(eq)) {
@@ -117,62 +95,19 @@ export default function ExercisesPage() {
     }
   }, [selectedExercise])
 
-  const resetAddForm = () => {
-    setNewExercise({
-      name: '',
-      primaryMuscle: '大胸筋',
-      secondaryMuscles: '',
-      equipment: 'その他',
-      category: 'strength',
-      level: '初級',
-      instructions: '',
-    })
-    setAddError('')
+  const closeAddModal = () => setShowAddModal(false)
+
+  const handleCreated = (created: Exercise) => {
+    setExercises(prev => [created, ...prev])
+    setSelectedExercise(created)
+    setReloadToken(prev => prev + 1)
+    closeAddModal()
   }
 
-  const closeAddModal = () => {
-    setShowAddModal(false)
-    resetAddForm()
-  }
-
-  const addExercise = async () => {
-    if (!newExercise.name.trim()) {
-      setAddError('種目名を入力してください。')
-      return
-    }
-    setIsAdding(true)
-    setAddError('')
-    try {
-      const secondaryMuscles = newExercise.secondaryMuscles
-        .split(',')
-        .map(v => v.trim())
-        .filter(Boolean)
-      const instructions = newExercise.instructions
-        .split('\n')
-        .map(v => v.trim())
-        .filter(Boolean)
-      const created = await apiFetch<Exercise>('/api/exercises', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: newExercise.name.trim(),
-          category: newExercise.category,
-          equipment: newExercise.equipment,
-          level: newExercise.level,
-          primary_muscles: newExercise.primaryMuscle ? [newExercise.primaryMuscle] : [],
-          secondary_muscles: secondaryMuscles,
-          instructions,
-        })
-      })
-      setExercises(prev => [created, ...prev])
-      setSelectedExercise(created)
-      setReloadToken(prev => prev + 1)
-      closeAddModal()
-    } catch (e) {
-      console.error(e)
-      setAddError(apiErrorMessage(e, '通信エラーが発生しました。'))
-    } finally {
-      setIsAdding(false)
-    }
+  // 同名の種目が既にあるときは新しく作らず、既存の種目の詳細を開く
+  const handleSelectExisting = (existing: Exercise) => {
+    setSelectedExercise(existing)
+    closeAddModal()
   }
 
   return (
@@ -445,106 +380,14 @@ export default function ExercisesPage() {
               </button>
             </div>
 
-            <div className="p-6 space-y-5">
-              <div className="space-y-2">
-                <label className="text-xs font-black text-white/40">種目名 <span className="text-red-400">*</span></label>
-                <input
-                  type="text"
-                  value={newExercise.name}
-                  onChange={(e) => setNewExercise({ ...newExercise, name: e.target.value })}
-                  placeholder="例: インクラインダンベルプレス"
-                  className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-white/40">メイン部位</label>
-                  <select
-                    value={newExercise.primaryMuscle}
-                    onChange={(e) => setNewExercise({ ...newExercise, primaryMuscle: e.target.value })}
-                    className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
-                  >
-                    {MUSCLE_GROUPS.filter(m => m !== 'すべて').map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-white/40">器具</label>
-                  <select
-                    value={newExercise.equipment}
-                    onChange={(e) => setNewExercise({ ...newExercise, equipment: e.target.value })}
-                    className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
-                  >
-                    {EQUIPMENTS.map(eq => <option key={eq} value={eq}>{eq}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-white/40">分類</label>
-                  <select
-                    value={newExercise.category}
-                    onChange={(e) => setNewExercise({ ...newExercise, category: e.target.value })}
-                    className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
-                  >
-                    {CATEGORY_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-white/40">難易度</label>
-                  <select
-                    value={newExercise.level}
-                    onChange={(e) => setNewExercise({ ...newExercise, level: e.target.value })}
-                    className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
-                  >
-                    {DIFFICULTY_OPTIONS.filter(option => option.value !== 'すべて').map(option => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-black text-white/40">サブ部位（任意・カンマ区切り）</label>
-                <input
-                  type="text"
-                  value={newExercise.secondaryMuscles}
-                  onChange={(e) => setNewExercise({ ...newExercise, secondaryMuscles: e.target.value })}
-                  placeholder="例: 肩, 上腕三頭筋"
-                  className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-black text-white/40">手順メモ（任意・1行ずつ）</label>
-                <textarea
-                  value={newExercise.instructions}
-                  onChange={(e) => setNewExercise({ ...newExercise, instructions: e.target.value })}
-                  placeholder={"例:\nベンチを30度くらいにする\n胸を張って肩をすくめない\n最後までフォーム優先"}
-                  className="w-full min-h-[130px] bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
-                />
-              </div>
-
-              {addError && (
-                <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
-                  {addError}
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                <button
-                  onClick={closeAddModal}
-                  className="py-4 bg-white/10 text-white font-bold rounded-2xl hover:bg-white/15 transition-all"
-                >
-                  キャンセル
-                </button>
-                <button
-                  onClick={addExercise}
-                  disabled={isAdding || !newExercise.name.trim()}
-                  className="py-4 bg-primary text-black font-black rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-2"
-                >
-                  {isAdding ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
-                  辞書に追加
-                </button>
-              </div>
+            <div className="p-6">
+              <ExerciseCreateForm
+                submitLabel="辞書に追加"
+                existingActionLabel="既存の種目を見る"
+                onCreated={handleCreated}
+                onSelectExisting={handleSelectExisting}
+                onCancel={closeAddModal}
+              />
             </div>
           </div>
         </div>

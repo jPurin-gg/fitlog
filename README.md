@@ -211,14 +211,14 @@ docker compose exec -T frontend npm run build
 docker compose exec -T frontend npm audit --omit=dev
 ```
 
-PostgreSQLの行ロックと冪等性、実HTTP経由の手動開始・記録・終了・履歴取得を確認する統合テストは、開発DBと分離した一時DBで実行します。月間プランなしでの記録、同時開始の重複防止、遅れたAI結果による上書き防止も対象です。AI通信先はテスト用のローカルサーバーに固定し、実際の外部AIは使いません。
+PostgreSQLの行ロックと冪等性、実HTTP経由の手動開始・記録・終了・履歴取得を確認する統合テストは、開発DBと分離した一時DBで実行します。月間プランなしでの記録、同時開始の重複防止、遅れたAI結果による上書き防止、同名種目の同時作成防止も対象です。AI通信先はテスト用のローカルサーバーに固定し、実際の外部AIは使いません。
 
 ```sh
 docker compose -f compose.test.yml run --rm --build backend-test
 docker compose -f compose.test.yml down
 ```
 
-Goをホストで実行する場合は、`docker compose -f compose.test.yml up -d --wait db` の後、`backend` で `go test -race -tags=integration -count=1 ./internal/app ./internal/workout/postgres` を実行できます。既定では `127.0.0.1:55432` の検証DBを使い、テストごとに作成したスキーマだけを後片付けします。
+Goをホストで実行する場合は、`docker compose -f compose.test.yml up -d --wait db` の後、`backend` で `go test -race -tags=integration -count=1 ./internal/app ./internal/workout/postgres ./internal/exercise/postgres` を実行できます。既定では `127.0.0.1:55432` の検証DBを使い、テストごとに作成したスキーマだけを後片付けします。
 
 ブラウザE2EはバックエンドAPIをモックし、AI OFFでの手動開始・複数セット・種目変更・終了、AI ONでの障害時の継続、月間案内の非表示・再訪・手動表示を確認します。初回だけChromiumを準備してください。既にインストール済みのChromeを使う場合は `PLAYWRIGHT_CHANNEL=chrome` を指定できます。
 
