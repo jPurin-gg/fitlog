@@ -25,6 +25,7 @@ import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
 import { displayPlanText, formatPlanMonth } from "@/lib/fitlog";
 import { useMonthlyPromptDismissal } from "./useMonthlyPromptDismissal";
+import { DAILY_PLAN_NOTE, DEFAULT_MOTIVATION, FREQUENCY_OPTIONS, frequencyOptionFor, restDaysFor } from "./monthlyPlanForm";
 
 const WEEKDAY_OPTIONS = [
   { value: 0, label: "日" },
@@ -61,6 +62,10 @@ export default function DashboardPage() {
   const [monthlyLoad, setMonthlyLoad] = React.useState({ scope: "", missing: false });
   const promptHandledRef = React.useRef("");
   const { ready: dismissalReady, dismissed, dismiss } = useMonthlyPromptDismissal(user.id, currentMonth);
+
+  // 当月プランの有無が確定するまでは、生成前に上書き確認を挟む。
+  const monthlyLoaded = monthlyLoad.scope === promptScope;
+  const monthlyMissing = monthlyLoaded && monthlyLoad.missing && !monthlyPlan;
 
   const closeMonthlyModal = () => {
     promptHandledRef.current = promptScope;
@@ -153,8 +158,10 @@ export default function DashboardPage() {
       <AnimatePresence>
         {showMonthlyModal && (
           <MonthlyPlanModal
-            key={promptScope}
+            key={`${promptScope}:${monthlyLoaded ? "loaded" : "loading"}`}
             month={currentMonth}
+            currentPlan={monthlyPlan}
+            confirmOverwrite={!monthlyMissing}
             onClose={closeMonthlyModal}
             onDismissMonth={() => { dismiss(); closeMonthlyModal(); }}
             onPlanGenerated={(plan: any) => {
@@ -539,18 +546,89 @@ function EquipmentPicker({ label, selected, onToggle, activeClassName }: any) {
 }
 
 
-export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, month = formatPlanMonth(new Date()) }: any) {
+function CurrentPlanSummary({ plan }: { plan: any }) {
+  const routine: any[] = Array.isArray(plan.weekly_routine) ? plan.weekly_routine : [];
+  const recommendedDays: number[] = Array.isArray(plan.recommended_days) ? plan.recommended_days : [];
+  const restDays = weekdayLabels(plan.rest_days);
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-xl font-bold tracking-tight mb-3">{displayPlanText(plan.plan_name)}</h3>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+          <dt className="text-white/40">頻度</dt>
+          <dd className="text-white/80">{plan.frequency || "未設定"}</dd>
+          <dt className="text-white/40">休息日</dt>
+          <dd className="text-white/80">{restDays || "指定なし"}</dd>
+        </dl>
+      </div>
+
+      <section aria-label="週の構成" className="space-y-2">
+        <h4 className="text-xs font-black tracking-widest text-white/40">週の構成</h4>
+        {routine.length > 0 ? (
+          <ul className="space-y-2">
+            {routine.map((day: any, index: number) => {
+              const weekday = WEEKDAY_OPTIONS.find(option => option.value === recommendedDays[index]);
+              const exercises: string[] = Array.isArray(day?.example_exercises) ? day.example_exercises : [];
+              return (
+                <li key={index} className="rounded-xl border border-white/5 bg-black/30 p-3">
+                  <div className="flex flex-wrap items-baseline gap-2 mb-1">
+                    {weekday && <span className="text-[10px] font-black text-primary bg-primary/10 px-2 py-0.5 rounded-md">{weekday.label}曜</span>}
+                    <span className="text-[10px] text-white/40">{displayPlanText(day?.day_name)}</span>
+                    <span className="font-bold text-sm">{displayPlanText(day?.target)}</span>
+                  </div>
+                  {exercises.length > 0 && (
+                    <p className="text-xs text-white/60">{exercises.join("・")}</p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="text-sm text-white/40">週の構成は登録されていません。</p>
+        )}
+      </section>
+
+      <section aria-label="説明" className="space-y-1">
+        <h4 className="text-xs font-black tracking-widest text-white/40">説明</h4>
+        <p className="text-sm text-white/80 leading-relaxed whitespace-pre-line">{plan.description || "説明は登録されていません。"}</p>
+      </section>
+
+      <section aria-label="根拠" className="space-y-1">
+        <h4 className="text-xs font-black tracking-widest text-white/40">根拠</h4>
+        <p className="text-sm text-white/80 leading-relaxed whitespace-pre-line">{plan.rationale || "根拠は登録されていません。"}</p>
+      </section>
+    </div>
+  );
+}
+
+type MonthlyPlanModalProps = {
+  onClose: () => void;
+  onPlanGenerated: (plan: any) => void;
+  onDismissMonth?: () => void;
+  month?: string;
+  // 保存済みの当月プラン。あれば「現行プランの確認」から開き、作り直しの初期値に使う。
+  currentPlan?: any;
+  // 生成前に上書き確認を挟むか。省略時は currentPlan の有無で決める。
+  // 当月プランの有無がまだ分からない場合も、呼び出し側は true を渡す。
+  confirmOverwrite?: boolean;
+};
+
+export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, month = formatPlanMonth(new Date()), currentPlan = null, confirmOverwrite }: MonthlyPlanModalProps) {
   useBodyScrollLock();
   const { enabled: aiEnabled, isEnabled } = useAISettings();
+  const needsConfirm = confirmOverwrite ?? Boolean(currentPlan);
 
-  const [motivation, setMotivation] = React.useState("健康維持");
-  const [frequency, setFrequency] = React.useState("週3-4回");
-  const [restDays, setRestDays] = React.useState<number[]>([]);
+  const [view, setView] = React.useState<"current" | "form">(currentPlan ? "current" : "form");
+  const [confirming, setConfirming] = React.useState(false);
+  const [motivation, setMotivation] = React.useState(DEFAULT_MOTIVATION);
+  const [frequency, setFrequency] = React.useState(() => frequencyOptionFor(currentPlan));
+  const [restDays, setRestDays] = React.useState<number[]>(() => restDaysFor(currentPlan));
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
   const generateInFlightRef = React.useRef(false);
   const generateAbortRef = React.useRef<AbortController | null>(null);
   const generateRequestRef = React.useRef(0);
+  const cancelConfirmRef = React.useRef<HTMLButtonElement | null>(null);
   const canGenerate = restDays.length < 7;
 
   React.useEffect(() => () => generateAbortRef.current?.abort(), []);
@@ -562,6 +640,21 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, mon
     setLoading(false);
     setError("");
   }, [aiEnabled]);
+  React.useEffect(() => {
+    if (confirming) cancelConfirmRef.current?.focus();
+  }, [confirming]);
+
+  const startRegenerate = () => {
+    setFrequency(frequencyOptionFor(currentPlan));
+    setRestDays(restDaysFor(currentPlan));
+    setConfirming(false);
+    setView("form");
+  };
+
+  const backToCurrent = () => {
+    setConfirming(false);
+    setView("current");
+  };
 
   const toggleRestDay = (day: number) => {
     setRestDays(prev => (
@@ -602,17 +695,28 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, mon
     }
   };
 
+  const requestGenerate = () => {
+    if (loading || !canGenerate || !aiEnabled) return;
+    if (needsConfirm) {
+      setConfirming(true);
+      return;
+    }
+    generatePlan();
+  };
+
+  const confirmOverwriteAndGenerate = () => {
+    setConfirming(false);
+    generatePlan();
+  };
+
   const motivationOptions = [
     { id: "健康維持", label: "健康維持 / 気軽に", desc: "無理なく続けたい" },
     { id: "筋肉を大きく", label: "筋肉を大きく", desc: "ボディメイク重視" },
     { id: "本気", label: "本気で追い込む", desc: "限界突破したい" }
   ];
 
-  const frequencyOptions = [
-    { id: "週1-2回", label: "週1〜2回" },
-    { id: "週3-4回", label: "週3〜4回" },
-    { id: "週5-6回", label: "週5〜6回" }
-  ];
+  const frequencyOptions = FREQUENCY_OPTIONS;
+  const regenerating = Boolean(currentPlan);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md overflow-hidden overscroll-none">
@@ -633,23 +737,52 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, mon
           <div className="w-16 h-16 bg-primary/20 rounded-2xl flex items-center justify-center mb-6">
             <Calendar className="w-8 h-8 text-primary" />
           </div>
-          <h2 className="text-2xl font-bold mb-2 pr-8">今月の月間プラン</h2>
+          {view === "current" && currentPlan ? (
+            <>
+              <h2 className="text-2xl font-bold mb-2 pr-8">今月の月間プラン</h2>
+              <p className="text-white/60 text-sm mb-6 leading-relaxed">
+                保存されている今月のプランです。内容を変えたいときは作り直せます。
+              </p>
+              <CurrentPlanSummary plan={currentPlan} />
+              <p className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4 text-xs text-white/60 leading-relaxed">
+                作り直すと、このプランは新しいプランで置き換わります。{DAILY_PLAN_NOTE}
+              </p>
+              <button
+                onClick={startRegenerate}
+                className="mt-6 w-full py-4 bg-primary text-black font-black rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+              >
+                <RefreshCw className="w-5 h-5" />
+                作り直す
+              </button>
+            </>
+          ) : (
+          <>
+          <h2 className="text-2xl font-bold mb-2 pr-8">{regenerating ? "月間プランを作り直す" : "今月の月間プラン"}</h2>
           <p className="text-white/60 text-sm mb-6 leading-relaxed">
-            今月の目標やペースに合わせて、AIで月間プランを作成できます。
+            {regenerating
+              ? `条件を選んでAIで作り直します。現在のプラン「${displayPlanText(currentPlan.plan_name)}」は、作り直すと置き換わります。`
+              : "今月の目標やペースに合わせて、AIで月間プランを作成できます。"}
           </p>
           <div className="mb-6 space-y-3">
+            {regenerating && (
+              <button onClick={backToCurrent} className="w-full rounded-2xl border border-white/20 px-4 py-3 text-sm font-bold text-white/70 hover:bg-white/10">
+                現在のプランに戻る
+              </button>
+            )}
             <AIToggle />
             {!aiEnabled && <p className="text-sm text-white/60">AIはOFFです。プランを作成するときはONにしてください。</p>}
-            <Link href="/workout" onClick={onClose} className="block rounded-2xl bg-white/10 px-4 py-3 text-center font-bold hover:bg-white/15">
-              プランなしで記録を始める
-            </Link>
-            {onDismissMonth && (
+            {!regenerating && (
+              <Link href="/workout" onClick={onClose} className="block rounded-2xl bg-white/10 px-4 py-3 text-center font-bold hover:bg-white/15">
+                プランなしで記録を始める
+              </Link>
+            )}
+            {!regenerating && onDismissMonth && (
               <button onClick={onDismissMonth} className="w-full rounded-2xl border border-white/20 px-4 py-3 text-sm text-white/70 hover:bg-white/10">
                 今月は次回以降表示しない
               </button>
             )}
           </div>
-          
+
           <div className="space-y-6 mb-8">
             <div className="space-y-3">
               <label className="text-xs font-black tracking-widest text-white/40 ml-1">今月のモチベーション</label>
@@ -658,6 +791,7 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, mon
                   <button
                     key={opt.id}
                     onClick={() => setMotivation(opt.id)}
+                    aria-pressed={motivation === opt.id}
                     className={`p-3 rounded-2xl border text-left transition-all ${
                       motivation === opt.id 
                         ? 'bg-primary/20 border-primary text-white shadow-[0_0_15px_rgba(255,255,255,0.1)]' 
@@ -678,6 +812,7 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, mon
                   <button
                     key={opt.id}
                     onClick={() => setFrequency(opt.id)}
+                    aria-pressed={frequency === opt.id}
                     className={`py-3 px-2 rounded-2xl border text-center font-bold text-sm transition-all ${
                       frequency === opt.id 
                         ? 'bg-primary/20 border-primary text-white' 
@@ -697,6 +832,7 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, mon
                   <button
                     key={day.value}
                     onClick={() => toggleRestDay(day.value)}
+                    aria-pressed={restDays.includes(day.value)}
                     className={`aspect-square rounded-2xl border text-center font-black text-sm transition-all ${
                       restDays.includes(day.value)
                         ? 'bg-secondary/20 border-secondary text-secondary'
@@ -724,25 +860,57 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, mon
             </div>
           )}
 
-          <button 
-            onClick={generatePlan}
+          {confirming ? (
+            <div role="alertdialog" aria-label="上書きの確認" aria-describedby="monthly-overwrite-detail" className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5 space-y-4">
+              <h3 className="font-bold text-red-100">今月のプランを上書きしますか？</h3>
+              <div id="monthly-overwrite-detail" className="space-y-2 text-sm text-white/80 leading-relaxed">
+                <p>
+                  {currentPlan
+                    ? `現在のプラン「${displayPlanText(currentPlan.plan_name)}」は新しいプランで置き換わり、元に戻せません。ホームで差し替えた種目も新しいプランの内容になります。`
+                    : "今月のプランがすでにある場合は、新しいプランで置き換わり、元に戻せません。"}
+                </p>
+                <p>{DAILY_PLAN_NOTE}</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  ref={cancelConfirmRef}
+                  onClick={() => setConfirming(false)}
+                  className="py-3 bg-white/10 text-white font-bold rounded-2xl hover:bg-white/15 transition-all"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={confirmOverwriteAndGenerate}
+                  disabled={loading || !canGenerate || !aiEnabled}
+                  className="py-3 bg-red-400 text-black font-black rounded-2xl hover:bg-red-300 transition-all disabled:opacity-50 disabled:pointer-events-none"
+                >
+                  上書きして作り直す
+                </button>
+              </div>
+            </div>
+          ) : (
+          <button
+            onClick={requestGenerate}
             disabled={loading || !canGenerate || !aiEnabled}
             className="group relative w-full py-5 mt-2 bg-primary text-black font-black rounded-2xl shadow-[0_0_30px_rgba(255,170,0,0.5)] hover:shadow-[0_0_50px_rgba(255,170,0,0.7)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 disabled:opacity-50 disabled:pointer-events-none tracking-widest overflow-hidden"
           >
             {/* Shimmer effect inside button */}
             <div className="absolute inset-0 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/30 to-transparent skew-x-12" />
-            
+
             <div className="relative z-10 flex flex-col items-center justify-center gap-1">
               {loading ? (
                 <Loader2 className="w-7 h-7 animate-spin" />
               ) : (
                 <div className="flex items-center gap-2">
-                  <span className="text-xl">決定してプランを作成</span>
+                  <span className="text-xl">{regenerating ? "この条件で作り直す" : "決定してプランを作成"}</span>
                   <Sparkles className="w-6 h-6" />
                 </div>
               )}
             </div>
           </button>
+          )}
+          </>
+          )}
         </div>
       </motion.div>
     </div>

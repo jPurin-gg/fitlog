@@ -109,3 +109,40 @@ it("プランの読み込み失敗を未作成と誤認して案内しない", a
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "プランなしで記録を始める" })).toHaveAttribute("href", "/workout");
 });
+
+it("ホームから現行プランの説明・根拠を確認でき、作り直しはキャンセルすれば何も変えない", async () => {
+  const plan = {
+    id: 3, plan_month: "2026-10", plan_name: "今のプラン", frequency: "週1-2回",
+    description: "全身を週2回鍛えます。", rationale: "回復を優先します。",
+    rest_days: [3], recommended_days: [4],
+    weekly_routine: [{ day_name: "1日目", target: "全身", example_exercises: ["スクワット"], exercise_ids: ["squat"] }],
+  };
+  let generateCalls = 0;
+  server.use(
+    http.get("http://localhost:3000/api/monthly-plans/:month", () => HttpResponse.json(plan)),
+    http.post("http://localhost:3000/api/monthly-plans/:month/generate", () => {
+      generateCalls++;
+      return HttpResponse.json({ ...plan, plan_name: "別のプラン" });
+    }),
+  );
+  show();
+  // 2026-10-01 は木曜なので、今日のメニューに現行プランが出る。
+  await screen.findByText("全身");
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "月間プランを作成／見直す" }));
+  const dialog = await screen.findByRole("dialog", { name: "月間プラン" });
+  expect(within(dialog).getByRole("region", { name: "説明" })).toHaveTextContent("全身を週2回鍛えます。");
+  expect(within(dialog).getByRole("region", { name: "根拠" })).toHaveTextContent("回復を優先します。");
+  expect(within(dialog).getByRole("region", { name: "週の構成" })).toHaveTextContent("木曜");
+
+  await user.click(within(dialog).getByRole("button", { name: "作り直す" }));
+  expect(within(dialog).getByRole("button", { name: "週1〜2回" })).toHaveAttribute("aria-pressed", "true");
+  expect(within(dialog).getByRole("button", { name: "水" })).toHaveAttribute("aria-pressed", "true");
+  await user.click(within(dialog).getByRole("switch"));
+  await user.click(within(dialog).getByRole("button", { name: "この条件で作り直す" }));
+  await user.click(within(dialog).getByRole("button", { name: "キャンセル" }));
+  await user.click(within(dialog).getByRole("button", { name: "閉じる" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(generateCalls).toBe(0);
+  expect(screen.getByText("全身")).toBeInTheDocument();
+});
