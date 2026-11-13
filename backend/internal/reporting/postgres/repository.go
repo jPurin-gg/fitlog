@@ -53,6 +53,20 @@ func (r *Repository) SetCounts(ctx context.Context, userID int, start, end time.
 	return result, rows.Err()
 }
 
+func (r *Repository) WeekProgress(ctx context.Context, userID int, start, end time.Time) (int, int, error) {
+	var workoutDays, plannedDays int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(DISTINCT (ws.created_at AT TIME ZONE $4)::date)::int
+			 FROM workout_sets ws JOIN workouts w ON w.id = ws.workout_id
+			 WHERE w.user_id = $1 AND ws.created_at >= $2 AND ws.created_at < $3),
+			(SELECT COUNT(DISTINCT plan_date)::int
+			 FROM workout_plans
+			 WHERE user_id = $1 AND plan_date >= $5::date AND plan_date < $6::date)
+	`, userID, start, end, start.Location().String(), start.Format("2006-01-02"), end.Format("2006-01-02")).Scan(&workoutDays, &plannedDays)
+	return workoutDays, plannedDays, err
+}
+
 func (r *Repository) RecentWorkouts(ctx context.Context, userID int, limit int) ([]reporting.WorkoutRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, started_at, ended_at, COALESCE(notes, '筋トレ')

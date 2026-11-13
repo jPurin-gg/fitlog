@@ -60,6 +60,19 @@ export interface WorkoutDetail {
   summary: WorkoutSummary;
 }
 
+/** セット保存APIの応答。is_pr は前日以前の最大重量を超えた場合だけ true。 */
+export interface RecordedSet {
+  id: number;
+  workout_id: number;
+  exercise_id: string;
+  set_order: number;
+  weight: number;
+  reps: number;
+  feeling: string;
+  is_pr: boolean;
+  created_at: string;
+}
+
 export interface SetInput {
   exercise_id: string;
   set_order: number;
