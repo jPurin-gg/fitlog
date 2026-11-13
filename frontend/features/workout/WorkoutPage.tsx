@@ -2,6 +2,7 @@
 
 import React from "react";
 import { AIToggle, useAISettings } from "@/components/AISettings";
+import { NumericInput } from "@/components/NumericInput";
 import { 
   Flame, 
   TrendingUp, 
@@ -73,6 +74,8 @@ export default function WorkoutPage() {
   const [targetSets, setTargetSets] = React.useState(3);
   const [editingTargetSets, setEditingTargetSets] = React.useState(false);
   const [tempTargetSets, setTempTargetSets] = React.useState(3);
+  const [savingTargetSets, setSavingTargetSets] = React.useState(false);
+  const [targetSetsError, setTargetSetsError] = React.useState<string | null>(null);
   const [finishedSummary, setFinishedSummary] = React.useState<WorkoutSummary | null>(null);
   const [finishedWorkoutID, setFinishedWorkoutID] = React.useState<number | null>(null);
   const [recordedSetID, setRecordedSetID] = React.useState<number | null>(null);
@@ -90,6 +93,12 @@ export default function WorkoutPage() {
   const summaryCommentAbortRef = React.useRef<AbortController | null>(null);
   const summaryCommentRequestRef = React.useRef(0);
   const nextSetByExerciseRef = React.useRef<Record<string, number>>({});
+  const targetSetsRequestRef = React.useRef(0);
+  const weightInputRef = React.useRef<HTMLInputElement>(null);
+  const repsInputRef = React.useRef<HTMLInputElement>(null);
+  const weightInputID = React.useId();
+  const repsInputID = React.useId();
+  const targetSetsEditorID = React.useId();
   const recordTransitionLocked = saveState === "saving" || saveRetryLocked;
 
   React.useEffect(() => () => {
@@ -132,13 +141,50 @@ export default function WorkoutPage() {
     fetchTargetSets();
   }, [currentExercise.id, workoutPlan]);
 
-  const saveTargetSets = async (value: number) => {
-    if (saveInFlightRef.current || saveRetryLocked || finishInFlightRef.current) return;
-    setTargetSets(value);
+  // 種目が変わったら編集中の目標セット数を閉じ、前の種目の保存結果は反映しない。
+  React.useEffect(() => {
+    targetSetsRequestRef.current += 1;
     setEditingTargetSets(false);
+    setSavingTargetSets(false);
+    setTargetSetsError(null);
+  }, [currentExercise.id]);
+
+  const toggleTargetSetsEditor = () => {
+    if (savingTargetSets) return;
+    setTargetSetsError(null);
+    if (editingTargetSets) {
+      setEditingTargetSets(false);
+      return;
+    }
+    setTempTargetSets(targetSets);
+    setEditingTargetSets(true);
+  };
+
+  const changeTempTargetSets = (delta: number) => {
+    setTargetSetsError(null);
+    setTempTargetSets(value => Math.min(20, Math.max(1, value + delta)));
+  };
+
+  // 増減は編集欄を開いたまま行い、確定したときだけ保存する。
+  const saveTargetSets = async () => {
+    if (savingTargetSets || saveInFlightRef.current || saveRetryLocked || finishInFlightRef.current) return;
+    const exerciseID = currentExercise.id;
+    const value = tempTargetSets;
+    const requestID = ++targetSetsRequestRef.current;
+    setSavingTargetSets(true);
+    setTargetSetsError(null);
     try {
-      await updateTargetSets(currentExercise.id, value);
-    } catch { /* 無視 */ }
+      await updateTargetSets(exerciseID, value);
+      if (targetSetsRequestRef.current !== requestID) return;
+      setTargetSets(value);
+      setEditingTargetSets(false);
+    } catch (e) {
+      if (targetSetsRequestRef.current !== requestID) return;
+      console.error(e);
+      setTargetSetsError(apiErrorMessage(e, "目標セット数を保存できませんでした。通信状態を確認して、もう一度確定してください。"));
+    } finally {
+      if (targetSetsRequestRef.current === requestID) setSavingTargetSets(false);
+    }
   };
 
   const resetSetFlow = () => {
@@ -325,6 +371,19 @@ export default function WorkoutPage() {
     } finally {
       saveInFlightRef.current = false;
     }
+  };
+
+  // 数値欄のEnterでは、もう一方が空ならそちらへ移り、両方入力済みなら保存する。
+  const submitSetFromKeyboard = () => {
+    if (!formData.weight) {
+      weightInputRef.current?.focus();
+      return;
+    }
+    if (!formData.reps) {
+      repsInputRef.current?.focus();
+      return;
+    }
+    void saveCurrentSet();
   };
 
   const retryRecommendation = () => {
@@ -627,7 +686,7 @@ export default function WorkoutPage() {
               <button
                 onClick={finishWorkout}
                 disabled={finishing || recordTransitionLocked}
-                className="px-4 py-2 bg-white/5 hover:bg-accent/20 border border-white/10 hover:border-accent/30 rounded-xl text-xs font-bold text-white/60 hover:text-accent transition-colors disabled:opacity-50"
+                className="min-h-11 min-w-11 px-4 py-2 bg-white/5 hover:bg-accent/20 border border-white/10 hover:border-accent/30 rounded-xl text-sm font-bold text-white/60 hover:text-accent transition-colors disabled:opacity-50"
               >
                 {finishing ? "終了中..." : "終了"}
               </button>
@@ -648,62 +707,114 @@ export default function WorkoutPage() {
           </div>
         )}
 
-        <section className="glass rounded-[32px] p-6 lg:p-8 border-primary/20 bg-primary/5 overflow-hidden relative shadow-2xl shadow-primary/5">
-          <div className="flex justify-between items-center mb-8 border-b border-white/5 pb-6">
-            <div>
-              <h2 className="text-2xl font-bold tracking-wider mb-2">{currentExercise.name}</h2>
-              <div className="flex gap-2">
+        <section className="glass rounded-[32px] p-4 sm:p-6 lg:p-8 border-primary/20 bg-primary/5 overflow-hidden relative shadow-2xl shadow-primary/5">
+          <div className="flex flex-wrap justify-between items-start gap-4 mb-6 border-b border-white/5 pb-6">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-2xl font-bold tracking-wider mb-3 break-words">{currentExercise.name}</h2>
+              <div className="flex flex-wrap gap-2">
                 <button 
+                  type="button"
                   onClick={() => setShowExerciseSelector(true)}
                   disabled={recordTransitionLocked || finishing}
-                  className="text-[10px] font-bold text-primary hover:text-primary/80 flex items-center gap-1 transition-colors bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg border border-primary/20 disabled:pointer-events-none disabled:opacity-40"
+                  className="min-h-11 text-xs font-bold text-primary hover:text-primary/80 flex items-center gap-1.5 transition-colors bg-primary/10 hover:bg-primary/20 px-3 py-2 rounded-xl border border-primary/20 disabled:pointer-events-none disabled:opacity-40"
                 >
-                  <Search className="w-3 h-3" /> 種目を検索して変更
+                  <Search className="w-4 h-4 flex-shrink-0" /> 種目を検索して変更
                 </button>
                 <button 
+                  type="button"
                   onClick={() => setShowAltModal(true)}
                   disabled={recordTransitionLocked || finishing}
-                  className="text-[10px] font-bold text-white/50 hover:text-primary flex items-center gap-1 transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/10 disabled:pointer-events-none disabled:opacity-40"
+                  className="min-h-11 text-xs font-bold text-white/60 hover:text-primary flex items-center gap-1.5 transition-colors bg-white/5 hover:bg-white/10 px-3 py-2 rounded-xl border border-white/10 disabled:pointer-events-none disabled:opacity-40"
                 >
-                  <RefreshCw className="w-3 h-3" /> AIに代替種目を聞く
+                  <RefreshCw className="w-4 h-4 flex-shrink-0" /> AIに代替種目を聞く
                 </button>
               </div>
             </div>
-          </div>
-          {/* SET カウンター＆目標セット数 */}
-          <div className="flex flex-col items-end gap-1">
-            <div className="px-5 py-2 bg-primary/20 rounded-2xl text-sm font-black text-primary border border-primary/30">
-              セット {currentSet} / {targetSets}
-            </div>
-            {/* 進捗バー */}
-            <div className="flex gap-1">
-              {Array.from({ length: targetSets }).map((_, i) => (
-                <div
-                  key={i}
-                  className={`h-1.5 w-5 rounded-full transition-colors ${
-                    i < currentSet - 1 + (saveState === "saved" ? 1 : 0) ? 'bg-primary' : 'bg-white/10'
-                  }`}
-                />
-              ))}
-            </div>
-            {/* 目標セット数の編集 */}
-            {editingTargetSets ? (
-              <div className="flex items-center gap-1 mt-1">
-                <button onClick={() => saveTargetSets(Math.max(1, tempTargetSets - 1))} disabled={finishing || recordTransitionLocked} className="w-6 h-6 bg-white/10 rounded-lg text-white font-bold hover:bg-white/20 transition-colors flex items-center justify-center text-xs disabled:opacity-40">−</button>
-                <span className="text-xs text-white/70 w-10 text-center font-bold">{tempTargetSets} セット</span>
-                <button onClick={() => saveTargetSets(Math.min(20, tempTargetSets + 1))} disabled={finishing || recordTransitionLocked} className="w-6 h-6 bg-white/10 rounded-lg text-white font-bold hover:bg-white/20 transition-colors flex items-center justify-center text-xs disabled:opacity-40">＋</button>
-                <button onClick={() => setEditingTargetSets(false)} disabled={finishing || recordTransitionLocked} className="text-[10px] text-white/40 ml-1 hover:text-white/60 disabled:opacity-40">✕</button>
+            {/* SET カウンター＆目標セット数 */}
+            <div className="flex flex-col items-end gap-1">
+              <div className="px-5 py-2 bg-primary/20 rounded-2xl text-sm font-black text-primary border border-primary/30 whitespace-nowrap">
+                セット {currentSet} / {targetSets}
               </div>
-            ) : (
+              {/* 進捗バー */}
+              <div className="flex flex-wrap justify-end gap-1 max-w-[9rem]">
+                {Array.from({ length: targetSets }).map((_, i) => (
+                  <div
+                    key={i}
+                    className={`h-1.5 w-5 rounded-full transition-colors ${
+                      i < currentSet - 1 + (saveState === "saved" ? 1 : 0) ? 'bg-primary' : 'bg-white/10'
+                    }`}
+                  />
+                ))}
+              </div>
               <button
-                onClick={() => { setTempTargetSets(targetSets); setEditingTargetSets(true); }}
-                disabled={finishing || recordTransitionLocked}
-                className="text-[10px] text-white/30 hover:text-white/60 transition-colors mt-0.5 disabled:opacity-40"
+                type="button"
+                onClick={toggleTargetSetsEditor}
+                disabled={finishing || recordTransitionLocked || savingTargetSets}
+                aria-expanded={editingTargetSets}
+                aria-controls={targetSetsEditorID}
+                className="min-h-11 px-3 rounded-xl text-xs font-bold text-white/50 hover:text-white/80 hover:bg-white/5 transition-colors disabled:opacity-40"
               >
                 目標セット数を変更
               </button>
-            )}
+            </div>
           </div>
+
+          {/* 目標セット数の編集: 開いたまま増減し、確定で保存する */}
+          {editingTargetSets && (
+            <div
+              id={targetSetsEditorID}
+              role="group"
+              aria-label="目標セット数の編集"
+              className="mb-8 rounded-2xl border border-white/10 bg-black/30 p-4"
+            >
+              <div className="flex items-center justify-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => changeTempTargetSets(-1)}
+                  disabled={finishing || recordTransitionLocked || savingTargetSets || tempTargetSets <= 1}
+                  aria-label="目標セット数を減らす"
+                  className="h-11 w-11 bg-white/10 rounded-xl text-white text-xl font-bold hover:bg-white/20 transition-colors flex items-center justify-center disabled:opacity-40"
+                >
+                  −
+                </button>
+                <span aria-live="polite" className="min-w-[5rem] text-center text-lg font-black">
+                  {tempTargetSets} セット
+                </span>
+                <button
+                  type="button"
+                  onClick={() => changeTempTargetSets(1)}
+                  disabled={finishing || recordTransitionLocked || savingTargetSets || tempTargetSets >= 20}
+                  aria-label="目標セット数を増やす"
+                  className="h-11 w-11 bg-white/10 rounded-xl text-white text-xl font-bold hover:bg-white/20 transition-colors flex items-center justify-center disabled:opacity-40"
+                >
+                  ＋
+                </button>
+              </div>
+              {targetSetsError && (
+                <p role="alert" className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300">
+                  {targetSetsError}
+                </p>
+              )}
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={toggleTargetSetsEditor}
+                  disabled={savingTargetSets}
+                  className="min-h-11 rounded-xl border border-white/10 bg-white/5 text-sm font-bold text-white/70 hover:bg-white/10 hover:text-white transition-colors disabled:opacity-40"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void saveTargetSets()}
+                  disabled={finishing || recordTransitionLocked || savingTargetSets}
+                  className="min-h-11 rounded-xl bg-primary text-sm font-black text-black transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  {savingTargetSets ? <><Loader2 className="h-4 w-4 animate-spin" /> 保存中...</> : targetSetsError ? "もう一度確定" : "確定"}
+                </button>
+              </div>
+            </div>
+          )}
 
           {workoutPlan && (
             <div className="mb-8 bg-black/30 rounded-2xl border border-white/5 p-4">
@@ -747,22 +858,28 @@ export default function WorkoutPage() {
             <div className="space-y-6">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-white/40 ml-1">重量（kg）</label>
-                  <input 
-                    type="number" 
+                  <label htmlFor={weightInputID} className="text-[10px] font-black text-white/40 ml-1">重量（kg）</label>
+                  <NumericInput
+                    id={weightInputID}
+                    ref={weightInputRef}
+                    kind="decimal"
                     value={formData.weight}
-                    onChange={(e) => setFormData({...formData, weight: e.target.value})}
+                    onValueChange={weight => setFormData(prev => ({ ...prev, weight }))}
+                    onEnter={submitSetFromKeyboard}
                     disabled={recordTransitionLocked || saveState === "saved" || finishing}
                     className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-primary/50 text-2xl font-bold disabled:opacity-60"
                     placeholder="80"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-white/40 ml-1">回数</label>
-                  <input 
-                    type="number" 
+                  <label htmlFor={repsInputID} className="text-[10px] font-black text-white/40 ml-1">回数</label>
+                  <NumericInput
+                    id={repsInputID}
+                    ref={repsInputRef}
+                    kind="integer"
                     value={formData.reps}
-                    onChange={(e) => setFormData({...formData, reps: e.target.value})}
+                    onValueChange={reps => setFormData(prev => ({ ...prev, reps }))}
+                    onEnter={submitSetFromKeyboard}
                     disabled={recordTransitionLocked || saveState === "saved" || finishing}
                     className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-secondary/50 text-2xl font-bold disabled:opacity-60"
                     placeholder="10"
@@ -836,7 +953,7 @@ export default function WorkoutPage() {
                       <button
                         type="button"
                         onClick={retryRecommendation}
-                        className="mt-3 flex items-center gap-1.5 text-xs font-bold text-amber-200 underline transition-colors hover:text-amber-100"
+                        className="mt-2 min-h-11 flex items-center gap-1.5 text-xs font-bold text-amber-200 underline transition-colors hover:text-amber-100"
                       >
                         <RefreshCw className="h-3.5 w-3.5" /> AI提案だけ再試行
                       </button>

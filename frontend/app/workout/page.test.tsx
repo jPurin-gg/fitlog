@@ -97,8 +97,8 @@ describe("WorkoutPage record-first flow", () => {
 
     await user.click(screen.getByRole("button", { name: "AIを待たず次セットへ" }));
     expect(await screen.findByText("セット 2 / 3")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("80")).toHaveValue(60);
-    expect(screen.getByPlaceholderText("10")).toHaveValue(8);
+    expect(screen.getByPlaceholderText("80")).toHaveValue("60");
+    expect(screen.getByPlaceholderText("10")).toHaveValue("8");
 
     await act(async () => {
       recommendation.resolve(HttpResponse.json({
@@ -132,10 +132,10 @@ describe("WorkoutPage record-first flow", () => {
     await act(async () => { saved.resolve(HttpResponse.json({ id: 100 })); await saved.promise; });
     await screen.findByText(/セットは保存済みです/);
     expect(aiCalls).toBe(0);
-    expect(screen.getByPlaceholderText("80")).toHaveValue(60);
+    expect(screen.getByPlaceholderText("80")).toHaveValue("60");
     await user.click(screen.getByRole("button", { name: "同じ内容で次へ" }));
     expect(screen.getByText("セット 2 / 3")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("80")).toHaveValue(60);
+    expect(screen.getByPlaceholderText("80")).toHaveValue("60");
     await user.click(screen.getByRole("switch"));
     expect(requests).toBe(1);
     expect(aiCalls).toBe(0);
@@ -234,9 +234,9 @@ describe("WorkoutPage record-first flow", () => {
 
     await user.click(screen.getByRole("button", { name: "セットを保存" }));
     expect(await screen.findByText("セットを保存できませんでした")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("80")).toHaveValue(60);
+    expect(screen.getByPlaceholderText("80")).toHaveValue("60");
     expect(screen.getByPlaceholderText("80")).toBeDisabled();
-    expect(screen.getByPlaceholderText("10")).toHaveValue(8);
+    expect(screen.getByPlaceholderText("10")).toHaveValue("8");
     expect(screen.getByPlaceholderText("10")).toBeDisabled();
     expect(screen.getByRole("button", { name: "終了" })).toBeDisabled();
 
