@@ -11,11 +11,14 @@ import (
 
 	"github.com/jPurin-gg/myfitlog-backend/internal/ai"
 	"github.com/jPurin-gg/myfitlog-backend/internal/apperr"
+	"github.com/jPurin-gg/myfitlog-backend/internal/clock"
 )
+
+var testClock = clock.Fixed{Time: time.Date(2026, 11, 13, 0, 30, 0, 0, time.FixedZone("JST", 9*60*60))}
 
 func TestRecordSetRequiresIdempotencyKey(t *testing.T) {
 	repository := &stubRepository{}
-	service := NewService(repository, nil, nil, nil, 0)
+	service := NewService(repository, nil, nil, testClock, 0)
 	_, _, err := service.RecordSet(context.Background(), 1, 2, "short", SetInput{ExerciseID: "bench", SetOrder: 1, Weight: 80, Reps: 10})
 	appErr := apperr.As(err)
 	if appErr.Status != 400 || repository.recordCalls != 0 {
@@ -25,10 +28,46 @@ func TestRecordSetRequiresIdempotencyKey(t *testing.T) {
 
 func TestRecordSetPassesStableKeyToRepository(t *testing.T) {
 	repository := &stubRepository{recorded: Set{ID: 10, WorkoutID: 2, ExerciseID: "bench", SetOrder: 1, Weight: 80, Reps: 10}}
-	service := NewService(repository, nil, nil, nil, 0)
+	service := NewService(repository, nil, nil, testClock, 0)
 	result, replayed, err := service.RecordSet(context.Background(), 1, 2, "request_123", SetInput{ExerciseID: "bench", SetOrder: 1, Weight: 80, Reps: 10})
 	if err != nil || replayed || result.ID != 10 || repository.key != "request_123" {
 		t.Fatalf("RecordSet() = %#v, %v, %v; key = %q", result, replayed, err, repository.key)
+	}
+}
+
+func TestRecordSetUsesStartOfTodayAsPersonalRecordBaseline(t *testing.T) {
+	repository := &stubRepository{recorded: Set{ID: 10}}
+	service := NewService(repository, nil, nil, testClock, 0)
+	if _, _, err := service.RecordSet(context.Background(), 1, 2, "request_123", SetInput{ExerciseID: "bench", SetOrder: 1, Weight: 80, Reps: 10}); err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 11, 13, 0, 0, 0, 0, testClock.Time.Location())
+	if !repository.dayStart.Equal(want) || repository.dayStart.Location() != want.Location() {
+		t.Fatalf("RecordSet() dayStart = %v, want %v", repository.dayStart, want)
+	}
+}
+
+func TestIsPersonalRecord(t *testing.T) {
+	tests := []struct {
+		name     string
+		weight   float64
+		previous PreviousBest
+		want     bool
+	}{
+		{name: "first record of the exercise", weight: 60, previous: PreviousBest{}, want: false},
+		{name: "first record with zero weight", weight: 0, previous: PreviousBest{}, want: false},
+		{name: "heavier than earlier days", weight: 62.5, previous: PreviousBest{Weight: 60, Found: true}, want: true},
+		{name: "same as earlier best", weight: 60, previous: PreviousBest{Weight: 60, Found: true}, want: false},
+		{name: "lighter than earlier best", weight: 55, previous: PreviousBest{Weight: 60, Found: true}, want: false},
+		{name: "bodyweight after earlier zero-weight sets", weight: 0, previous: PreviousBest{Weight: 0, Found: true}, want: false},
+		{name: "added load after earlier zero-weight sets", weight: 5, previous: PreviousBest{Weight: 0, Found: true}, want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := IsPersonalRecord(test.weight, test.previous); got != test.want {
+				t.Fatalf("IsPersonalRecord(%v, %+v) = %v, want %v", test.weight, test.previous, got, test.want)
+			}
+		})
 	}
 }
 
@@ -65,7 +104,7 @@ func TestRecordSetValidatesInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repository := &stubRepository{}
-			service := NewService(repository, nil, nil, nil, 0)
+			service := NewService(repository, nil, nil, testClock, 0)
 			_, _, err := service.RecordSet(context.Background(), 1, tt.workoutID, tt.key, tt.input)
 			if tt.wantField != "" {
 				appErr := apperr.As(err)
@@ -97,7 +136,7 @@ func TestRecordSetMapsRepositoryErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repository := &stubRepository{recordErr: tt.err}
-			service := NewService(repository, nil, nil, nil, 0)
+			service := NewService(repository, nil, nil, testClock, 0)
 			_, _, err := service.RecordSet(context.Background(), 1, 2, "request_123", SetInput{ExerciseID: "bench", SetOrder: 1, Weight: 80, Reps: 10})
 			appErr := apperr.As(err)
 			if appErr == nil || appErr.Status != tt.wantStatus || appErr.Code != tt.wantCode || repository.recordCalls != 1 {
@@ -109,7 +148,7 @@ func TestRecordSetMapsRepositoryErrors(t *testing.T) {
 
 func TestRecordSetPropagatesReplayedFlag(t *testing.T) {
 	repository := &stubRepository{recorded: Set{ID: 10, WorkoutID: 2, ExerciseID: "bench", SetOrder: 1, Weight: 80, Reps: 10}, recordReplayed: true}
-	service := NewService(repository, nil, nil, nil, 0)
+	service := NewService(repository, nil, nil, testClock, 0)
 	result, replayed, err := service.RecordSet(context.Background(), 1, 2, "request_123", SetInput{ExerciseID: "bench", SetOrder: 1, Weight: 80, Reps: 10})
 	if err != nil || !replayed || result.ID != 10 {
 		t.Fatalf("RecordSet() = %#v, %v, %v", result, replayed, err)
@@ -409,6 +448,7 @@ func TestRecommendHonorsOptionalAITimeout(t *testing.T) {
 type stubRepository struct {
 	recordCalls         int
 	key                 string
+	dayStart            time.Time
 	input               SetInput
 	recorded            Set
 	recordReplayed      bool
@@ -427,10 +467,11 @@ type stubRepository struct {
 	summaryCommentInput string
 }
 
-func (r *stubRepository) RecordSet(_ context.Context, _, _ int, key string, input SetInput) (Set, bool, error) {
+func (r *stubRepository) RecordSet(_ context.Context, _, _ int, key string, input SetInput, dayStart time.Time) (Set, bool, error) {
 	r.recordCalls++
 	r.key = key
 	r.input = input
+	r.dayStart = dayStart
 	return r.recorded, r.recordReplayed, r.recordErr
 }
 

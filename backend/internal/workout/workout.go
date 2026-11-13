@@ -43,6 +43,21 @@ type Set struct {
 	CreatedAt  string  `json:"created_at"`
 }
 
+// PreviousBest is the heaviest weight recorded for an exercise before the
+// start of the day being recorded. Found is false when no earlier record exists.
+type PreviousBest struct {
+	Weight float64
+	Found  bool
+}
+
+// IsPersonalRecord reports whether weight is a personal record. A set is a
+// record only when the exercise was recorded on an earlier day and weight
+// exceeds that earlier maximum. The first record of an exercise is never a
+// record, and every set on the same day is compared with the same baseline.
+func IsPersonalRecord(weight float64, previous PreviousBest) bool {
+	return previous.Found && weight > previous.Weight
+}
+
 type Recommendation struct {
 	NextAction     string  `json:"next_action"`
 	Recommendation string  `json:"recommendation"`
@@ -135,7 +150,9 @@ type CalendarWorkoutInput struct {
 }
 
 type Repository interface {
-	RecordSet(ctx context.Context, userID, workoutID int, key string, input SetInput) (Set, bool, error)
+	// RecordSet compares the new set with sets created before dayStart to
+	// decide is_pr.
+	RecordSet(ctx context.Context, userID, workoutID int, key string, input SetInput, dayStart time.Time) (Set, bool, error)
 	RecommendationContext(ctx context.Context, userID, workoutID, setID int) (RecommendationContext, error)
 	Finish(ctx context.Context, userID, workoutID int) (Detail, error)
 	Detail(ctx context.Context, userID, workoutID int) (Detail, error)
@@ -192,7 +209,7 @@ func (s *Service) RecordSet(ctx context.Context, userID, workoutID int, key stri
 	if len(fields) > 0 {
 		return Set{}, false, apperr.Validation("セット記録の入力を確認してください。", fields)
 	}
-	set, replayed, err := s.repository.RecordSet(ctx, userID, workoutID, key, input)
+	set, replayed, err := s.repository.RecordSet(ctx, userID, workoutID, key, input, beginningOfDay(s.clock.Now()))
 	if errors.Is(err, ErrNotFound) {
 		return Set{}, false, apperr.NotFound("進行中のワークアウトまたは種目が見つかりません。")
 	}
@@ -444,6 +461,10 @@ func (s *Service) parseDate(value string) (time.Time, error) {
 		return time.Time{}, apperr.Validation("日付はYYYY-MM-DD形式で指定してください。", nil)
 	}
 	return date, nil
+}
+
+func beginningOfDay(value time.Time) time.Time {
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, value.Location())
 }
 
 func formatRecent(rows []HistorySet) string {

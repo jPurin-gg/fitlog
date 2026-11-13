@@ -44,7 +44,7 @@ func TestRecordSetConcurrentReplay(t *testing.T) {
 		go func() {
 			defer wait.Done()
 			<-start
-			set, _, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "concurrent_replay_key", input)
+			set, _, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "concurrent_replay_key", input, todayStart())
 			if err != nil {
 				errorsFound <- err
 				return
@@ -87,14 +87,14 @@ func TestRecordSetReplayStillWorksAfterFinish(t *testing.T) {
 	workoutID := fixture.createWorkout(t)
 	input := workout.SetInput{ExerciseID: fixture.exerciseID, SetOrder: 1, Weight: 30, Reps: 10}
 
-	created, replayed, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "finished_replay_key", input)
+	created, replayed, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "finished_replay_key", input, todayStart())
 	if err != nil || replayed {
 		t.Fatalf("first RecordSet() = (%+v, %v, %v), want created set", created, replayed, err)
 	}
 	if _, err := fixture.repository.Finish(context.Background(), fixture.userID, workoutID); err != nil {
 		t.Fatalf("Finish() error = %v", err)
 	}
-	replayedSet, replayed, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "finished_replay_key", input)
+	replayedSet, replayed, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "finished_replay_key", input, todayStart())
 	if err != nil || !replayed {
 		t.Fatalf("replayed RecordSet() = (%+v, %v, %v), want replay", replayedSet, replayed, err)
 	}
@@ -124,12 +124,12 @@ func TestRecordSetConflictOnDifferentPayload(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			workoutID := fixture.createWorkout(t)
-			created, replayed, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "conflict_key", recorded)
+			created, replayed, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "conflict_key", recorded, todayStart())
 			if err != nil || replayed {
 				t.Fatalf("first RecordSet() = (%#v, %v, %v), want created set", created, replayed, err)
 			}
 
-			conflicting, replayed, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "conflict_key", test.input)
+			conflicting, replayed, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "conflict_key", test.input, todayStart())
 			if !errors.Is(err, workout.ErrConflict) {
 				t.Fatalf("conflicting RecordSet() = (%#v, %v, %v), want ErrConflict", conflicting, replayed, err)
 			}
@@ -137,7 +137,7 @@ func TestRecordSetConflictOnDifferentPayload(t *testing.T) {
 				t.Fatalf("stored sets after conflict = %#v, want only %#v", sets, created)
 			}
 
-			replayedSet, replayed, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "conflict_key", recorded)
+			replayedSet, replayed, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "conflict_key", recorded, todayStart())
 			if err != nil || !replayed || replayedSet.ID != created.ID {
 				t.Fatalf("replayed RecordSet() = (%#v, %v, %v), want replay of set %d", replayedSet, replayed, err, created.ID)
 			}
@@ -163,7 +163,7 @@ func TestRecordSetConcurrentConflict(t *testing.T) {
 			defer wait.Done()
 			<-start
 			input := payloads[index%len(payloads)]
-			set, replayed, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "concurrent_conflict_key", input)
+			set, replayed, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "concurrent_conflict_key", input, todayStart())
 			outcomes <- recordOutcome{input: input, set: set, replayed: replayed, err: err}
 		}()
 	}
@@ -232,7 +232,7 @@ func TestRecordSetConflictOnUniqueViolation(t *testing.T) {
 
 			outcomes := make(chan recordOutcome, 1)
 			go func() {
-				set, replayed, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "unique_violation_key", test.input)
+				set, replayed, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "unique_violation_key", test.input, todayStart())
 				outcomes <- recordOutcome{input: test.input, set: set, replayed: replayed, err: err}
 			}()
 			deadline := time.Now().Add(10 * time.Second)
@@ -290,7 +290,7 @@ func TestRecordSetAndFinishSerialize(t *testing.T) {
 		go func() {
 			defer wait.Done()
 			<-start
-			_, _, recordErr = fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, fmt.Sprintf("finish_race_%08d", iteration), input)
+			_, _, recordErr = fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, fmt.Sprintf("finish_race_%08d", iteration), input, todayStart())
 		}()
 		go func() {
 			defer wait.Done()
@@ -448,7 +448,7 @@ func TestWorkoutRepositoryDoesNotExposeAnotherUsersWorkout(t *testing.T) {
 	fixture := newIntegrationFixture(t)
 	workoutID := fixture.createWorkout(t)
 	input := workout.SetInput{ExerciseID: fixture.exerciseID, SetOrder: 1, Weight: 40, Reps: 8}
-	created, _, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "owner_set_key", input)
+	created, _, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "owner_set_key", input, todayStart())
 	if err != nil {
 		t.Fatalf("owner RecordSet() error = %v", err)
 	}
@@ -461,7 +461,7 @@ func TestWorkoutRepositoryDoesNotExposeAnotherUsersWorkout(t *testing.T) {
 	if _, err := fixture.repository.Detail(context.Background(), otherUserID, workoutID); !errors.Is(err, workout.ErrNotFound) {
 		t.Fatalf("other user Detail() error = %v, want ErrNotFound", err)
 	}
-	if _, _, err := fixture.repository.RecordSet(context.Background(), otherUserID, workoutID, "other_user_key", input); !errors.Is(err, workout.ErrNotFound) {
+	if _, _, err := fixture.repository.RecordSet(context.Background(), otherUserID, workoutID, "other_user_key", input, todayStart()); !errors.Is(err, workout.ErrNotFound) {
 		t.Fatalf("other user RecordSet() error = %v, want ErrNotFound", err)
 	}
 	if _, err := fixture.repository.RecommendationContext(context.Background(), otherUserID, workoutID, created.ID); !errors.Is(err, workout.ErrNotFound) {
@@ -478,6 +478,90 @@ func TestWorkoutRepositoryDoesNotExposeAnotherUsersWorkout(t *testing.T) {
 	if err != nil || detail.Summary.TotalSets != 1 {
 		t.Fatalf("owner Detail() = (%+v, %v), want one unchanged set", detail, err)
 	}
+}
+
+func TestRecordSetPersonalRecordRequiresEarlierDay(t *testing.T) {
+	fixture := newIntegrationFixture(t)
+	workoutID := fixture.createWorkout(t)
+	record := func(key string, weight float64, order int) workout.Set {
+		t.Helper()
+		set, _, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, key, workout.SetInput{ExerciseID: fixture.exerciseID, SetOrder: order, Weight: weight, Reps: 5}, todayStart())
+		if err != nil {
+			t.Fatalf("RecordSet(%v) error = %v", weight, err)
+		}
+		return set
+	}
+
+	// 初めての種目は、その日に重くしていっても自己ベストにしない。
+	for index, weight := range []float64{40, 45} {
+		if set := record(fmt.Sprintf("first_day_%d", index), weight, index+1); set.IsPR {
+			t.Fatalf("first-day set %v is_pr = true, want false", weight)
+		}
+	}
+
+	earlierWorkoutID := fixture.createWorkout(t)
+	if _, err := fixture.db.Exec(`
+		INSERT INTO workout_sets (workout_id,exercise_id,weight,reps,set_order,is_pr,created_at)
+		VALUES ($1,$2,60,5,1,false,$3)
+	`, earlierWorkoutID, fixture.exerciseID, todayStart().Add(-12*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	// 基準は前日以前の最大（60kg）で、当日の重いセットでは基準を上げない。
+	tests := []struct {
+		weight float64
+		want   bool
+	}{{60, false}, {62.5, true}, {65, true}, {63, true}, {55, false}}
+	for index, test := range tests {
+		set := record(fmt.Sprintf("later_day_%d", index), test.weight, index+3)
+		if set.IsPR != test.want {
+			t.Fatalf("set %v is_pr = %v, want %v", test.weight, set.IsPR, test.want)
+		}
+	}
+
+	replayed, replayedFlag, err := fixture.repository.RecordSet(context.Background(), fixture.userID, workoutID, "later_day_1", workout.SetInput{ExerciseID: fixture.exerciseID, SetOrder: 4, Weight: 62.5, Reps: 5}, todayStart())
+	if err != nil || !replayedFlag || !replayed.IsPR {
+		t.Fatalf("replayed RecordSet() = (%+v, %v, %v), want stored PR", replayed, replayedFlag, err)
+	}
+}
+
+func TestSaveCalendarWorkoutPersonalRecordUsesEarlierDays(t *testing.T) {
+	fixture := newIntegrationFixture(t)
+	day1 := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
+	day2 := day1.AddDate(0, 0, 1)
+	save := func(date time.Time, weights ...float64) []workout.Set {
+		t.Helper()
+		input := workout.CalendarWorkoutInput{Title: "筋トレ"}
+		for index, weight := range weights {
+			input.Sets = append(input.Sets, workout.CalendarSet{ExerciseID: fixture.exerciseID, Weight: weight, Reps: 5, SetOrder: index + 1})
+		}
+		saved, err := fixture.repository.SaveCalendarWorkout(context.Background(), fixture.userID, date, input)
+		if err != nil {
+			t.Fatalf("SaveCalendarWorkout(%s) error = %v", date.Format("2006-01-02"), err)
+		}
+		return fixture.storedSets(t, saved.WorkoutID)
+	}
+	assertPR := func(sets []workout.Set, want ...bool) {
+		t.Helper()
+		if len(sets) != len(want) {
+			t.Fatalf("stored sets = %d, want %d", len(sets), len(want))
+		}
+		for index, set := range sets {
+			if set.IsPR != want[index] {
+				t.Fatalf("set %d (%vkg) is_pr = %v, want %v", index+1, set.Weight, set.IsPR, want[index])
+			}
+		}
+	}
+
+	assertPR(save(day1, 50, 55), false, false)
+	assertPR(save(day2, 55, 57.5, 56), false, true, true)
+	// 前日以前に記録がない日を直しても、後の日の記録は基準に入れない。
+	assertPR(save(day1, 50, 60), false, false)
+}
+
+func todayStart() time.Time {
+	now := time.Now()
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 }
 
 func newIntegrationFixture(t *testing.T) integrationFixture {

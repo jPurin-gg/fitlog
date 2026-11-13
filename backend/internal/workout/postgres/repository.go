@@ -16,7 +16,7 @@ type Repository struct{ db *sql.DB }
 
 func New(db *sql.DB) *Repository { return &Repository{db: db} }
 
-func (r *Repository) RecordSet(ctx context.Context, userID, workoutID int, key string, input workout.SetInput) (workout.Set, bool, error) {
+func (r *Repository) RecordSet(ctx context.Context, userID, workoutID int, key string, input workout.SetInput, dayStart time.Time) (workout.Set, bool, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return workout.Set{}, false, err
@@ -55,8 +55,8 @@ func (r *Repository) RecordSet(ctx context.Context, userID, workoutID int, key s
 	if !exerciseExists {
 		return workout.Set{}, false, workout.ErrNotFound
 	}
-	var previousMax float64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(max_weight,0) FROM user_exercise_stats WHERE user_id=$1 AND exercise_id=$2`, userID, input.ExerciseID).Scan(&previousMax); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	previousBest, err := previousBestBefore(ctx, tx, userID, input.ExerciseID, dayStart)
+	if err != nil {
 		return workout.Set{}, false, err
 	}
 
@@ -66,7 +66,7 @@ func (r *Repository) RecordSet(ctx context.Context, userID, workoutID int, key s
 		INSERT INTO workout_sets (workout_id,exercise_id,weight,reps,set_order,feeling,is_pr,idempotency_key)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		RETURNING id,workout_id,exercise_id,set_order,weight,reps,COALESCE(feeling,''),is_pr,created_at
-	`, workoutID, input.ExerciseID, input.Weight, input.Reps, input.SetOrder, input.Feeling, input.Weight > previousMax, key).Scan(
+	`, workoutID, input.ExerciseID, input.Weight, input.Reps, input.SetOrder, input.Feeling, workout.IsPersonalRecord(input.Weight, previousBest), key).Scan(
 		&result.ID, &result.WorkoutID, &result.ExerciseID, &result.SetOrder, &result.Weight, &result.Reps, &result.Feeling, &result.IsPR, &createdAt,
 	)
 	if err != nil {
@@ -324,16 +324,17 @@ func (r *Repository) SaveCalendarWorkout(ctx context.Context, userID int, date t
 	}
 	for index, set := range input.Sets {
 		impacted[set.ExerciseID] = true
-		var maxWeight float64
-		_ = tx.QueryRowContext(ctx, `
-			SELECT COALESCE(MAX(ws.weight),0) FROM workout_sets ws JOIN workouts w ON w.id=ws.workout_id
-			WHERE w.user_id=$1 AND ws.exercise_id=$2
-		`, userID, set.ExerciseID).Scan(&maxWeight)
+		// date is the start of the edited day, so sets saved in this loop never
+		// become part of the baseline for each other.
+		previousBest, err := previousBestBefore(ctx, tx, userID, set.ExerciseID, date)
+		if err != nil {
+			return workout.CalendarWorkout{}, err
+		}
 		createdAt := startedAt.Add(time.Duration(index) * time.Minute)
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO workout_sets (workout_id,exercise_id,weight,reps,set_order,feeling,is_pr,created_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-		`, workoutID, set.ExerciseID, set.Weight, set.Reps, set.SetOrder, set.Feeling, set.Weight > maxWeight, createdAt); err != nil {
+		`, workoutID, set.ExerciseID, set.Weight, set.Reps, set.SetOrder, set.Feeling, workout.IsPersonalRecord(set.Weight, previousBest), createdAt); err != nil {
 			return workout.CalendarWorkout{}, err
 		}
 	}
@@ -428,6 +429,21 @@ func findSetByKey(ctx context.Context, query queryer, userID, workoutID int, key
 	}
 	set.CreatedAt = createdAt.Format(time.RFC3339)
 	return set, true, nil
+}
+
+// previousBestBefore returns the user's heaviest set of the exercise created
+// before dayStart. Sets from dayStart onward (the same day) are excluded so
+// they share one baseline.
+func previousBestBefore(ctx context.Context, query queryer, userID int, exerciseID string, dayStart time.Time) (workout.PreviousBest, error) {
+	var maxWeight sql.NullFloat64
+	err := query.QueryRowContext(ctx, `
+		SELECT MAX(ws.weight) FROM workout_sets ws JOIN workouts w ON w.id=ws.workout_id
+		WHERE w.user_id=$1 AND ws.exercise_id=$2 AND ws.created_at < $3
+	`, userID, exerciseID, dayStart).Scan(&maxWeight)
+	if err != nil {
+		return workout.PreviousBest{}, err
+	}
+	return workout.PreviousBest{Weight: maxWeight.Float64, Found: maxWeight.Valid}, nil
 }
 
 func sameSet(existing workout.Set, input workout.SetInput) bool {
