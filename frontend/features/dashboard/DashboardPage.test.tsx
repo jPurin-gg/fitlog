@@ -7,7 +7,7 @@ import { setupServer } from "msw/node";
 import { AISettingsProvider } from "@/components/AISettings";
 import DashboardPage from "./DashboardPage";
 
-const auth = vi.hoisted(() => ({ user: { id: 1, nickname: "テスト" } }));
+const auth = vi.hoisted(() => ({ user: { id: 1, nickname: "テスト" }, isNewAccount: false }));
 vi.mock("@/components/AuthGate", () => ({ useAuth: () => auth, LogoutButton: () => null }));
 
 let monthlyCalls = 0;
@@ -24,6 +24,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-01T12:00:00Z"));
   auth.user.id = 1;
+  auth.isNewAccount = false;
   monthlyCalls = 0;
 });
 afterEach(() => { server.resetHandlers(); vi.useRealTimers(); vi.restoreAllMocks(); });
@@ -99,6 +100,18 @@ it("今月のプランがあるときは自動で案内しない", async () => {
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "月間プランを作成／見直す" }));
   await screen.findByRole("dialog");
+});
+
+it.each([
+  { isNewAccount: false, greeting: "おかえりなさい", other: "はじめまして" },
+  { isNewAccount: true, greeting: "はじめまして", other: "おかえりなさい" },
+])("作成直後のアカウントかどうかで挨拶を変える: $greeting", async ({ isNewAccount, greeting, other }) => {
+  auth.isNewAccount = isNewAccount;
+  show();
+  expect(await screen.findByText(greeting)).toBeInTheDocument();
+  expect(screen.queryByText(other)).not.toBeInTheDocument();
+  // 月間プランの確認が終わるまで待ち、テスト終了後に状態更新が残らないようにする。
+  await screen.findByRole("dialog", { name: "月間プラン" });
 });
 
 it("プランの読み込み失敗を未作成と誤認して案内しない", async () => {

@@ -48,7 +48,7 @@ function weekdayLabels(days?: number[]) {
 }
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, isNewAccount } = useAuth();
   const [showMonthlyModal, setShowMonthlyModal] = React.useState(false);
   const [showPreferencesModal, setShowPreferencesModal] = React.useState(false);
   const [monthlyPlan, setMonthlyPlan] = React.useState<any>(null);
@@ -204,7 +204,7 @@ export default function DashboardPage() {
         <header className="flex flex-col gap-5 sm:flex-row sm:justify-between sm:items-center mb-12">
           <div className="min-w-0">
             <h1 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight mb-1">
-              おかえりなさい
+              {isNewAccount ? "はじめまして" : "おかえりなさい"}
               <span className="block text-gradient">{user.nickname}さん</span>
             </h1>
             <p className="text-white/50">今日のコンディションに合わせて進めましょう。</p>
