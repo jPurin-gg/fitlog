@@ -32,8 +32,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
+      {/* 下部ナビ用の余白は BottomNav のスペーサーだけで持つ。各ページのラッパーは flex-1 で
+          残りの高さを埋め、内容が1画面に収まるときは縦スクロールが出ないようにする。 */}
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased pb-24 relative`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased relative flex min-h-dvh flex-col`}
       >
         <AuthGate>
           {children}
