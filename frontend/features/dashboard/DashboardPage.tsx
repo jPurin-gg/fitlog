@@ -22,7 +22,7 @@ import { AlternativeCoachModal } from "@/features/exercises/components/Alternati
 import { LogoutButton, useAuth } from "@/components/AuthGate";
 import { AIToggle, useAISettings } from "@/components/AISettings";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
-import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
+import { ApiError, apiErrorMessage, apiFetch, apiTimeouts } from "@/lib/api";
 import { displayPlanText, formatPlanMonth } from "@/lib/fitlog";
 import { useMonthlyPromptDismissal } from "./useMonthlyPromptDismissal";
 
@@ -585,6 +585,7 @@ export function MonthlyPlanModal({ onClose, onPlanGenerated, onDismissMonth, mon
       const data = await apiFetch<any>(`/api/monthly-plans/${month}/generate`, {
         method: 'POST',
         signal: controller.signal,
+        timeoutMs: apiTimeouts.aiLongMs,
         body: JSON.stringify({
           motivation,
           frequency,

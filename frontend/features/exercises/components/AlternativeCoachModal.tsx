@@ -6,7 +6,7 @@ import { AIToggle, useAISettings } from "@/components/AISettings";
 import { motion } from "framer-motion";
 import { Loader2, X, MessageSquare, BrainCircuit, ArrowRight, AlertCircle } from "lucide-react";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
-import { apiErrorMessage, apiFetch } from "@/lib/api";
+import { apiErrorMessage, apiFetch, apiTimeouts } from "@/lib/api";
 
 export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onReplace }: any) {
   const { enabled: aiEnabled, isEnabled } = useAISettings();
@@ -52,6 +52,7 @@ export function AlternativeCoachModal({ exerciseId, exerciseName, onClose, onRep
       const data = await apiFetch<any>(`/api/exercises/${encodeURIComponent(exerciseId)}/alternatives`, {
         method: 'POST',
         signal: controller.signal,
+        timeoutMs: apiTimeouts.aiLongMs,
         body: JSON.stringify({ reason })
       });
       if (current()) setResult(data);

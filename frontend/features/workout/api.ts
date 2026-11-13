@@ -1,4 +1,4 @@
-import { apiFetch } from "@/lib/api";
+import { apiFetch, apiTimeouts } from "@/lib/api";
 import type { SetInput, SetRecommendation, WorkoutDetail, WorkoutPlanSession, WorkoutSummary } from "./types";
 
 export function getTargetSets(exerciseID: string) {
@@ -17,6 +17,8 @@ export function startWorkoutPlan(date: string, input: { use_ai: boolean; exercis
     method: "POST",
     body: JSON.stringify(input),
     signal,
+    // AI調整を頼むときだけ、バックエンドがAIを待つ時間のぶん長く待つ。
+    timeoutMs: input.use_ai ? apiTimeouts.aiOptionalMs : apiTimeouts.standardMs,
   });
 }
 
@@ -24,9 +26,11 @@ export function getSetRecommendation(workoutID: number, setID: number, signal: A
   return apiFetch<SetRecommendation>(`/api/workouts/${workoutID}/sets/${setID}/recommendation`, {
     method: "POST",
     signal,
+    timeoutMs: apiTimeouts.aiOptionalMs,
   });
 }
 
+// 時間切れ（ApiTimeoutError）や通信失敗では保存済みか分からない。同じ idempotencyKey で再送すれば重複しない。
 export function recordWorkoutSet(workoutID: number, idempotencyKey: string, input: SetInput) {
   return apiFetch<{ id: number }>(`/api/workouts/${workoutID}/sets`, {
     method: "POST",
@@ -39,6 +43,7 @@ export function getSummaryComment(workoutID: number, signal: AbortSignal) {
   return apiFetch<{ comment: string; replayed: boolean }>(`/api/workouts/${workoutID}/summary-comment`, {
     method: "POST",
     signal,
+    timeoutMs: apiTimeouts.aiOptionalMs,
   });
 }
 
