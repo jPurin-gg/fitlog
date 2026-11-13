@@ -1,15 +1,22 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/jPurin-gg/myfitlog-backend/internal/auth"
 	"github.com/jPurin-gg/myfitlog-backend/internal/clock"
+	"github.com/jPurin-gg/myfitlog-backend/internal/httpx"
 )
 
 func TestLoginIssuesSignedCookieUsedByMiddleware(t *testing.T) {
@@ -169,11 +176,61 @@ func TestLogoutClearsSessionCookie(t *testing.T) {
 	}
 }
 
+func TestLoginRepositoryFailureLogsOnceWithoutLeakingDetails(t *testing.T) {
+	const sensitive = "test-only-sensitive-nickname"
+	repository := &authRepository{findErr: fmt.Errorf("lookup %s: %w", sensitive, &pq.Error{
+		Code: "23505", Message: sensitive, Detail: sensitive,
+	})}
+	handler := NewHandler(auth.NewService(repository), nil, clock.Fixed{}, "fitlog_session", false, time.Hour)
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/auth/login", handler.Login)
+	server := httpx.WithRequestID(httpx.LogRequests(logger, httpx.Recover(logger, mux)))
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"nickname":"`+sensitive+`","password":"test-only-password"}`)))
+
+	var problem httpx.Problem
+	if err := json.Unmarshal(recorder.Body.Bytes(), &problem); err != nil {
+		t.Fatal(err)
+	}
+	requestID := recorder.Header().Get("X-Request-ID")
+	if recorder.Code != http.StatusInternalServerError || problem.Code != "INTERNAL_ERROR" || problem.Detail != "処理中にエラーが発生しました。" || requestID == "" || problem.RequestID != requestID || len(recorder.Result().Cookies()) != 0 {
+		t.Fatalf("unexpected login error response: %#v", problem)
+	}
+	lines := bytes.Split(bytes.TrimSpace(output.Bytes()), []byte("\n"))
+	if len(lines) != 2 {
+		t.Fatalf("log count = %d, want one diagnostic and one access log", len(lines))
+	}
+	for index, line := range lines {
+		var record map[string]any
+		if err := json.Unmarshal(line, &record); err != nil {
+			t.Fatal(err)
+		}
+		if record["request_id"] != requestID || record["route"] != "/api/auth/login" || record["status"] != float64(500) {
+			t.Fatalf("login correlation metadata = %#v", record)
+		}
+		if index == 0 && (record["level"] != "ERROR" || record["stage"] != "handler" || record["error_class"] != "database_constraint" || record["sqlstate"] != "23505") {
+			t.Fatalf("login diagnostic metadata = %#v", record)
+		}
+		if index == 1 && record["msg"] != "http request" {
+			t.Fatalf("expected access log, got %#v", record)
+		}
+	}
+	if strings.Contains(output.String()+recorder.Body.String(), sensitive) || strings.Contains(output.String()+recorder.Body.String(), "test-only-password") {
+		t.Fatal("response or logs contain login input or database details")
+	}
+}
+
 type authRepository struct {
-	user auth.StoredUser
+	user    auth.StoredUser
+	findErr error
 }
 
 func (r *authRepository) FindByNickname(_ context.Context, nickname string) (auth.StoredUser, error) {
+	if r.findErr != nil {
+		return auth.StoredUser{}, r.findErr
+	}
 	if r.user.ID == 0 || r.user.Nickname != nickname {
 		return auth.StoredUser{}, auth.ErrUserNotFound
 	}
