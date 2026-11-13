@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { Search, Plus, Dumbbell, X, Loader2, Activity, Star } from "lucide-react";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
-import { apiFetch } from "@/lib/api";
+import { apiErrorMessage, apiFetch } from "@/lib/api";
 
 interface Exercise {
   id: string;
@@ -62,6 +62,8 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
   const [customName, setCustomName] = useState("");
   const [customCategory, setCustomCategory] = useState("筋力トレーニング");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // お気に入りの更新・種目の追加に失敗したときの表示。
+  const [actionError, setActionError] = useState("");
 
   useBodyScrollLock();
 
@@ -135,6 +137,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
 
   const toggleFavorite = async (exercise: Exercise) => {
     const favorite = favoriteIds.has(exercise.id);
+    setActionError("");
     try {
       await apiFetch<void>(`/api/exercises/${encodeURIComponent(exercise.id)}/favorite`, {
         method: favorite ? "DELETE" : "PUT",
@@ -146,13 +149,19 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
       }
     } catch (e) {
       console.error(e);
-      alert("お気に入りの更新に失敗しました。");
+      setActionError(apiErrorMessage(e, "お気に入りを更新できませんでした。通信環境を確認して、もう一度お試しください。"));
     }
+  };
+
+  const showCustomForm = (visible: boolean) => {
+    setActionError("");
+    setIsCustomizing(visible);
   };
 
   const handleCustomSubmit = async () => {
     if (!customName.trim()) return;
     setIsSubmitting(true);
+    setActionError("");
     try {
       const data = await apiFetch<Exercise>("/api/exercises", {
         method: "POST",
@@ -166,7 +175,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
       onSelect({ id: data.id, name: data.name });
     } catch (e) {
       console.error(e);
-      alert("通信エラーが発生しました。");
+      setActionError(apiErrorMessage(e, "種目を追加できませんでした。通信環境を確認して、もう一度お試しください。"));
     }
     setIsSubmitting(false);
   };
@@ -184,6 +193,12 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {actionError && (
+          <div role="alert" className="mx-4 mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {actionError}
+          </div>
+        )}
 
         {isCustomizing ? (
           <div className="p-6 overflow-y-auto space-y-5 flex-1 text-white">
@@ -219,7 +234,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
 
             <div className="pt-4 flex gap-3">
               <button 
-                onClick={() => setIsCustomizing(false)}
+                onClick={() => showCustomForm(false)}
                 className="flex-1 py-3 bg-white/10 text-white font-bold rounded-xl hover:bg-white/20 transition-colors"
               >
                 キャンセル
@@ -375,7 +390,7 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
 
             <div className="p-4 border-t border-white/10 bg-[#1a1a1a]">
               <button 
-                onClick={() => setIsCustomizing(true)}
+                onClick={() => showCustomForm(true)}
                 className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 border-dashed text-white font-bold rounded-xl transition-all flex justify-center items-center gap-2"
               >
                 <Plus className="w-5 h-5 text-primary" />

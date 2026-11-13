@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Loader2, Lock, LogOut, Sparkles } from "lucide-react";
+import { Loader2, Lock, LogOut, RefreshCw, Sparkles } from "lucide-react";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
 import { AISettingsProvider } from "./AISettings";
 
@@ -28,6 +28,8 @@ export function useAuth() {
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<AuthUser | null>(null);
   const [ready, setReady] = React.useState(false);
+  const [restoreError, setRestoreError] = React.useState<string | null>(null);
+  const [restoreAttempt, setRestoreAttempt] = React.useState(0);
 
   React.useEffect(() => {
     let active = true;
@@ -36,20 +38,34 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         if (active) setUser(currentUser);
       })
       .catch(error => {
-        if (!(error instanceof ApiError && error.status === 401)) {
-          console.error("Failed to restore session", error);
-        }
+        if (error instanceof ApiError && error.status === 401) return;
+        console.error("Failed to restore session", error);
+        // 未ログインとは区別し、ログイン画面で再確認できるようにする。
+        if (active) setRestoreError(apiErrorMessage(error, "サーバーに接続できませんでした。通信環境を確認して、もう一度お試しください。"));
       })
       .finally(() => {
         if (active) setReady(true);
       });
-
-    const resetSession = () => setUser(null);
-    window.addEventListener("fitlog:unauthorized", resetSession);
     return () => {
       active = false;
-      window.removeEventListener("fitlog:unauthorized", resetSession);
     };
+  }, [restoreAttempt]);
+
+  React.useEffect(() => {
+    const resetSession = () => setUser(null);
+    window.addEventListener("fitlog:unauthorized", resetSession);
+    return () => window.removeEventListener("fitlog:unauthorized", resetSession);
+  }, []);
+
+  const retryRestore = React.useCallback(() => {
+    setReady(false);
+    setRestoreError(null);
+    setRestoreAttempt(attempt => attempt + 1);
+  }, []);
+
+  const login = React.useCallback((nextUser: AuthUser) => {
+    setRestoreError(null);
+    setUser(nextUser);
   }, []);
 
   const logout = React.useCallback(async () => {
@@ -71,7 +87,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) {
-    return <LoginScreen onLogin={setUser} />;
+    return <LoginScreen onLogin={login} restoreError={restoreError} onRetryRestore={retryRestore} />;
   }
 
   return (
@@ -81,7 +97,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   );
 }
 
-function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
+interface LoginScreenProps {
+  onLogin: (user: AuthUser) => void;
+  restoreError: string | null;
+  onRetryRestore: () => void;
+}
+
+function LoginScreen({ onLogin, restoreError, onRetryRestore }: LoginScreenProps) {
   const [nickname, setNickname] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [loading, setLoading] = React.useState(false);
@@ -118,6 +140,20 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
           <h1 className="text-3xl font-black tracking-tight mb-2">Fitlog に入る</h1>
           <p className="text-white/50 text-sm">ニックネームとパスワードで始めます。未登録の組み合わせは新しいユーザーとして作成されます。</p>
         </div>
+
+        {restoreError && (
+          <div role="alert" className="mb-5 rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4">
+            <p className="text-sm font-bold text-amber-200">ログイン状態を確認できませんでした</p>
+            <p className="mt-1 text-xs text-amber-100/70">{restoreError}</p>
+            <button
+              type="button"
+              onClick={onRetryRestore}
+              className="mt-3 flex items-center gap-1.5 text-xs font-bold text-amber-200 underline transition-colors hover:text-amber-100"
+            >
+              <RefreshCw className="h-3.5 w-3.5" /> ログイン状態を再確認
+            </button>
+          </div>
+        )}
 
         <form onSubmit={login} className="glass rounded-[32px] p-6 md:p-8 border border-white/10 space-y-5">
           <div className="space-y-2">
