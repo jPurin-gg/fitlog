@@ -7,9 +7,12 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import WorkoutPage from "./page";
 import { AISettingsProvider } from "@/components/AISettings";
+import { apiTimeouts } from "@/lib/api";
 
 const apiOrigin = "http://localhost:3000";
 const server = setupServer();
+const defaultStandardTimeoutMs = apiTimeouts.standardMs;
+const emptySummary = { total_sets: 0, total_reps: 0, total_volume: 0, duration_min: 1, pr_count: 0, exercises: [] };
 
 const startedPlan = {
   id: 10,
@@ -55,14 +58,26 @@ function renderWorkout(aiEnabled = true) {
   return render(<AISettingsProvider userID={1}><WorkoutPage /></AISettingsProvider>);
 }
 
-async function startWorkout(user: ReturnType<typeof userEvent.setup>) {
-  renderWorkout();
+async function startWorkout(user: ReturnType<typeof userEvent.setup>, aiEnabled = true) {
+  renderWorkout(aiEnabled);
   await user.click(screen.getByRole("button", { name: /ワークアウトを開始/ }));
   await screen.findByRole("heading", { name: "ワークアウト中" });
 }
 
+// ブラウザの回線状態（navigator.onLine と online / offline イベント）を切り替える。
+function setBrowserOnline(online: boolean) {
+  Object.defineProperty(window.navigator, "onLine", { configurable: true, get: () => online });
+  act(() => {
+    window.dispatchEvent(new Event(online ? "online" : "offline"));
+  });
+}
+
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  server.resetHandlers();
+  apiTimeouts.standardMs = defaultStandardTimeoutMs;
+  Reflect.deleteProperty(window.navigator, "onLine");
+});
 afterAll(() => server.close());
 
 beforeEach(() => {
@@ -468,5 +483,119 @@ describe("WorkoutPage record-first flow", () => {
 
     await user.click(screen.getByRole("button", { name: /^ベンチプレス/ }));
     expect(screen.getByText("セット 2 / 3")).toBeInTheDocument();
+  });
+});
+
+describe("WorkoutPage 通信が不安定なとき", () => {
+  it("応答しない保存を待ち時間で打ち切り、同じ冪等キーの再試行で保存する", async () => {
+    useCommonHandlers();
+    const hung = deferred<Response>();
+    const keys: string[] = [];
+    server.use(
+      http.post(`${apiOrigin}/api/workouts/42/sets`, ({ request }) => {
+        keys.push(request.headers.get("Idempotency-Key") || "");
+        return keys.length === 1 ? hung.promise : HttpResponse.json({ id: 106, workout_id: 42 });
+      }),
+    );
+    const user = userEvent.setup();
+    await startWorkout(user, false);
+    apiTimeouts.standardMs = 100;
+
+    await user.click(screen.getByRole("button", { name: "セットを保存" }));
+
+    expect(await screen.findByText("セットを保存できませんでした")).toBeInTheDocument();
+    expect(screen.getByText("サーバーからの応答がありませんでした。通信環境を確認して、もう一度お試しください。")).toBeInTheDocument();
+    expect(screen.getByText(/秒後に自動で再送します/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("80")).toHaveValue(60);
+    expect(screen.getByPlaceholderText("80")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "終了" })).toBeDisabled();
+
+    apiTimeouts.standardMs = defaultStandardTimeoutMs;
+    await user.click(screen.getByRole("button", { name: "セットの保存を再試行" }));
+
+    expect(await screen.findByText(/セットは保存済みです/)).toBeInTheDocument();
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBe(keys[0]);
+  });
+
+  it("オフライン中は再送を待ち、回線が戻ると同じ冪等キーで自動再送する", async () => {
+    useCommonHandlers();
+    const keys: string[] = [];
+    server.use(
+      http.post(`${apiOrigin}/api/workouts/42/sets`, ({ request }) => {
+        keys.push(request.headers.get("Idempotency-Key") || "");
+        return keys.length === 1 ? HttpResponse.error() : HttpResponse.json({ id: 107, workout_id: 42 });
+      }),
+    );
+    const user = userEvent.setup();
+    await startWorkout(user, false);
+
+    setBrowserOnline(false);
+    expect(screen.getByText(/オフラインです。入力内容はこの画面に残ります/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "セットを保存" }));
+    expect(await screen.findByText("セットを保存できませんでした")).toBeInTheDocument();
+    expect(screen.getByText("オフラインです。回線が戻ると自動で再送します。")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("80")).toBeDisabled();
+    expect(keys).toHaveLength(1);
+
+    setBrowserOnline(true);
+
+    expect(await screen.findByText(/セットは保存済みです/)).toBeInTheDocument();
+    expect(screen.queryByText(/オフラインです/)).not.toBeInTheDocument();
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBe(keys[0]);
+  });
+
+  it("応答しない終了を待ち時間で打ち切り、もう一度終了できる", async () => {
+    useCommonHandlers();
+    const hung = deferred<Response>();
+    let finishCalls = 0;
+    server.use(
+      http.post(`${apiOrigin}/api/workouts/42/finish`, () => {
+        finishCalls += 1;
+        return finishCalls === 1 ? hung.promise : HttpResponse.json({ summary: emptySummary });
+      }),
+    );
+    const user = userEvent.setup();
+    await startWorkout(user, false);
+    apiTimeouts.standardMs = 100;
+
+    await user.click(screen.getByRole("button", { name: "終了" }));
+
+    expect(await screen.findByText("ワークアウトを終了できませんでした")).toBeInTheDocument();
+    expect(screen.getByText("サーバーからの応答がありませんでした。通信環境を確認して、もう一度お試しください。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "終了" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "セットを保存" })).toBeEnabled();
+    expect(screen.getByPlaceholderText("80")).toBeEnabled();
+
+    apiTimeouts.standardMs = defaultStandardTimeoutMs;
+    await user.click(screen.getByRole("button", { name: "もう一度試す" }));
+
+    expect(await screen.findByRole("heading", { name: "今日のまとめ" })).toBeInTheDocument();
+    expect(finishCalls).toBe(2);
+  });
+
+  it("目標セット数を保存できなかったことを伝え、記録は続けられる", async () => {
+    useCommonHandlers("not_requested");
+    server.use(
+      http.put(`${apiOrigin}/api/exercises/:exerciseID/settings`, () => new HttpResponse(
+        "<html><body><h1>502 Bad Gateway</h1></body></html>",
+        { status: 502, headers: { "Content-Type": "text/html" } },
+      )),
+    );
+    const user = userEvent.setup();
+    await startWorkout(user, false);
+
+    await user.click(screen.getByRole("button", { name: "目標セット数を変更" }));
+    await user.click(screen.getByRole("button", { name: "＋" }));
+
+    const message = await screen.findByRole("alert");
+    expect(message).toHaveTextContent("目標セット数を保存できませんでした。今回は4セットのまま記録できますが、次回には引き継がれません。");
+    expect(message).not.toHaveTextContent(/Bad Gateway|</);
+    expect(screen.getByText("セット 1 / 4")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "セットを保存" })).toBeEnabled();
   });
 });

@@ -15,17 +15,20 @@ import {
   ListChecks,
   Trophy,
   RotateCcw,
-  Home
+  Home,
+  WifiOff
 } from "lucide-react";
 import { AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { AlternativeCoachModal } from "@/features/exercises/components/AlternativeCoachModal";
 import { ExerciseSelectorModal } from "@/features/exercises/components/ExerciseSelectorModal";
 import { WorkoutSummaryView, type WorkoutSummary } from "./components/WorkoutSummaryView";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { ApiError, apiErrorMessage } from "@/lib/api";
 import { displayPlanText, formatLocalDate } from "@/lib/fitlog";
 import { initialRecordFlowState, recordFlowReducer } from "./workoutFlow";
 import { finishWorkoutSession, getSetRecommendation, getSummaryComment, getTargetSets, recordWorkoutSet, startWorkoutPlan, updateTargetSets } from "./api";
+import { useSaveAutoRetry } from "./useSaveAutoRetry";
 import type { SetRecommendation, WorkoutPlanSession } from "./types";
 
 type SummaryCommentState = "idle" | "loading" | "ready" | "unavailable";
@@ -37,6 +40,7 @@ function newIdempotencyKey() {
   return `fitlog_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
 
+// 通信失敗・時間切れ・サーバー側の障害では、セットが保存済みか判定できない。
 function isAmbiguousSaveFailure(error: unknown) {
   if (!(error instanceof ApiError)) return true;
   return ![400, 401, 403, 404, 409, 422].includes(error.status);
@@ -44,6 +48,7 @@ function isAmbiguousSaveFailure(error: unknown) {
 
 export default function WorkoutPage() {
   const { enabled: aiEnabled, isEnabled } = useAISettings();
+  const online = useOnlineStatus();
   const [starting, setStarting] = React.useState(false);
   const [finishing, setFinishing] = React.useState(false);
   const [recommendation, setRecommendation] = React.useState<SetRecommendation | null>(null);
@@ -73,6 +78,7 @@ export default function WorkoutPage() {
   const [targetSets, setTargetSets] = React.useState(3);
   const [editingTargetSets, setEditingTargetSets] = React.useState(false);
   const [tempTargetSets, setTempTargetSets] = React.useState(3);
+  const [targetSetsError, setTargetSetsError] = React.useState<string | null>(null);
   const [finishedSummary, setFinishedSummary] = React.useState<WorkoutSummary | null>(null);
   const [finishedWorkoutID, setFinishedWorkoutID] = React.useState<number | null>(null);
   const [recordedSetID, setRecordedSetID] = React.useState<number | null>(null);
@@ -136,9 +142,14 @@ export default function WorkoutPage() {
     if (saveInFlightRef.current || saveRetryLocked || finishInFlightRef.current) return;
     setTargetSets(value);
     setEditingTargetSets(false);
+    setTargetSetsError(null);
     try {
       await updateTargetSets(currentExercise.id, value);
-    } catch { /* 無視 */ }
+    } catch (e) {
+      // 画面上の目標はそのまま使えるため、記録は止めずに保存できなかったことだけ伝える。
+      console.error(e);
+      setTargetSetsError(`目標セット数を保存できませんでした。今回は${value}セットのまま記録できますが、次回には引き継がれません。`);
+    }
   };
 
   const resetSetFlow = () => {
@@ -150,6 +161,7 @@ export default function WorkoutPage() {
     setRecommendationError(null);
     setSaveError(null);
     setSaveRetryLocked(false);
+    setTargetSetsError(null);
     setRequestRef.current = null;
     activeSetIDRef.current = null;
     setRecordedSetID(null);
@@ -326,6 +338,14 @@ export default function WorkoutPage() {
       saveInFlightRef.current = false;
     }
   };
+
+  // 保存済みか判定できない間は入力が固定されているため、同じ本文と冪等キーのまま再送される。
+  const saveAutoRetry = useSaveAutoRetry({
+    locked: saveRetryLocked,
+    failed: saveState === "failed",
+    online,
+    retry: () => { void saveCurrentSet(); },
+  });
 
   const retryRecommendation = () => {
     if (!isEnabled()) return;
@@ -641,10 +661,25 @@ export default function WorkoutPage() {
           </div>
         )}
 
+        {!online && (
+          <div role="status" className="mb-5 flex items-start gap-3 rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100/80">
+            <WifiOff className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-300" />
+            <p>オフラインです。入力内容はこの画面に残ります。回線が戻ってから保存・終了してください。</p>
+          </div>
+        )}
+
         {finishError && (
           <div className="mb-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
             <p className="text-sm font-bold text-red-300">ワークアウトを終了できませんでした</p>
             <p className="mt-1 text-xs text-red-200/65">{finishError}</p>
+            <button
+              type="button"
+              onClick={finishWorkout}
+              disabled={finishing || recordTransitionLocked}
+              className="mt-3 flex items-center gap-1 text-xs text-red-300 underline transition-colors hover:text-red-200 disabled:opacity-50"
+            >
+              <RefreshCw className="h-3 w-3" /> もう一度試す
+            </button>
           </div>
         )}
 
@@ -702,6 +737,9 @@ export default function WorkoutPage() {
               >
                 目標セット数を変更
               </button>
+            )}
+            {targetSetsError && (
+              <p role="alert" className="mt-1 max-w-[18rem] text-right text-[10px] text-red-300">{targetSetsError}</p>
             )}
           </div>
 
@@ -810,6 +848,17 @@ export default function WorkoutPage() {
                         ? "保存済みか判定できないため入力と移動を固定し、同じ識別子で安全に再送します。"
                         : "入力内容を確認してから、もう一度保存してください。"}
                     </p>
+                    {saveAutoRetry.status !== "idle" && (
+                      <p className="mt-1 text-[11px] font-bold text-red-200/70">
+                        {saveAutoRetry.status === "offline"
+                          ? "オフラインです。回線が戻ると自動で再送します。"
+                          : saveAutoRetry.status === "exhausted"
+                            ? "自動での再送を止めました。通信環境を確認して「セットの保存を再試行」を押してください。"
+                            : saveAutoRetry.delayMs >= 1_000
+                              ? `約${Math.round(saveAutoRetry.delayMs / 1_000)}秒後に自動で再送します。`
+                              : "まもなく自動で再送します。"}
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
