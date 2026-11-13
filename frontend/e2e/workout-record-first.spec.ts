@@ -13,6 +13,9 @@ test("ブラウザでワークアウトを開始し、AI障害中も記録を完
     if (request.method() === "GET" && url.pathname === "/api/auth/me") {
       return respond(200, { id: 1, nickname: "E2E user" });
     }
+    if (request.method() === "GET" && url.pathname === "/api/today") {
+      return respond(200, { date: "2026-08-24", timezone: "Asia/Tokyo", rest_day: false, plan: null, workout: null });
+    }
     if (request.method() === "GET" && /\/api\/exercises\/[^/]+\/settings$/.test(url.pathname)) {
       return respond(200, { target_sets: 3 });
     }

@@ -19,6 +19,7 @@ async function mockAPI(page: Page) {
       if (path === "/api/auth/me") return respond(200, { id: 1, nickname: "E2E user" });
       if (path === "/api/dashboard") return respond(200, { recent_workouts: [] });
       if (path === "/api/preferences") return respond(200, {});
+      if (path === "/api/today") return respond(200, { date: "2026-08-24", timezone: "Asia/Tokyo", rest_day: false, plan: null, workout: null });
       if (/^\/api\/monthly-plans\/\d{4}-\d{2}$/.test(path)) return respond(404, { detail: "月間プランはありません。" });
       if (["/api/exercises", "/api/exercises/favorites"].includes(path)) return respond(200, exercises);
       if (path === "/api/exercises/recent") return respond(200, []);
