@@ -23,7 +23,8 @@ import { AlternativeCoachModal } from "@/features/exercises/components/Alternati
 import { ExerciseSelectorModal } from "@/features/exercises/components/ExerciseSelectorModal";
 import { WorkoutSummaryView, type WorkoutSummary } from "./components/WorkoutSummaryView";
 import { ApiError, apiErrorMessage } from "@/lib/api";
-import { displayPlanText, formatLocalDate } from "@/lib/fitlog";
+import { displayPlanText } from "@/lib/fitlog";
+import { getToday } from "@/features/today/api";
 import { initialRecordFlowState, recordFlowReducer } from "./workoutFlow";
 import { finishWorkoutSession, getSetRecommendation, getSummaryComment, getTargetSets, recordWorkoutSet, startWorkoutPlan, updateTargetSets } from "./api";
 import type { SetRecommendation, WorkoutPlanSession } from "./types";
@@ -216,7 +217,10 @@ export default function WorkoutPage() {
     setSummaryCommentState("idle");
     setSummaryCommentError(null);
     try {
-      const data = await startWorkoutPlan(formatLocalDate(new Date()), {
+      // 開始できるのはサーバー（APP_TIMEZONE）の今日だけなので、日付はサーバーから受け取る。
+      const today = await getToday(controller.signal);
+      if (controller.signal.aborted || startRequestRef.current !== requestID) return;
+      const data = await startWorkoutPlan(today.date, {
         use_ai: exercise ? false : useAI,
         ...(exercise ? { exercise_id: exercise.id } : {}),
       }, controller.signal);
