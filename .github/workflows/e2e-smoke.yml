@@ -1,0 +1,47 @@
+name: E2E smoke
+
+# APIをモックしないブラウザのスモークE2E。compose.test.yml の一時DB・バックエンド・AIスタブ・
+# Next.js本番ビルドをまとめて起動するため時間がかかる。PRでは回さず、mainへのpushと手動実行で動かす。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  e2e-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Show Docker versions
+        run: |
+          docker version --format 'Docker {{.Server.Version}}'
+          docker compose version
+
+      - name: Run smoke E2E
+        run: docker compose -f compose.test.yml run --rm --build -T e2e-smoke
+
+      - name: Show service logs
+        if: failure()
+        run: docker compose -f compose.test.yml --profile e2e logs --no-color --timestamps db backend ai-stub
+
+      - name: Upload smoke report and traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: frontend/smoke-results/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Stop smoke services
+        if: always()
+        run: docker compose -f compose.test.yml --profile e2e down
