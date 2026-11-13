@@ -4,7 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
+import { AISettingsProvider } from "@/components/AISettings";
 import ExercisesPage from "./ExercisesPage";
+import { AlternativeCoachModal } from "./components/AlternativeCoachModal";
 import { ExerciseSelectorModal } from "./components/ExerciseSelectorModal";
 
 const api = "http://localhost:3000";
@@ -72,6 +74,20 @@ const paths: Record<string, () => Path> = {
       },
       expectExistingChosen: async () => {
         await waitFor(() => expect(onSelect).toHaveBeenCalledWith({ id: "bench_press", name: "ベンチプレス" }));
+      },
+    };
+  },
+  "代替種目モーダルの手動変更": () => {
+    const onReplace = vi.fn();
+    return {
+      open: async user => {
+        render(<AISettingsProvider userID={1}><AlternativeCoachModal exerciseId="squat" exerciseName="スクワット" onClose={vi.fn()} onReplace={onReplace} /></AISettingsProvider>);
+        await user.click(screen.getByRole("button", { name: "辞書から種目を選ぶ" }));
+        await user.click(screen.getByRole("button", { name: "見つからない種目を新しく追加" }));
+        return "追加して選択";
+      },
+      expectExistingChosen: async () => {
+        await waitFor(() => expect(onReplace).toHaveBeenCalledWith({ id: "bench_press", name: "ベンチプレス" }));
       },
     };
   },

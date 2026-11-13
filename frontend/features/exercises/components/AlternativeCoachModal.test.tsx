@@ -16,14 +16,20 @@ function show(onReplace = vi.fn()) {
   render(<AISettingsProvider userID={1}><AlternativeCoachModal exerciseId="bench" exerciseName="ベンチプレス" onClose={vi.fn()} onReplace={onReplace} /></AISettingsProvider>);
 }
 
-it("OFFでAI相談をせず、手動で種目を登録できる", async () => {
+it("OFFでAI相談をせず、辞書の種目セレクターから手動で変更できる", async () => {
   const onReplace = vi.fn();
-  server.use(http.post("http://localhost:3000/api/exercises", () => HttpResponse.json({ id: "manual", name: "自重スクワット" })));
+  server.use(
+    http.get("http://localhost:3000/api/exercises/favorites", () => HttpResponse.json([])),
+    http.get("http://localhost:3000/api/exercises/recent", () => HttpResponse.json([])),
+    http.get("http://localhost:3000/api/exercises", () => HttpResponse.json([{ id: "bodyweight_squat", name: "自重スクワット", primaryMuscles: ["大腿四頭筋"] }])),
+  );
   show(onReplace);
   expect(screen.getByRole("button", { name: "AIに代替種目を相談する" })).toBeDisabled();
-  await userEvent.type(screen.getByPlaceholderText("好きな種目名を入力"), "自重スクワット");
-  await userEvent.click(screen.getByRole("button", { name: "決定" }));
-  await waitFor(() => expect(onReplace).toHaveBeenCalledWith({ id: "manual", name: "自重スクワット" }));
+  expect(screen.queryByRole("textbox", { name: /種目名/ })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "辞書から種目を選ぶ" }));
+  await userEvent.type(screen.getByPlaceholderText("種目名で検索..."), "自重スクワット");
+  await userEvent.click(await screen.findByRole("button", { name: /^自重スクワット/ }));
+  await waitFor(() => expect(onReplace).toHaveBeenCalledWith({ id: "bodyweight_squat", name: "自重スクワット" }));
 });
 
 it("相談中のOFF→ONでも古い候補を表示しない", async () => {
