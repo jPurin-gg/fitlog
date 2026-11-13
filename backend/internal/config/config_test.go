@@ -322,6 +322,84 @@ func TestDBConfigDSN(t *testing.T) {
 	}
 }
 
+func TestLoadLoginLimitDefaults(t *testing.T) {
+	setRequiredEnvironment(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := LoginConfig{SourceAttempts: 20, AccountAttempts: 5, Window: 5 * time.Minute, MaxConcurrentHashes: 2, MaxEntries: 10000}
+	if cfg.Login != want || len(cfg.TrustedProxyCIDRs) != 0 {
+		t.Fatalf("login configuration = %#v, trusted proxy count = %d", cfg.Login, len(cfg.TrustedProxyCIDRs))
+	}
+}
+
+func TestLoadLoginLimitsAndTrustedProxies(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("AUTH_LOGIN_SOURCE_ATTEMPTS", " 30 ")
+	t.Setenv("AUTH_LOGIN_ACCOUNT_ATTEMPTS", "7")
+	t.Setenv("AUTH_LOGIN_WINDOW_SECONDS", "60")
+	t.Setenv("AUTH_LOGIN_MAX_CONCURRENT_HASHES", "3")
+	t.Setenv("AUTH_LOGIN_MAX_ENTRIES", "123")
+	t.Setenv("AUTH_TRUSTED_PROXY_CIDRS", " 192.0.2.5/32, 2001:db8::5/128 ")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := LoginConfig{SourceAttempts: 30, AccountAttempts: 7, Window: time.Minute, MaxConcurrentHashes: 3, MaxEntries: 123}
+	if cfg.Login != want {
+		t.Fatalf("Login = %#v, want %#v", cfg.Login, want)
+	}
+	if len(cfg.TrustedProxyCIDRs) != 2 || cfg.TrustedProxyCIDRs[0].String() != "192.0.2.5/32" || cfg.TrustedProxyCIDRs[1].String() != "2001:db8::5/128" {
+		t.Fatal("trusted proxy CIDRs were not loaded")
+	}
+}
+
+func TestLoadRejectsInvalidLoginLimits(t *testing.T) {
+	for _, name := range []string{
+		"AUTH_LOGIN_SOURCE_ATTEMPTS", "AUTH_LOGIN_ACCOUNT_ATTEMPTS", "AUTH_LOGIN_WINDOW_SECONDS",
+		"AUTH_LOGIN_MAX_CONCURRENT_HASHES", "AUTH_LOGIN_MAX_ENTRIES",
+	} {
+		for _, value := range []string{"0", "-1", "invalid-value", "1.5", "999999999999999999999999999999"} {
+			t.Run(name+"/"+value, func(t *testing.T) {
+				setRequiredEnvironment(t)
+				t.Setenv(name, value)
+				_, err := Load()
+				if err == nil || !strings.Contains(err.Error(), name) {
+					t.Fatalf("Load() error = %v, want error naming %s", err, name)
+				}
+				if strings.Contains(err.Error(), "invalid-value") {
+					t.Fatal("configuration error echoed its input")
+				}
+			})
+		}
+	}
+}
+
+func TestLoadRejectsLoginWindowDurationOverflow(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("AUTH_LOGIN_WINDOW_SECONDS", "9223372037")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "AUTH_LOGIN_WINDOW_SECONDS") {
+		t.Fatalf("Load() error = %v, want duration overflow error", err)
+	}
+}
+
+func TestLoadRejectsInvalidTrustedProxyCIDRs(t *testing.T) {
+	for _, value := range []string{"untrusted-synthetic-value", "192.0.2.1", "192.0.2.1/33", "192.0.2.1/32,", "192.0.2.1/32,,2001:db8::/32"} {
+		t.Run(value, func(t *testing.T) {
+			setRequiredEnvironment(t)
+			t.Setenv("AUTH_TRUSTED_PROXY_CIDRS", value)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), "AUTH_TRUSTED_PROXY_CIDRS") {
+				t.Fatalf("Load() error = %v, want invalid proxy configuration error", err)
+			}
+			if strings.Contains(err.Error(), value) {
+				t.Fatal("configuration error echoed its input")
+			}
+		})
+	}
+}
+
 func setRequiredEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("APP_TIMEZONE", "UTC")
@@ -334,6 +412,8 @@ func setRequiredEnvironment(t *testing.T) {
 		"XAI_API_KEY", "XAI_API_URL", "XAI_MODEL",
 		"AI_RATE_LIMIT_RPM", "AI_RATE_LIMIT_MAX_WAIT_MS", "AI_MAX_ATTEMPTS", "AI_HTTP_TIMEOUT_SECONDS",
 		"AI_OPTIONAL_TIMEOUT_SECONDS", "AI_RETRY_BASE_MS", "AI_RETRY_MAX_MS",
+		"AUTH_LOGIN_SOURCE_ATTEMPTS", "AUTH_LOGIN_ACCOUNT_ATTEMPTS", "AUTH_LOGIN_WINDOW_SECONDS",
+		"AUTH_LOGIN_MAX_CONCURRENT_HASHES", "AUTH_LOGIN_MAX_ENTRIES", "AUTH_TRUSTED_PROXY_CIDRS",
 	} {
 		t.Setenv(name, "")
 	}
