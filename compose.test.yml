@@ -31,3 +31,69 @@ services:
       db:
         condition: service_healthy
     command: go test -race -tags=integration -count=1 ./internal/workout/postgres ./internal/app
+
+  # ここから下は、APIをモックしないスモークE2E（profile: e2e）。
+  # `docker compose -f compose.test.yml run --rm --build e2e-smoke` で db・backend・ai-stub ごと起動する。
+  # 値はすべてテスト専用のダミーで、外部のAIや本番のシークレットは使わない。
+  backend:
+    profiles: ["e2e"]
+    build:
+      context: .
+      dockerfile: docker/backend.prod.Dockerfile
+    environment:
+      APP_ENV: test
+      # e2e-smoke の playwright.smoke.config.ts の timezoneId と同じにする（開始APIの「当日」判定）。
+      APP_TIMEZONE: Asia/Tokyo
+      # ブラウザのOrigin（e2e-smoke の baseURL）と一致させる。異なるとPOST・PUT・DELETEが403になる。
+      FRONTEND_URL: http://127.0.0.1:3000
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: fitlog_test
+      DB_PASSWORD: fitlog_test
+      DB_NAME: fitlog_test
+      SESSION_SECRET: e2e-smoke-only-session-secret-not-for-production
+      SESSION_COOKIE_SECURE: "false"
+      # APIキーが空だとAIを呼ばずに失敗するため、ダミー値でスタブまで届くようにする。
+      XAI_API_KEY: e2e-smoke-dummy-key
+      XAI_API_URL: http://ai-stub:8090/v1/chat/completions
+      XAI_MODEL: e2e-smoke-stub
+      AI_MAX_ATTEMPTS: "1"
+      AI_HTTP_TIMEOUT_SECONDS: "5"
+      AI_OPTIONAL_TIMEOUT_SECONDS: "5"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # AIの通信先のスタブ。呼ばれたことを記録して503を返す（スモークはAI OFFで通る経路だけを使う）。
+  ai-stub:
+    profiles: ["e2e"]
+    image: node:22-alpine
+    working_dir: /stub
+    volumes:
+      - ./frontend/e2e-smoke/ai-stub.mjs:/stub/ai-stub.mjs:ro
+    command: ["node", "ai-stub.mjs"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8090/__stub/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  # Next.js の本番ビルドと Playwright。ブラウザは同じコンテナの http://127.0.0.1:3000 を開き、
+  # Next.js が /api を backend へ中継する。バックエンドの起動完了はテスト前に中継越しに待つ。
+  e2e-smoke:
+    profiles: ["e2e"]
+    build:
+      context: .
+      dockerfile: docker/e2e.Dockerfile
+    init: true
+    ipc: host
+    environment:
+      CI: ${CI:-}
+      SMOKE_AI_STUB_URL: http://ai-stub:8090
+    volumes:
+      - ./frontend/smoke-results:/app/smoke-results
+    depends_on:
+      backend:
+        condition: service_started
+      ai-stub:
+        condition: service_healthy
