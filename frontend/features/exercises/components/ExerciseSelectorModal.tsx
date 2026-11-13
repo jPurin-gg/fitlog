@@ -1,9 +1,11 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Search, Plus, Dumbbell, X, Loader2, Activity, Star } from "lucide-react";
+import { Search, Plus, Dumbbell, X, Activity, Star } from "lucide-react";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { apiFetch } from "@/lib/api";
+import { EQUIPMENT_OPTIONS } from "../exerciseOptions";
+import { ExerciseCreateForm } from "./ExerciseCreateForm";
 
 interface Exercise {
   id: string;
@@ -23,9 +25,7 @@ const MUSCLE_CATEGORIES: Record<string, string[]> = {
   "その他": ["首"]
 };
 
-const EQUIPMENTS = [
-  "自重", "ダンベル", "バーベル", "マシン", "ケーブル", "バンド", "ケトルベル", "メディシンボール", "バランスボール", "その他"
-];
+const EQUIPMENTS = EQUIPMENT_OPTIONS;
 
 const EXERCISE_LABELS: Record<string, string> = {
   strength: "筋力トレーニング",
@@ -57,11 +57,6 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
   const [equipFilter, setEquipFilter] = useState("");
   const [isCustomizing, setIsCustomizing] = useState(false);
   const [activeTab, setActiveTab] = useState<"favorite" | "recent" | "search">("favorite");
-  
-  // カスタム種目用
-  const [customName, setCustomName] = useState("");
-  const [customCategory, setCustomCategory] = useState("筋力トレーニング");
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useBodyScrollLock();
 
@@ -150,27 +145,6 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
     }
   };
 
-  const handleCustomSubmit = async () => {
-    if (!customName.trim()) return;
-    setIsSubmitting(true);
-    try {
-      const data = await apiFetch<Exercise>("/api/exercises", {
-        method: "POST",
-        body: JSON.stringify({ 
-          name: customName, 
-          category: customCategory, 
-          equipment: "その他", 
-          primary_muscle: "" 
-        })
-      });
-      onSelect({ id: data.id, name: data.name });
-    } catch (e) {
-      console.error(e);
-      alert("通信エラーが発生しました。");
-    }
-    setIsSubmitting(false);
-  };
-
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md overflow-hidden overscroll-none touch-none" onClick={onClose}>
       <div className="bg-[#111] border border-white/10 rounded-3xl shadow-2xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
@@ -189,49 +163,17 @@ export function ExerciseSelectorModal({ onClose, onSelect }: Props) {
           <div className="p-6 overflow-y-auto space-y-5 flex-1 text-white">
             <h3 className="font-bold text-lg text-primary mb-2">新しい種目を追加</h3>
             <p className="text-sm text-white/50 mb-4">
-              見つからない種目は自分で追加できます。追加した種目は辞書に保存され、後からいつでも記録に使用できます。
+              見つからない種目は自分で追加できます。追加した種目は辞書に保存され、後からいつでも記録に使用できます。同じ名前の種目が辞書にあるときは、新しく作らずにその種目を選べます。
             </p>
 
-            <div className="space-y-2">
-              <label className="text-xs font-black text-white/40">種目名 <span className="text-red-500">*</span></label>
-              <input 
-                type="text" 
-                value={customName}
-                onChange={e => setCustomName(e.target.value)}
-                placeholder="例: ダンベルプレス"
-                className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-black text-white/40">カテゴリ（任意）</label>
-              <select 
-                value={customCategory}
-                onChange={e => setCustomCategory(e.target.value)}
-                className="w-full bg-black/40 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:border-primary text-white"
-              >
-                <option value="筋力トレーニング">筋力トレーニング</option>
-                <option value="有酸素運動">有酸素運動</option>
-                <option value="ストレッチ">ストレッチ</option>
-                <option value="その他">その他</option>
-              </select>
-            </div>
-
-            <div className="pt-4 flex gap-3">
-              <button 
-                onClick={() => setIsCustomizing(false)}
-                className="flex-1 py-3 bg-white/10 text-white font-bold rounded-xl hover:bg-white/20 transition-colors"
-              >
-                キャンセル
-              </button>
-              <button 
-                onClick={handleCustomSubmit}
-                disabled={isSubmitting || !customName.trim()}
-                className="flex-1 py-3 bg-primary text-black font-bold rounded-xl hover:scale-[1.02] transition-all disabled:opacity-50 flex justify-center items-center gap-2"
-              >
-                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "追加して選択"}
-              </button>
-            </div>
+            <ExerciseCreateForm
+              initialName={searchQuery.trim()}
+              submitLabel="追加して選択"
+              existingActionLabel="この種目を選ぶ"
+              onCreated={exercise => onSelect({ id: exercise.id, name: exercise.name })}
+              onSelectExisting={exercise => onSelect({ id: exercise.id, name: exercise.name })}
+              onCancel={() => setIsCustomizing(false)}
+            />
           </div>
         ) : (
           <div className="flex flex-col flex-1 overflow-hidden">

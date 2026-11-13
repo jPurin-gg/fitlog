@@ -6,6 +6,8 @@ export interface ApiProblem {
   code?: string;
   request_id?: string;
   errors?: Record<string, string>;
+  // RFC 9457 の拡張メンバー（例: 種目の重複時の existing）
+  [extension: string]: unknown;
 }
 
 export class ApiError extends Error {
