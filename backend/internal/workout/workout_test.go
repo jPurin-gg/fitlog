@@ -319,6 +319,7 @@ func TestSummaryCommentRequiresCompletedWorkout(t *testing.T) {
 func TestSummaryCommentGeneratesAndSavesComment(t *testing.T) {
 	repository := &stubRepository{
 		detail:              Detail{ID: 2, Status: "completed", Summary: Summary{TotalSets: 3}},
+		summaryVersion:      7,
 		recommendation:      RecommendationContext{WorkoutSets: []HistorySet{{ExerciseName: "ベンチプレス", SetOrder: 1, Weight: 40, Reps: 10}}},
 		savedSummaryComment: "その調子で続けましょう。",
 	}
@@ -334,8 +335,8 @@ func TestSummaryCommentGeneratesAndSavesComment(t *testing.T) {
 	if err != nil || result.Comment != "その調子で続けましょう。" || result.Replayed {
 		t.Fatalf("SummaryComment() = %#v, %v", result, err)
 	}
-	if repository.summaryCommentInput != "その調子で続けましょう。" || repository.saveSummaryCalls != 1 {
-		t.Fatalf("saved comment = %q; calls = %d", repository.summaryCommentInput, repository.saveSummaryCalls)
+	if repository.summaryCommentInput != "その調子で続けましょう。" || repository.saveSummaryCalls != 1 || repository.summaryVersionInput != 7 {
+		t.Fatalf("saved comment = %q; calls = %d; version = %d", repository.summaryCommentInput, repository.saveSummaryCalls, repository.summaryVersionInput)
 	}
 }
 
@@ -420,6 +421,8 @@ type stubRepository struct {
 	finishErr           error
 	detail              Detail
 	detailErr           error
+	summaryVersion      int64
+	summaryVersionInput int64
 	savedSummaryComment string
 	saveSummaryReplayed bool
 	saveSummaryErr      error
@@ -447,8 +450,13 @@ func (r *stubRepository) Detail(context.Context, int, int) (Detail, error) {
 	return r.detail, r.detailErr
 }
 
-func (r *stubRepository) SaveSummaryComment(_ context.Context, _, _ int, comment string) (string, bool, error) {
+func (r *stubRepository) SummaryContext(context.Context, int, int) (SummaryContext, error) {
+	return SummaryContext{Detail: r.detail, WorkoutSets: r.recommendation.WorkoutSets, Version: r.summaryVersion}, r.detailErr
+}
+
+func (r *stubRepository) SaveSummaryComment(_ context.Context, _, _ int, version int64, comment string) (string, bool, error) {
 	r.saveSummaryCalls++
+	r.summaryVersionInput = version
 	r.summaryCommentInput = comment
 	if r.savedSummaryComment == "" {
 		r.savedSummaryComment = comment

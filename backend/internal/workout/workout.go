@@ -17,8 +17,9 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("workout not found")
-	ErrConflict = errors.New("workout conflict")
+	ErrNotFound       = errors.New("workout not found")
+	ErrConflict       = errors.New("workout conflict")
+	ErrSummaryChanged = errors.New("workout changed during summary generation")
 )
 
 var idempotencyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,128}$`)
@@ -112,6 +113,14 @@ type SummaryCommentResult struct {
 	Replayed bool   `json:"replayed"`
 }
 
+// SummaryContext contains all summary input from one database snapshot.
+// Version changes when a calendar edit replaces the completed workout.
+type SummaryContext struct {
+	Detail      Detail
+	WorkoutSets []HistorySet
+	Version     int64
+}
+
 type CalendarSet struct {
 	ID           int     `json:"id,omitempty"`
 	ExerciseID   string  `json:"exercise_id"`
@@ -139,7 +148,8 @@ type Repository interface {
 	RecommendationContext(ctx context.Context, userID, workoutID, setID int) (RecommendationContext, error)
 	Finish(ctx context.Context, userID, workoutID int) (Detail, error)
 	Detail(ctx context.Context, userID, workoutID int) (Detail, error)
-	SaveSummaryComment(ctx context.Context, userID, workoutID int, comment string) (string, bool, error)
+	SummaryContext(ctx context.Context, userID, workoutID int) (SummaryContext, error)
+	SaveSummaryComment(ctx context.Context, userID, workoutID int, version int64, comment string) (string, bool, error)
 	CalendarWorkout(ctx context.Context, userID int, date time.Time) (CalendarWorkout, error)
 	SaveCalendarWorkout(ctx context.Context, userID int, date time.Time, input CalendarWorkoutInput) (CalendarWorkout, error)
 }
@@ -283,13 +293,14 @@ func (s *Service) Detail(ctx context.Context, userID, workoutID int) (Detail, er
 }
 
 func (s *Service) SummaryComment(ctx context.Context, userID, workoutID int) (SummaryCommentResult, error) {
-	detail, err := s.repository.Detail(ctx, userID, workoutID)
+	data, err := s.repository.SummaryContext(ctx, userID, workoutID)
 	if errors.Is(err, ErrNotFound) {
 		return SummaryCommentResult{}, apperr.NotFound("ワークアウトが見つかりません。")
 	}
 	if err != nil {
 		return SummaryCommentResult{}, apperr.Internal(err)
 	}
+	detail := data.Detail
 	if detail.Status != "completed" {
 		return SummaryCommentResult{}, apperr.Conflict("ワークアウト完了後にAI総評を生成できます。")
 	}
@@ -298,13 +309,6 @@ func (s *Service) SummaryComment(ctx context.Context, userID, workoutID int) (Su
 	}
 
 	encoded, err := json.Marshal(detail.Summary)
-	if err != nil {
-		return SummaryCommentResult{}, apperr.Internal(err)
-	}
-	data, err := s.repository.RecommendationContext(ctx, userID, workoutID, 0)
-	if errors.Is(err, ErrNotFound) {
-		return SummaryCommentResult{}, apperr.NotFound("ワークアウトが見つかりません。")
-	}
 	if err != nil {
 		return SummaryCommentResult{}, apperr.Internal(err)
 	}
@@ -347,7 +351,11 @@ func (s *Service) SummaryComment(ctx context.Context, userID, workoutID int) (Su
 		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutSummary, "invalid_output", aiStarted)
 		return SummaryCommentResult{}, apperr.New(502, apperr.CodeAIUnavailable, "AI総評が不完全です。")
 	}
-	comment, replayed, err := s.repository.SaveSummaryComment(ctx, userID, workoutID, response.Comment)
+	comment, replayed, err := s.repository.SaveSummaryComment(ctx, userID, workoutID, data.Version, response.Comment)
+	if errors.Is(err, ErrSummaryChanged) {
+		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutSummary, "stale", aiStarted)
+		return SummaryCommentResult{}, apperr.Conflict("記録が編集されたためAI総評を保存しませんでした。最新の記録で再生成してください。")
+	}
 	if errors.Is(err, ErrNotFound) {
 		ai.LogFeatureOutcome(ctx, s.logger, ai.TaskWorkoutSummary, "storage_error", aiStarted)
 		return SummaryCommentResult{}, apperr.NotFound("ワークアウトが見つかりません。")
