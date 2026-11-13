@@ -52,6 +52,7 @@ func NewHandler(db *sql.DB, cfg config.Config, logger *slog.Logger) http.Handler
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
+	mux.HandleFunc("POST /api/auth/register", authHandler.Register)
 	mux.Handle("GET /api/auth/me", authHandler.Authenticate(http.HandlerFunc(authHandler.Me)))
 	mux.Handle("DELETE /api/auth/session", authHandler.Authenticate(http.HandlerFunc(authHandler.Logout)))
 

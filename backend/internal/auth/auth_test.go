@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -143,31 +144,144 @@ func TestTokenSignerVerifyRejectsForgedAndMalformedTokens(t *testing.T) {
 	}
 }
 
-func TestLoginRegistersAndClaimsLegacyUser(t *testing.T) {
+func TestRegisterThenLoginAndLegacyClaim(t *testing.T) {
 	repository := &memoryRepository{users: map[string]StoredUser{}, nextID: 1}
 	service := NewService(repository).WithPasswordHashIterations(1)
 
-	created, wasCreated, err := service.Login(context.Background(), " Mitsuki ", "password")
-	if err != nil || !wasCreated || created.Nickname != "Mitsuki" {
-		t.Fatalf("first Login() = %#v, %v, %v", created, wasCreated, err)
+	created, err := service.Register(context.Background(), " Mitsuki ", "password")
+	if err != nil || created.Nickname != "Mitsuki" || repository.users["Mitsuki"].PasswordHash == "" {
+		t.Fatalf("Register() = %#v, %v", created, err)
 	}
-	loggedIn, wasCreated, err := service.Login(context.Background(), "Mitsuki", "password")
-	if err != nil || wasCreated || loggedIn.ID != created.ID {
-		t.Fatalf("second Login() = %#v, %v, %v", loggedIn, wasCreated, err)
+	loggedIn, err := service.Login(context.Background(), " Mitsuki ", "password")
+	if err != nil || loggedIn != created {
+		t.Fatalf("Login() = %#v, %v; want %#v", loggedIn, err, created)
 	}
-	_, _, err = service.Login(context.Background(), "Mitsuki", "wrong")
+	_, err = service.Login(context.Background(), "Mitsuki", "wrong")
 	if appErr := apperr.As(err); appErr.Status != http.StatusUnauthorized || appErr.Code != apperr.CodeUnauthenticated {
 		t.Fatalf("Login(wrong password) error = %#v", appErr)
 	}
 
 	repository.users["Legacy"] = StoredUser{User: User{ID: 99, Nickname: "Legacy"}}
-	legacy, wasCreated, err := service.Login(context.Background(), "Legacy", "claimed-password")
-	if err != nil || wasCreated || legacy.ID != 99 || repository.users["Legacy"].PasswordHash == "" {
-		t.Fatalf("legacy Login() = %#v, %v, %v", legacy, wasCreated, err)
+	legacy, err := service.Login(context.Background(), "Legacy", "claimed-password")
+	if err != nil || legacy.ID != 99 || repository.users["Legacy"].PasswordHash == "" {
+		t.Fatalf("legacy Login() = %#v, %v", legacy, err)
 	}
 }
 
-func TestLoginValidatesNicknameAndPassword(t *testing.T) {
+// Regression test for #89: a mistyped nickname used to become a new, empty account.
+func TestLoginNeverCreatesUnknownNickname(t *testing.T) {
+	repository := &memoryRepository{users: map[string]StoredUser{}, nextID: 1}
+	service := NewService(repository).WithPasswordHashIterations(1)
+	if _, err := service.Register(context.Background(), "Mitsuki", "password"); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	_, wrongPasswordErr := service.Login(context.Background(), "Mitsuki", "wrong")
+	for _, nickname := range []string{"Mitsuko", "Mitsuki2", "みつき"} {
+		_, err := service.Login(context.Background(), nickname, "password")
+		appErr := apperr.As(err)
+		if appErr.Status != http.StatusUnauthorized || appErr.Code != apperr.CodeUnauthenticated {
+			t.Fatalf("Login(%q) error = %#v", nickname, appErr)
+		}
+		// Same answer as a wrong password, so login does not reveal which nicknames exist.
+		if appErr.Detail != apperr.As(wrongPasswordErr).Detail {
+			t.Fatalf("Login(%q) detail = %q, want %q", nickname, appErr.Detail, apperr.As(wrongPasswordErr).Detail)
+		}
+	}
+	if len(repository.users) != 1 {
+		t.Fatalf("users = %d, want only the registered one", len(repository.users))
+	}
+}
+
+func TestRegisterRejectsNicknameInUse(t *testing.T) {
+	repository := &memoryRepository{users: map[string]StoredUser{}, nextID: 1}
+	service := NewService(repository).WithPasswordHashIterations(1)
+	if _, err := service.Register(context.Background(), "Mitsuki", "password"); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	repository.users["Legacy"] = StoredUser{User: User{ID: 99, Nickname: "Legacy"}}
+	before := repository.users["Mitsuki"].PasswordHash
+
+	for _, test := range []struct{ nickname, password string }{
+		{"Mitsuki", "password"},
+		{"Mitsuki", "another-password"},
+		{" Mitsuki ", "password"},
+		{"Legacy", "claimed-password"},
+	} {
+		_, err := service.Register(context.Background(), test.nickname, test.password)
+		if appErr := apperr.As(err); appErr.Status != http.StatusConflict || appErr.Code != apperr.CodeConflict {
+			t.Fatalf("Register(%q, %q) error = %#v", test.nickname, test.password, appErr)
+		}
+	}
+	if len(repository.users) != 2 || repository.users["Mitsuki"].PasswordHash != before || repository.users["Legacy"].PasswordHash != "" {
+		t.Fatalf("users after rejected registrations = %#v", repository.users)
+	}
+}
+
+// Regression test for #89: "Mitsuki" typed on a phone and "mitsuki" on a PC used to be two accounts.
+func TestNicknameMatchingIgnoresCaseAndWidth(t *testing.T) {
+	repository := &memoryRepository{users: map[string]StoredUser{}, nextID: 1}
+	service := NewService(repository).WithPasswordHashIterations(1)
+	registered, err := service.Register(context.Background(), "Mitsuki", "password")
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	for _, variant := range []string{"mitsuki", "MITSUKI", "Ｍｉｔｓｕｋｉ", " ｍitsuki "} {
+		// The account keeps the nickname it was registered with, however the login was typed.
+		user, err := service.Login(context.Background(), variant, "password")
+		if err != nil || user != registered {
+			t.Fatalf("Login(%q) = %#v, %v; want %#v", variant, user, err, registered)
+		}
+		_, err = service.Login(context.Background(), variant, "wrong")
+		if appErr := apperr.As(err); appErr.Status != http.StatusUnauthorized || appErr.Code != apperr.CodeUnauthenticated {
+			t.Fatalf("Login(%q, wrong password) error = %#v", variant, appErr)
+		}
+		_, err = service.Register(context.Background(), variant, "password")
+		if appErr := apperr.As(err); appErr.Status != http.StatusConflict || appErr.Code != apperr.CodeConflict {
+			t.Fatalf("Register(%q) error = %#v", variant, appErr)
+		}
+	}
+	if len(repository.users) != 1 {
+		t.Fatalf("users = %d, want only the registered one", len(repository.users))
+	}
+}
+
+// Accounts created before nicknames were folded may already differ only by case. Each stays
+// reachable by its exact nickname, and a spelling that matches neither exactly is not guessed.
+func TestLoginPrefersExactNicknameAmongSimilarOnes(t *testing.T) {
+	upperHash, err := hashPassword("upper-password", 1)
+	if err != nil {
+		t.Fatalf("hashPassword() error = %v", err)
+	}
+	lowerHash, err := hashPassword("lower-password", 1)
+	if err != nil {
+		t.Fatalf("hashPassword() error = %v", err)
+	}
+	repository := &memoryRepository{
+		users: map[string]StoredUser{
+			"Mitsuki": {User: User{ID: 1, Nickname: "Mitsuki"}, PasswordHash: upperHash},
+			"mitsuki": {User: User{ID: 2, Nickname: "mitsuki"}, PasswordHash: lowerHash},
+		},
+		nextID: 3,
+	}
+	service := NewService(repository).WithPasswordHashIterations(1)
+
+	if user, err := service.Login(context.Background(), "Mitsuki", "upper-password"); err != nil || user.ID != 1 {
+		t.Fatalf("Login(Mitsuki) = %#v, %v", user, err)
+	}
+	if user, err := service.Login(context.Background(), "mitsuki", "lower-password"); err != nil || user.ID != 2 {
+		t.Fatalf("Login(mitsuki) = %#v, %v", user, err)
+	}
+	for _, password := range []string{"upper-password", "lower-password"} {
+		_, err := service.Login(context.Background(), "MITSUKI", password)
+		if appErr := apperr.As(err); appErr.Status != http.StatusUnauthorized || appErr.Code != apperr.CodeUnauthenticated {
+			t.Fatalf("Login(MITSUKI, %q) error = %#v", password, appErr)
+		}
+	}
+}
+
+func TestLoginAndRegisterValidateNicknameAndPassword(t *testing.T) {
 	tests := []struct {
 		name     string
 		nickname string
@@ -183,33 +297,37 @@ func TestLoginValidatesNicknameAndPassword(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			repository := &memoryRepository{users: map[string]StoredUser{}, nextID: 1}
-			_, _, err := NewService(repository).Login(context.Background(), test.nickname, test.password)
-			appErr := apperr.As(err)
-			if appErr.Status != http.StatusBadRequest || appErr.Code != apperr.CodeValidation || appErr.Fields[test.field] == "" || len(repository.users) != 0 {
-				t.Fatalf("Login() error = %#v; users = %d", appErr, len(repository.users))
+			service := NewService(repository)
+			operations := map[string]func(context.Context, string, string) (User, error){"Login": service.Login, "Register": service.Register}
+			for operation, call := range operations {
+				_, err := call(context.Background(), test.nickname, test.password)
+				appErr := apperr.As(err)
+				if appErr.Status != http.StatusBadRequest || appErr.Code != apperr.CodeValidation || appErr.Fields[test.field] == "" || len(repository.users) != 0 {
+					t.Fatalf("%s() error = %#v; users = %d", operation, appErr, len(repository.users))
+				}
 			}
 		})
 	}
 }
 
-func TestLoginCountsNicknameLengthInRunes(t *testing.T) {
+func TestRegisterCountsNicknameLengthInRunes(t *testing.T) {
 	repository := &memoryRepository{users: map[string]StoredUser{}, nextID: 1}
 	nickname := strings.Repeat("あ", 80)
-	user, wasCreated, err := NewService(repository).WithPasswordHashIterations(1).Login(context.Background(), nickname, "password")
-	if err != nil || !wasCreated || user.Nickname != nickname {
-		t.Fatalf("Login(80 runes) = %#v, %v, %v", user, wasCreated, err)
+	user, err := NewService(repository).WithPasswordHashIterations(1).Register(context.Background(), nickname, "password")
+	if err != nil || user.Nickname != nickname {
+		t.Fatalf("Register(80 runes) = %#v, %v", user, err)
 	}
 }
 
-func TestLoginReportsConflictWhenNicknameIsTakenDuringRegistration(t *testing.T) {
+func TestRegisterReportsConflictWhenNicknameIsTakenConcurrently(t *testing.T) {
 	repository := &memoryRepository{
 		users:            map[string]StoredUser{"Mitsuki": {User: User{ID: 1, Nickname: "Mitsuki"}, PasswordHash: "taken"}},
 		nextID:           2,
 		notFoundOnLookup: "Mitsuki",
 	}
-	_, _, err := NewService(repository).WithPasswordHashIterations(1).Login(context.Background(), "Mitsuki", "password")
+	_, err := NewService(repository).WithPasswordHashIterations(1).Register(context.Background(), "Mitsuki", "password")
 	if appErr := apperr.As(err); appErr.Status != http.StatusConflict || appErr.Code != apperr.CodeConflict {
-		t.Fatalf("Login(raced nickname) error = %#v", appErr)
+		t.Fatalf("Register(raced nickname) error = %#v", appErr)
 	}
 }
 
@@ -246,6 +364,31 @@ func (r *memoryRepository) FindByNickname(_ context.Context, nickname string) (S
 		return StoredUser{}, ErrUserNotFound
 	}
 	return user, nil
+}
+
+func (r *memoryRepository) FindSimilarNicknames(_ context.Context, nickname string) ([]StoredUser, error) {
+	if nickname == r.notFoundOnLookup {
+		return nil, nil
+	}
+	var similar []StoredUser
+	for _, user := range r.users {
+		if foldNickname(user.Nickname) == foldNickname(nickname) {
+			similar = append(similar, user)
+		}
+	}
+	sort.Slice(similar, func(i, j int) bool { return similar[i].ID < similar[j].ID })
+	return similar, nil
+}
+
+// foldNickname stands in for PostgreSQL's lower(normalize(username, NFKC)). It only folds letter
+// case and the full-width ASCII block, which is all these tests use.
+func foldNickname(nickname string) string {
+	return strings.ToLower(strings.Map(func(r rune) rune {
+		if r >= 0xFF01 && r <= 0xFF5E {
+			return r - 0xFEE0
+		}
+		return r
+	}, nickname))
 }
 
 func (r *memoryRepository) FindByID(_ context.Context, userID int) (User, error) {

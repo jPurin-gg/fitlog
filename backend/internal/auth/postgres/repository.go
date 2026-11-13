@@ -30,6 +30,31 @@ func (r *Repository) FindByNickname(ctx context.Context, nickname string) (auth.
 	return user, err
 }
 
+// FindSimilarNicknames compares nicknames after NFKC normalization and lowercasing, which folds
+// full-width/half-width forms and letter case. Two rows are enough for callers to see ambiguity.
+func (r *Repository) FindSimilarNicknames(ctx context.Context, nickname string) ([]auth.StoredUser, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, username, COALESCE(password_hash, '')
+		FROM users
+		WHERE lower(normalize(username, NFKC)) = lower(normalize($1::text, NFKC))
+		ORDER BY id
+		LIMIT 2
+	`, nickname)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []auth.StoredUser
+	for rows.Next() {
+		var user auth.StoredUser
+		if err := rows.Scan(&user.ID, &user.Nickname, &user.PasswordHash); err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
+
 func (r *Repository) FindByID(ctx context.Context, userID int) (auth.User, error) {
 	var user auth.User
 	err := r.db.QueryRowContext(ctx, `SELECT id, username FROM users WHERE id = $1`, userID).Scan(&user.ID, &user.Nickname)

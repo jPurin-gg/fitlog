@@ -28,24 +28,34 @@ func NewHandler(service *auth.Service, signer *auth.TokenSigner, appClock clock.
 	return &Handler{service: service, signer: signer, clock: appClock, cookieName: cookieName, cookieSecure: secure, cookieTTL: ttl}
 }
 
-type loginRequest struct {
+type credentialsRequest struct {
 	Nickname string `json:"nickname"`
 	Password string `json:"password"`
 }
 
-type loginResponse struct {
+type sessionResponse struct {
 	ID       int    `json:"id"`
 	Nickname string `json:"nickname"`
 	Created  bool   `json:"created"`
 }
 
+// Login signs in an existing user. It answers 200 with created=false and never creates a user.
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	var request loginRequest
+	h.startSession(w, r, h.service.Login, false)
+}
+
+// Register creates a user and signs them in. It answers 201 with created=true.
+func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	h.startSession(w, r, h.service.Register, true)
+}
+
+func (h *Handler) startSession(w http.ResponseWriter, r *http.Request, authenticate func(ctx context.Context, nickname, password string) (auth.User, error), created bool) {
+	var request credentialsRequest
 	if err := httpx.DecodeJSON(w, r, &request); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	user, created, err := h.service.Login(r.Context(), request.Nickname, request.Password)
+	user, err := authenticate(r.Context(), request.Nickname, request.Password)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -60,7 +70,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	if created {
 		status = http.StatusCreated
 	}
-	httpx.WriteJSON(w, status, loginResponse{ID: user.ID, Nickname: user.Nickname, Created: created})
+	httpx.WriteJSON(w, status, sessionResponse{ID: user.ID, Nickname: user.Nickname, Created: created})
 }
 
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {

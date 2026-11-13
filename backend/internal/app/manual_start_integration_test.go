@@ -238,7 +238,7 @@ func newManualAPIFixture(t *testing.T, aiHandler http.HandlerFunc) *manualAPIFix
 		t.Fatal(err)
 	}
 	f.client = &http.Client{Jar: jar, Timeout: 15 * time.Second}
-	f.request(t, "POST", "/api/auth/login", map[string]string{"nickname": "integration-user", "password": "test-only-password"}, "", http.StatusCreated)
+	f.request(t, "POST", "/api/auth/register", map[string]string{"nickname": "integration-user", "password": "test-only-password"}, "", http.StatusCreated)
 	f.request(t, "GET", "/api/auth/me", nil, "", http.StatusOK)
 	return f
 }

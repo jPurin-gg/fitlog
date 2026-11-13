@@ -36,6 +36,10 @@ type StoredUser struct {
 
 type Repository interface {
 	FindByNickname(ctx context.Context, nickname string) (StoredUser, error)
+	// FindSimilarNicknames returns the users whose nickname equals the given one once letter case and
+	// character width (full-width/half-width) are ignored, exact matches included. Callers only tell
+	// none, one and several apart, so implementations may stop after two.
+	FindSimilarNicknames(ctx context.Context, nickname string) ([]StoredUser, error)
 	FindByID(ctx context.Context, userID int) (User, error)
 	Create(ctx context.Context, nickname, passwordHash string) (User, error)
 	SetPasswordHash(ctx context.Context, userID int, passwordHash string) error
@@ -56,10 +60,96 @@ func (s *Service) WithPasswordHashIterations(iterations int) *Service {
 	return s
 }
 
-func (s *Service) Login(ctx context.Context, nickname, password string) (User, bool, error) {
+// Login authenticates an existing user. It never creates one: an unknown nickname gets the same
+// answer as a wrong password, so a mistyped nickname cannot silently become a new, empty account.
+func (s *Service) Login(ctx context.Context, nickname, password string) (User, error) {
+	nickname, err := validateCredentials(nickname, password)
+	if err != nil {
+		return User{}, err
+	}
+
+	stored, err := s.findForLogin(ctx, nickname)
+	if errors.Is(err, ErrUserNotFound) {
+		return User{}, invalidCredentials()
+	}
+	if err != nil {
+		return User{}, apperr.Internal(err)
+	}
+	if stored.PasswordHash == "" {
+		hash, hashErr := hashPassword(password, s.hashIterations)
+		if hashErr != nil {
+			return User{}, apperr.Internal(hashErr)
+		}
+		if updateErr := s.repository.SetPasswordHash(ctx, stored.ID, hash); updateErr != nil {
+			return User{}, apperr.Internal(updateErr)
+		}
+		return stored.User, nil
+	}
+	valid, verifyErr := VerifyPassword(password, stored.PasswordHash)
+	if verifyErr != nil {
+		return User{}, apperr.Internal(verifyErr)
+	}
+	if !valid {
+		return User{}, invalidCredentials()
+	}
+	return stored.User, nil
+}
+
+// findForLogin prefers the exact nickname, so accounts that already differ only by case or width
+// stay reachable. Otherwise it accepts the one account whose nickname differs only by letter case
+// or character width; several such accounts are ambiguous and count as unknown.
+func (s *Service) findForLogin(ctx context.Context, nickname string) (StoredUser, error) {
+	stored, err := s.repository.FindByNickname(ctx, nickname)
+	if !errors.Is(err, ErrUserNotFound) {
+		return stored, err
+	}
+	similar, err := s.repository.FindSimilarNicknames(ctx, nickname)
+	if err != nil {
+		return StoredUser{}, err
+	}
+	if len(similar) != 1 {
+		return StoredUser{}, ErrUserNotFound
+	}
+	return similar[0], nil
+}
+
+// Register creates a new user. A nickname that is already in use is a conflict, even when the
+// password matches: signing in to an existing account is Login's job. A nickname that differs from
+// an existing one only by letter case or character width is also taken, so a phone keyboard that
+// capitalizes or widens the input cannot fork a second account.
+func (s *Service) Register(ctx context.Context, nickname, password string) (User, error) {
+	nickname, err := validateCredentials(nickname, password)
+	if err != nil {
+		return User{}, err
+	}
+
+	similar, err := s.repository.FindSimilarNicknames(ctx, nickname)
+	if err != nil {
+		return User{}, apperr.Internal(err)
+	}
+	if len(similar) > 0 {
+		return User{}, nicknameTaken()
+	}
+
+	hash, err := hashPassword(password, s.hashIterations)
+	if err != nil {
+		return User{}, apperr.Internal(err)
+	}
+	user, err := s.repository.Create(ctx, nickname, hash)
+	if errors.Is(err, ErrNicknameTaken) {
+		return User{}, nicknameTaken()
+	}
+	if err != nil {
+		return User{}, apperr.Internal(err)
+	}
+	return user, nil
+}
+
+// validateCredentials returns the trimmed nickname shared by Login and Register.
+func validateCredentials(nickname, password string) (string, error) {
 	nickname = strings.TrimSpace(nickname)
 	if nickname == "" || password == "" {
-		return User{}, false, apperr.Validation("ニックネームとパスワードを入力してください。", map[string]string{
+		return "", apperr.Validation("ニックネームとパスワードを入力してください。", map[string]string{
 			"nickname": "required",
 			"password": "required",
 		})
@@ -72,46 +162,17 @@ func (s *Service) Login(ctx context.Context, nickname, password string) (User, b
 		fields["password"] = "must be at most 256 bytes"
 	}
 	if len(fields) > 0 {
-		return User{}, false, apperr.Validation("ニックネームまたはパスワードが長すぎます。", fields)
+		return "", apperr.Validation("ニックネームまたはパスワードが長すぎます。", fields)
 	}
+	return nickname, nil
+}
 
-	stored, err := s.repository.FindByNickname(ctx, nickname)
-	switch {
-	case err == nil:
-		if stored.PasswordHash == "" {
-			hash, hashErr := hashPassword(password, s.hashIterations)
-			if hashErr != nil {
-				return User{}, false, apperr.Internal(hashErr)
-			}
-			if updateErr := s.repository.SetPasswordHash(ctx, stored.ID, hash); updateErr != nil {
-				return User{}, false, apperr.Internal(updateErr)
-			}
-			return stored.User, false, nil
-		}
-		valid, verifyErr := VerifyPassword(password, stored.PasswordHash)
-		if verifyErr != nil {
-			return User{}, false, apperr.Internal(verifyErr)
-		}
-		if !valid {
-			return User{}, false, apperr.Unauthenticated("ニックネームまたはパスワードが違います。")
-		}
-		return stored.User, false, nil
-	case !errors.Is(err, ErrUserNotFound):
-		return User{}, false, apperr.Internal(err)
-	}
+func invalidCredentials() error {
+	return apperr.Unauthenticated("ニックネームまたはパスワードが違います。")
+}
 
-	hash, err := hashPassword(password, s.hashIterations)
-	if err != nil {
-		return User{}, false, apperr.Internal(err)
-	}
-	user, err := s.repository.Create(ctx, nickname, hash)
-	if err != nil {
-		if errors.Is(err, ErrNicknameTaken) {
-			return User{}, false, apperr.Conflict("そのニックネームは直前に登録されました。もう一度ログインしてください。")
-		}
-		return User{}, false, apperr.Internal(err)
-	}
-	return user, true, nil
+func nicknameTaken() error {
+	return apperr.Conflict("そのニックネームは既に使われています（大文字小文字・全角半角の違いは区別しません）。ログインするか、別のニックネームを選んでください。")
 }
 
 func (s *Service) Me(ctx context.Context, userID int) (User, error) {
