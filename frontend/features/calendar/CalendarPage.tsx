@@ -52,6 +52,8 @@ export default function CalendarPage() {
   const [workedOutDays, setWorkedOutDays] = useState<WorkedOutDay[]>([]);
   const [plannedDays, setPlannedDays] = useState<PlannedWorkoutDay[]>([]);
   const [editingDate, setEditingDate] = useState<string | null>(null);
+  // 選んだ日はグリッドの下に内容を出す。初期値は今日で、別の月を表示中は未選択として扱う。
+  const [selectedDateKey, setSelectedDateKey] = useState(() => formatLocalDate(new Date()));
   const selectedPlanMonth = formatPlanMonth(currentDate);
 
   const refreshCalendarData = React.useCallback(() => {
@@ -158,12 +160,13 @@ export default function CalendarPage() {
   const moveMonth = (offset: number) => {
     setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
   };
-  const openDayEditor = (day: number) => {
-    setEditingDate(`${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
-  };
+  const dateKeyOf = (day: number) => `${selectedPlanMonth}-${String(day).padStart(2, "0")}`;
+  const selectedDay = selectedDateKey.startsWith(`${selectedPlanMonth}-`) ? Number(selectedDateKey.slice(-2)) : null;
+  const selectedStatus = selectedDay ? getDayStatus(selectedDay) : null;
+  const selectedIsFuture = selectedDay ? isFutureDateKey(selectedDateKey) : false;
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white p-4 md:p-8 font-sans selection:bg-primary/30">
+    <div className="min-h-screen bg-[#0a0a0a] text-white px-3 py-4 sm:p-4 md:p-8 font-sans selection:bg-primary/30">
       <div className="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="fixed bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-secondary/10 blur-[120px] rounded-full pointer-events-none" />
 
@@ -188,12 +191,12 @@ export default function CalendarPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
-            <div className="glass rounded-[32px] p-6 lg:p-8">
-              <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between mb-8">
+            <div className="glass rounded-3xl sm:rounded-[32px] px-2 py-4 sm:p-6 lg:p-8">
+              <div className="flex flex-col gap-4 px-1 sm:px-0 sm:flex-row sm:items-center sm:justify-between mb-6 sm:mb-8">
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => moveMonth(-1)}
-                    className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+                    className="w-11 h-11 flex-shrink-0 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors"
                     aria-label="前の月"
                   >
                     <ChevronLeft className="w-5 h-5" />
@@ -204,7 +207,7 @@ export default function CalendarPage() {
                   </h2>
                   <button
                     onClick={() => moveMonth(1)}
-                    className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+                    className="w-11 h-11 flex-shrink-0 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors"
                     aria-label="次の月"
                   >
                     <ChevronRight className="w-5 h-5" />
@@ -224,10 +227,14 @@ export default function CalendarPage() {
                     <div className="w-2 h-2 md:w-3 md:h-3 rounded-full border-2 border-white"></div>
                     今日
                   </div>
+                  <div className="flex items-center gap-1 md:gap-2">
+                    <div className="w-2 h-2 md:w-3 md:h-3 rounded-sm border-2 border-secondary"></div>
+                    選択中
+                  </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-7 gap-2 lg:gap-4 mb-4">
+              <div className="grid grid-cols-7 gap-1 sm:gap-2 lg:gap-4 mb-2 sm:mb-4">
                 {weekDayNames.map(day => (
                   <div key={day} className="text-center text-[10px] font-black text-white/30 tracking-widest">
                     {day}
@@ -235,11 +242,13 @@ export default function CalendarPage() {
                 ))}
               </div>
 
-              <div className="grid grid-cols-7 gap-2 lg:gap-4">
+              <div className="grid grid-cols-7 gap-1 sm:gap-2 lg:gap-4">
                 {days.map((day, idx) => {
-                  if (!day) return <div key={`empty-${idx}`} className="p-2" />;
+                  if (!day) return <div key={`empty-${idx}`} aria-hidden="true" />;
                   
                   const status = getDayStatus(day);
+                  const dateKey = dateKeyOf(day);
+                  const selected = day === selectedDay;
                   
                   let bgClass = "bg-white/5 border-white/5";
                   let textClass = "text-white/50";
@@ -248,73 +257,111 @@ export default function CalendarPage() {
                     bgClass = "bg-green-500/20 border-green-500/30 ring-1 ring-green-500/50";
                     textClass = "text-green-400 font-bold";
                   } else if (status.isPlanned) {
-                    bgClass = "bg-primary/20 border-primary/30 ring-1 ring-primary/50 relative overflow-hidden";
+                    bgClass = "bg-primary/20 border-primary/30 ring-1 ring-primary/50";
                     textClass = "text-primary font-bold";
                   }
                   
                   if (status.isToday) {
-                    bgClass += " ring-2 ring-white ring-offset-2 ring-offset-[#0a0a0a]";
+                    bgClass += " ring-2 ring-white ring-offset-1 sm:ring-offset-2 ring-offset-[#0a0a0a]";
                     textClass = "text-white font-black";
                   }
 
-                  const dayContent = (
-                    <motion.div
-                      key={day}
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: idx * 0.01 }}
-                      className={`relative aspect-square rounded-2xl border flex flex-col items-center justify-center transition-all ${
-                        "hover:scale-105 cursor-pointer group"
-                      } ${bgClass}`}
-                    >
-                      {status.isPlanned && !status.isWorkedOut && (
-                        <div className="absolute inset-0 bg-gradient-to-tr from-primary/10 to-transparent opacity-50" />
-                      )}
-                      
-                      <span className={`text-sm md:text-xl lg:text-2xl mb-1 ${textClass}`}>{day}</span>
-                      
-                      <div className="h-4 flex items-center justify-center">
-                        {status.isWorkedOut ? (
-                          <div className="flex flex-col items-center">
-                            <span className="text-[8px] md:text-[10px] font-black text-green-300 leading-none text-center whitespace-normal px-1 w-full line-clamp-2">
-                              {status.type}
-                            </span>
-                          </div>
-                        ) : (
-                          <>
-                            {status.isPlanned && !status.isToday && (
-                              <div className="flex flex-col items-center">
-                                <span className="text-[7px] md:text-[9px] font-bold text-primary opacity-80 leading-tight text-center whitespace-normal px-0.5 w-full line-clamp-2">
-                                  {status.plannedTarget || <Dumbbell className="w-3 h-3 mx-auto" />}
-                                </span>
-                              </div>
-                            )}
-                            {status.isToday && status.isPlanned && (
-                              <div className="flex flex-col items-center animate-pulse">
-                                <span className="text-[8px] md:text-[10px] font-black text-white leading-tight text-center whitespace-normal px-0.5 w-full line-clamp-2">
-                                  {status.plannedTarget || <Dumbbell className="w-4 h-4 mx-auto" />}
-                                </span>
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </motion.div>
-                  );
+                  // 狭い幅では点だけを出し、広い幅でだけ短いラベルを1行で添える（10px以上・はみ出しは省略）。
+                  const label = status.isWorkedOut ? status.type : status.isPlanned ? status.plannedTarget : "";
+                  const dotClass = status.isWorkedOut ? "bg-green-400" : status.isPlanned ? "bg-primary" : "";
+                  const accessibleStatus = status.isWorkedOut
+                    ? ` 実施済み ${status.type}`
+                    : status.isPlanned ? ` 予定 ${status.plannedTarget}` : "";
 
                   return (
                     <button
                       key={day}
                       type="button"
-                      onClick={() => openDayEditor(day)}
-                      aria-label={`${selectedPlanMonth}-${String(day).padStart(2, "0")} の記録を編集`}
-                      className="block text-left"
+                      onClick={() => setSelectedDateKey(dateKey)}
+                      aria-pressed={selected}
+                      aria-label={`${dateKey}${accessibleStatus}`.trim()}
+                      className="block min-w-0 text-left"
                     >
-                      {dayContent}
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: idx * 0.01 }}
+                        data-testid="calendar-day-cell"
+                        className={`relative aspect-square min-w-0 overflow-hidden rounded-xl sm:rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all hover:scale-105 cursor-pointer ${bgClass}`}
+                      >
+                        {status.isPlanned && !status.isWorkedOut && (
+                          <div className="absolute inset-0 bg-gradient-to-tr from-primary/10 to-transparent opacity-50" />
+                        )}
+                        {selected && (
+                          <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-[inherit] border-2 border-secondary" />
+                        )}
+
+                        <span className={`relative text-sm leading-none md:text-xl lg:text-2xl ${textClass}`}>{day}</span>
+
+                        <span aria-hidden="true" className="relative flex h-1.5 max-w-full items-center justify-center md:h-4">
+                          {dotClass && <span className={`h-1.5 w-1.5 rounded-full md:hidden ${dotClass} ${status.isToday && status.isPlanned ? "animate-pulse" : ""}`} />}
+                          {(status.isWorkedOut || status.isPlanned) && (
+                            <span className={`hidden md:block max-w-full truncate px-1 text-[10px] lg:text-xs font-black leading-4 ${status.isWorkedOut ? "text-green-300" : "text-primary"}`}>
+                              {label || <Dumbbell className="h-3 w-3" />}
+                            </span>
+                          )}
+                        </span>
+                      </motion.div>
                     </button>
                   );
                 })}
               </div>
+
+              {/* 選んだ日の内容はセルに詰め込まず、グリッドの下に出す */}
+              <section aria-label="選択した日の内容" aria-live="polite" className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-4">
+                {selectedDay && selectedStatus ? (
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-black text-primary">
+                        {new Date(year, month, selectedDay).toLocaleDateString("ja-JP", { month: "long", day: "numeric", weekday: "short" })}
+                        {selectedStatus.isToday && <span className="ml-2 text-xs text-white/60">今日</span>}
+                      </h3>
+                      <ul className="mt-2 space-y-1 text-sm text-white/80">
+                        {selectedStatus.isWorkedOut && (
+                          <li className="flex items-center gap-2">
+                            <span aria-hidden="true" className="h-2 w-2 flex-shrink-0 rounded-full bg-green-400" />
+                            <span className="break-words">実施済み: {selectedStatus.type || "筋トレ"}</span>
+                          </li>
+                        )}
+                        {selectedStatus.isPlanned && (
+                          <li className="flex items-center gap-2">
+                            <span aria-hidden="true" className="h-2 w-2 flex-shrink-0 rounded-full bg-primary" />
+                            <span className="break-words">予定: {selectedStatus.plannedTarget || "トレーニング"}</span>
+                          </li>
+                        )}
+                        {!selectedStatus.isWorkedOut && !selectedStatus.isPlanned && (
+                          <li className="text-white/45">記録・予定はありません</li>
+                        )}
+                      </ul>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedStatus.workoutId && (
+                        <Link
+                          href={`/workouts/${selectedStatus.workoutId}`}
+                          className="min-h-11 px-4 rounded-xl border border-white/10 bg-white/5 text-sm font-bold text-white/70 hover:bg-white/10 hover:text-white transition-colors flex items-center gap-2"
+                        >
+                          詳細 <ExternalLink className="h-4 w-4" />
+                        </Link>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setEditingDate(selectedDateKey)}
+                        aria-label={`${selectedDateKey} の${selectedIsFuture ? "予定" : "記録"}を編集`}
+                        className="min-h-11 px-4 rounded-xl bg-primary text-sm font-black text-black hover:scale-[1.02] active:scale-[0.98] transition-all"
+                      >
+                        {selectedIsFuture ? "予定を編集" : "記録を編集"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-white/45">日付を選ぶと、その日の記録や予定をここに表示します。</p>
+                )}
+              </section>
             </div>
           </div>
 
