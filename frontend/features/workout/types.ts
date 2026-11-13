@@ -79,3 +79,9 @@ export interface WorkoutSet {
   is_pr: boolean;
   created_at: string;
 }
+
+export interface SetPatch {
+  weight?: number;
+  reps?: number;
+  feeling?: string;
+}
