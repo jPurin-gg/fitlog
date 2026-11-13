@@ -37,6 +37,26 @@ func (h *Handler) RecordSet(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, status, result)
 }
 
+func (h *Handler) UpdateSet(w http.ResponseWriter, r *http.Request) {
+	workoutID, setID, err := workoutSetPathIDs(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.DecodeAndRespond(w, r, http.StatusOK, func(request workout.SetPatch) (workout.Set, error) {
+		return h.service.UpdateSet(r.Context(), authhttp.UserID(r.Context()), workoutID, setID, request)
+	})
+}
+
+func (h *Handler) DeleteSet(w http.ResponseWriter, r *http.Request) {
+	workoutID, setID, err := workoutSetPathIDs(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.RespondNoContent(w, r, h.service.DeleteSet(r.Context(), authhttp.UserID(r.Context()), workoutID, setID))
+}
+
 func (h *Handler) Recommendation(w http.ResponseWriter, r *http.Request) {
 	workoutID, err := positivePathID(r, "workoutID")
 	if err != nil {
@@ -91,6 +111,18 @@ func (h *Handler) PutCalendarWorkout(w http.ResponseWriter, r *http.Request) {
 	httpx.DecodeAndRespond(w, r, http.StatusOK, func(request workout.CalendarWorkoutInput) (workout.CalendarWorkout, error) {
 		return h.service.SaveCalendarWorkout(r.Context(), authhttp.UserID(r.Context()), r.PathValue("date"), request)
 	})
+}
+
+func workoutSetPathIDs(r *http.Request) (int, int, error) {
+	workoutID, err := positivePathID(r, "workoutID")
+	if err != nil {
+		return 0, 0, err
+	}
+	setID, err := positivePathID(r, "setID")
+	if err != nil {
+		return 0, 0, err
+	}
+	return workoutID, setID, nil
 }
 
 func positivePathID(r *http.Request, name string) (int, error) {

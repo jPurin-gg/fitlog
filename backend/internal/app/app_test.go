@@ -61,6 +61,8 @@ func TestNewHandlerRegistersProtectedRoutes(t *testing.T) {
 		{http.MethodPut, "/api/workouts/by-date/2026-08-24"},
 		{http.MethodGet, "/api/workouts/42"},
 		{http.MethodPost, "/api/workouts/42/sets"},
+		{http.MethodPatch, "/api/workouts/42/sets/7"},
+		{http.MethodDelete, "/api/workouts/42/sets/7"},
 		{http.MethodPost, "/api/workouts/42/sets/7/recommendation"},
 		{http.MethodPost, "/api/workouts/42/finish"},
 		{http.MethodPost, "/api/workouts/42/summary-comment"},
@@ -70,5 +72,27 @@ func TestNewHandlerRegistersProtectedRoutes(t *testing.T) {
 		if recorder.Code != http.StatusUnauthorized || !strings.HasPrefix(recorder.Header().Get("Content-Type"), "application/problem+json") {
 			t.Fatalf("%s %s = %d, %q", test.method, test.path, recorder.Code, recorder.Header().Get("Content-Type"))
 		}
+	}
+}
+
+func TestCORSPreflightAllowsSetCorrectionMethods(t *testing.T) {
+	cfg := config.Config{
+		FrontendURL:       "http://localhost:3000",
+		Timezone:          time.UTC,
+		SessionSecret:     []byte("0123456789abcdef0123456789abcdef"),
+		SessionCookieName: "fitlog_session",
+		SessionTTL:        30 * 24 * time.Hour,
+		PromptDir:         "../../prompts",
+		AI:                config.AIConfig{Timeout: time.Second},
+	}
+	handler := NewHandler(&sql.DB{}, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	request := httptest.NewRequest(http.MethodOptions, "/api/workouts/42/sets/7", nil)
+	request.Header.Set("Origin", "http://localhost:3000")
+	request.Header.Set("Access-Control-Request-Method", http.MethodPatch)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	allowed := recorder.Header().Get("Access-Control-Allow-Methods")
+	if recorder.Code != http.StatusNoContent || !strings.Contains(allowed, http.MethodPatch) || !strings.Contains(allowed, http.MethodDelete) {
+		t.Fatalf("preflight = %d, Access-Control-Allow-Methods = %q", recorder.Code, allowed)
 	}
 }

@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api";
-import type { SetInput, SetRecommendation, WorkoutDetail, WorkoutPlanSession, WorkoutSummary } from "./types";
+import type { SetInput, SetPatch, SetRecommendation, WorkoutDetail, WorkoutPlanSession, WorkoutSet, WorkoutSummary } from "./types";
 
 export function getTargetSets(exerciseID: string) {
   return apiFetch<{ target_sets: number }>(`/api/exercises/${encodeURIComponent(exerciseID)}/settings`);
@@ -28,11 +28,22 @@ export function getSetRecommendation(workoutID: number, setID: number, signal: A
 }
 
 export function recordWorkoutSet(workoutID: number, idempotencyKey: string, input: SetInput) {
-  return apiFetch<{ id: number }>(`/api/workouts/${workoutID}/sets`, {
+  return apiFetch<WorkoutSet>(`/api/workouts/${workoutID}/sets`, {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
     body: JSON.stringify(input),
   });
+}
+
+export function updateWorkoutSet(workoutID: number, setID: number, patch: SetPatch) {
+  return apiFetch<WorkoutSet>(`/api/workouts/${workoutID}/sets/${setID}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export function deleteWorkoutSet(workoutID: number, setID: number) {
+  return apiFetch<void>(`/api/workouts/${workoutID}/sets/${setID}`, { method: "DELETE" });
 }
 
 export function getSummaryComment(workoutID: number, signal: AbortSignal) {

@@ -8,6 +8,7 @@ import { ExerciseSelectorModal } from "@/features/exercises/components/ExerciseS
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { ApiError, apiErrorMessage, apiFetch } from "@/lib/api";
 import { displayPlanText, formatLocalDate, formatPlanMonth } from "@/lib/fitlog";
+import { MAX_REPS, MAX_WEIGHT_KG, validateSetValues } from "@/lib/setLimits";
 import type { CalendarPlan, CalendarPlanExercise, CalendarWorkout, CalendarWorkoutSet, DayRoutine, MonthlyPlan, PlannedWorkoutDay, WorkedOutDay } from "./types";
 
 function dateFromPlanMonth(planMonth: string) {
@@ -510,19 +511,26 @@ export function CalendarWorkoutEditor({
   };
 
   const save = async () => {
+    const payload = {
+      title,
+      sets: sets.map((set, i) => ({
+        exercise_id: set.exercise_id,
+        weight: Number(set.weight) || 0,
+        reps: Number(set.reps) || 0,
+        set_order: i + 1,
+        feeling: set.feeling || "",
+      })),
+    };
+    for (const [index, set] of payload.sets.entries()) {
+      const message = validateSetValues(set.weight, set.reps);
+      if (message) {
+        setError(`${index + 1}セット目: ${message}`);
+        return;
+      }
+    }
     setSaving(true);
     setError("");
     try {
-      const payload = {
-        title,
-        sets: sets.map((set, i) => ({
-          exercise_id: set.exercise_id,
-          weight: Number(set.weight) || 0,
-          reps: Number(set.reps) || 0,
-          set_order: i + 1,
-          feeling: set.feeling || "",
-        })),
-      };
       await apiFetch<CalendarWorkout>(`/api/workouts/by-date/${date}`, {
         method: "PUT",
         body: JSON.stringify(payload),
@@ -621,6 +629,7 @@ export function CalendarWorkoutEditor({
                           <input
                             type="number"
                             min="0"
+                            max={MAX_WEIGHT_KG}
                             step="0.5"
                             value={set.weight}
                             onChange={e => updateSet(index, { weight: Number(e.target.value) })}
@@ -632,6 +641,7 @@ export function CalendarWorkoutEditor({
                           <input
                             type="number"
                             min="1"
+                            max={MAX_REPS}
                             step="1"
                             value={set.reps}
                             onChange={e => updateSet(index, { reps: Number(e.target.value) })}

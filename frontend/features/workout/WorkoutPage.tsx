@@ -15,7 +15,9 @@ import {
   ListChecks,
   Trophy,
   RotateCcw,
-  Home
+  Home,
+  Pencil,
+  Undo2
 } from "lucide-react";
 import { AnimatePresence } from "framer-motion";
 import Link from "next/link";
@@ -24,11 +26,25 @@ import { ExerciseSelectorModal } from "@/features/exercises/components/ExerciseS
 import { WorkoutSummaryView, type WorkoutSummary } from "./components/WorkoutSummaryView";
 import { ApiError, apiErrorMessage } from "@/lib/api";
 import { displayPlanText, formatLocalDate } from "@/lib/fitlog";
+import { MAX_REPS, MAX_WEIGHT_KG, needsLargeWeightConfirmation, parseSetValues, type SetValues } from "@/lib/setLimits";
 import { initialRecordFlowState, recordFlowReducer } from "./workoutFlow";
-import { finishWorkoutSession, getSetRecommendation, getSummaryComment, getTargetSets, recordWorkoutSet, startWorkoutPlan, updateTargetSets } from "./api";
+import { deleteWorkoutSet, finishWorkoutSession, getSetRecommendation, getSummaryComment, getTargetSets, recordWorkoutSet, startWorkoutPlan, updateTargetSets, updateWorkoutSet } from "./api";
 import type { SetRecommendation, WorkoutPlanSession } from "./types";
 
 type SummaryCommentState = "idle" | "loading" | "ready" | "unavailable";
+
+interface SavedSet extends SetValues {
+  id: number;
+  feeling: string;
+}
+
+interface Confirmation {
+  title: string;
+  detail: string;
+  confirmLabel: string;
+  cancelLabel?: string;
+  onConfirm: () => void;
+}
 
 function newIdempotencyKey() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -76,12 +92,19 @@ export default function WorkoutPage() {
   const [finishedSummary, setFinishedSummary] = React.useState<WorkoutSummary | null>(null);
   const [finishedWorkoutID, setFinishedWorkoutID] = React.useState<number | null>(null);
   const [recordedSetID, setRecordedSetID] = React.useState<number | null>(null);
+  const [savedSet, setSavedSet] = React.useState<SavedSet | null>(null);
+  const [confirmation, setConfirmation] = React.useState<Confirmation | null>(null);
+  const [editingSavedSet, setEditingSavedSet] = React.useState(false);
+  const [correctionState, setCorrectionState] = React.useState<"idle" | "updating" | "deleting">("idle");
+  const [correctionError, setCorrectionError] = React.useState<string | null>(null);
+  const [correctionNotice, setCorrectionNotice] = React.useState<string | null>(null);
   const startInFlightRef = React.useRef(false);
   const startAbortRef = React.useRef<AbortController | null>(null);
   const startRequestRef = React.useRef(0);
   const startWithoutAIRef = React.useRef<(() => void) | null>(null);
   const saveInFlightRef = React.useRef(false);
   const finishInFlightRef = React.useRef(false);
+  const correctionInFlightRef = React.useRef(false);
   const setRequestRef = React.useRef<{ signature: string; key: string; setID?: number } | null>(null);
   const activeSetIDRef = React.useRef<number | null>(null);
   const recommendationAbortRef = React.useRef<AbortController | null>(null);
@@ -90,7 +113,13 @@ export default function WorkoutPage() {
   const summaryCommentAbortRef = React.useRef<AbortController | null>(null);
   const summaryCommentRequestRef = React.useRef(0);
   const nextSetByExerciseRef = React.useRef<Record<string, number>>({});
-  const recordTransitionLocked = saveState === "saving" || saveRetryLocked;
+  // このワークアウトで保存済みのセット重量（確認の基準となる過去最大の算出用）。
+  const sessionSetWeightsRef = React.useRef<Record<number, { exerciseID: string; weight: number }>>({});
+  // 保存済みセットの修正中・修正/取り消しの通信中も、種目変更や終了などの移動を止める。
+  const recordTransitionLocked = saveState === "saving" || saveRetryLocked || editingSavedSet || correctionState !== "idle";
+  const inputsLocked = editingSavedSet
+    ? correctionState !== "idle" || finishing
+    : recordTransitionLocked || saveState === "saved" || finishing;
 
   React.useEffect(() => () => {
     startAbortRef.current?.abort();
@@ -153,6 +182,33 @@ export default function WorkoutPage() {
     setRequestRef.current = null;
     activeSetIDRef.current = null;
     setRecordedSetID(null);
+    setSavedSet(null);
+    setEditingSavedSet(false);
+    setCorrectionError(null);
+    setCorrectionNotice(null);
+  };
+
+  // 計画開始時点の過去最大と、このワークアウトで保存済みの同じ種目の重量のうち大きい方。
+  const referenceMaxWeight = (exerciseID: string, excludeSetID: number | null) => {
+    const planned = workoutPlan?.plan.exercises.find(ex => ex.exercise_id === exerciseID)?.last_max_weight || 0;
+    const sessionWeights = Object.entries(sessionSetWeightsRef.current)
+      .filter(([setID, set]) => set.exerciseID === exerciseID && Number(setID) !== excludeSetID)
+      .map(([, set]) => set.weight);
+    return Math.max(planned, ...sessionWeights);
+  };
+
+  const confirmLargeWeight = (weight: number, exerciseID: string, excludeSetID: number | null, proceed: () => void) => {
+    const previousMax = referenceMaxWeight(exerciseID, excludeSetID);
+    if (!needsLargeWeightConfirmation(weight, previousMax)) {
+      proceed();
+      return;
+    }
+    setConfirmation({
+      title: `${weight}kg で保存しますか？`,
+      detail: `過去の最大重量（${previousMax}kg）を大きく超えています。入力ミスでないか確認してください。`,
+      confirmLabel: `${weight}kg で保存`,
+      onConfirm: proceed,
+    });
   };
 
   const activatePlanExercise = (plan: WorkoutPlanSession, index: number) => {
@@ -188,6 +244,7 @@ export default function WorkoutPage() {
     setWorkoutPlan(data);
     setWorkoutStarted(true);
     nextSetByExerciseRef.current = {};
+    sessionSetWeightsRef.current = {};
     setStartNotice(isEnabled() && data.ai_status === "fallback"
       ? "AI調整は利用できませんでしたが、記録できるメニューで開始しました。"
       : null);
@@ -271,7 +328,7 @@ export default function WorkoutPage() {
     }
   };
 
-  const saveCurrentSet = async () => {
+  const saveCurrentSet = () => {
     if (!formData.weight || !formData.reps || saveInFlightRef.current || finishInFlightRef.current || recordedSetID !== null) return;
     const workoutID = workoutPlan?.workout_id;
     if (!workoutID) {
@@ -280,19 +337,29 @@ export default function WorkoutPage() {
       return;
     }
 
-    const weight = Number.parseFloat(formData.weight);
-    const reps = Number.parseInt(formData.reps, 10);
-    if (!Number.isFinite(weight) || weight < 0 || !Number.isInteger(reps) || reps <= 0) {
+    const parsed = parseSetValues(formData.weight, formData.reps);
+    if (!parsed.ok) {
       dispatchRecordFlow({ type: "SAVE_FAILED" });
       setSaveRetryLocked(false);
-      setSaveError("重量は0以上、回数は1以上の整数で入力してください。");
+      setSaveError(parsed.message);
       return;
     }
+    // 保存成否が不明な再送は、確認済みの同じ内容を同じ識別子で送り直すだけにする。
+    if (saveRetryLocked) {
+      void recordSet(workoutID, parsed.values);
+      return;
+    }
+    confirmLargeWeight(parsed.values.weight, currentExercise.id, null, () => void recordSet(workoutID, parsed.values));
+  };
+
+  const recordSet = async (workoutID: number, values: SetValues) => {
+    if (saveInFlightRef.current || finishInFlightRef.current) return;
+    const exerciseID = currentExercise.id;
     const setInput = {
-      exercise_id: currentExercise.id,
+      exercise_id: exerciseID,
       set_order: currentSet,
-      weight,
-      reps,
+      weight: values.weight,
+      reps: values.reps,
       feeling: formData.feeling,
     };
     const signature = JSON.stringify(setInput);
@@ -310,8 +377,14 @@ export default function WorkoutPage() {
       setRequestRef.current.setID = recorded.id;
       activeSetIDRef.current = recorded.id;
       setRecordedSetID(recorded.id);
-      nextSetByExerciseRef.current[currentExercise.id] = Math.max(
-        nextSetByExerciseRef.current[currentExercise.id] || 1,
+      // 表示と次セットの初期値は、入力文字列ではなく保存された値を使う。
+      const saved = { id: recorded.id, weight: recorded.weight ?? setInput.weight, reps: recorded.reps ?? setInput.reps, feeling: recorded.feeling ?? setInput.feeling };
+      setSavedSet(saved);
+      setCorrectionNotice(null);
+      setFormData(previous => ({ ...previous, weight: String(saved.weight), reps: String(saved.reps) }));
+      sessionSetWeightsRef.current[recorded.id] = { exerciseID, weight: saved.weight };
+      nextSetByExerciseRef.current[exerciseID] = Math.max(
+        nextSetByExerciseRef.current[exerciseID] || 1,
         currentSet + 1,
       );
       setSaveRetryLocked(false);
@@ -333,8 +406,104 @@ export default function WorkoutPage() {
     void fetchRecommendation(workoutPlan.workout_id, recordedSetID);
   };
 
+  const startSetCorrection = () => {
+    if (saveState !== "saved" || !savedSet || finishInFlightRef.current || correctionInFlightRef.current) return;
+    setCorrectionError(null);
+    setCorrectionNotice(null);
+    setEditingSavedSet(true);
+  };
+
+  const cancelSetCorrection = () => {
+    if (!savedSet || correctionInFlightRef.current) return;
+    setFormData(previous => ({ ...previous, weight: String(savedSet.weight), reps: String(savedSet.reps), feeling: savedSet.feeling }));
+    setCorrectionError(null);
+    setEditingSavedSet(false);
+  };
+
+  const submitSetCorrection = () => {
+    const workoutID = workoutPlan?.workout_id;
+    if (!workoutID || !savedSet || !editingSavedSet || correctionInFlightRef.current || finishInFlightRef.current) return;
+    const parsed = parseSetValues(formData.weight, formData.reps);
+    if (!parsed.ok) {
+      setCorrectionError(parsed.message);
+      return;
+    }
+    const target = savedSet;
+    const exerciseID = currentExercise.id;
+    const feeling = formData.feeling.trim();
+    confirmLargeWeight(parsed.values.weight, exerciseID, target.id, () => {
+      void updateSavedSet(workoutID, target.id, exerciseID, { ...parsed.values, feeling });
+    });
+  };
+
+  const updateSavedSet = async (workoutID: number, setID: number, exerciseID: string, patch: SetValues & { feeling: string }) => {
+    if (correctionInFlightRef.current) return;
+    correctionInFlightRef.current = true;
+    setCorrectionState("updating");
+    setCorrectionError(null);
+    try {
+      const updated = await updateWorkoutSet(workoutID, setID, patch);
+      const saved = { id: setID, weight: updated.weight ?? patch.weight, reps: updated.reps ?? patch.reps, feeling: updated.feeling ?? patch.feeling };
+      setSavedSet(saved);
+      setFormData(previous => ({ ...previous, weight: String(saved.weight), reps: String(saved.reps), feeling: saved.feeling }));
+      sessionSetWeightsRef.current[setID] = { exerciseID, weight: saved.weight };
+      setEditingSavedSet(false);
+      setCorrectionNotice("セットを修正しました。自己ベストと最大重量は修正後の値で再計算されます。");
+      // 修正前の値に基づくAI提案は破棄し、ONなら修正後の値で取り直す。
+      recommendationAbortRef.current?.abort();
+      recommendationRequestRef.current += 1;
+      setRecommendation(null);
+      setRecommendationError(null);
+      dispatchRecordFlow({ type: "RECOMMENDATION_CANCELED" });
+      void fetchRecommendation(workoutID, setID);
+    } catch (e) {
+      console.error(e);
+      setCorrectionError(apiErrorMessage(e, "セットを修正できませんでした。もう一度お試しください。"));
+    } finally {
+      correctionInFlightRef.current = false;
+      setCorrectionState("idle");
+    }
+  };
+
+  const requestSetDeletion = () => {
+    if (saveState !== "saved" || !savedSet || finishInFlightRef.current || correctionInFlightRef.current) return;
+    const target = savedSet;
+    setConfirmation({
+      title: "このセットを取り消しますか？",
+      detail: `${target.weight}kg × ${target.reps}回 の記録を削除し、自己ベストと最大重量を再計算します。`,
+      confirmLabel: "取り消す",
+      cancelLabel: "残す",
+      onConfirm: () => { void deleteSavedSet(target.id); },
+    });
+  };
+
+  const deleteSavedSet = async (setID: number) => {
+    const workoutID = workoutPlan?.workout_id;
+    if (!workoutID || correctionInFlightRef.current || finishInFlightRef.current) return;
+    correctionInFlightRef.current = true;
+    setCorrectionState("deleting");
+    setCorrectionError(null);
+    setCorrectionNotice(null);
+    try {
+      await deleteWorkoutSet(workoutID, setID);
+      delete sessionSetWeightsRef.current[setID];
+      // 取り消したセット番号から記録し直す。
+      if (nextSetByExerciseRef.current[currentExercise.id] === currentSet + 1) {
+        nextSetByExerciseRef.current[currentExercise.id] = currentSet;
+      }
+      resetSetFlow();
+      setCorrectionNotice(`${currentSet}セット目の記録を取り消しました。内容を直して保存し直せます。`);
+    } catch (e) {
+      console.error(e);
+      setCorrectionError(apiErrorMessage(e, "セットを取り消せませんでした。もう一度お試しください。"));
+    } finally {
+      correctionInFlightRef.current = false;
+      setCorrectionState("idle");
+    }
+  };
+
   const handleNextSet = () => {
-    if (saveState !== "saved" || finishInFlightRef.current) return;
+    if (saveState !== "saved" || editingSavedSet || finishInFlightRef.current || correctionInFlightRef.current) return;
     const nextSet = currentSet + 1;
     nextSetByExerciseRef.current[currentExercise.id] = nextSet;
     setCurrentSet(nextSet);
@@ -373,7 +542,7 @@ export default function WorkoutPage() {
   };
 
   const finishWorkout = async () => {
-    if (finishInFlightRef.current || saveInFlightRef.current || saveRetryLocked) return;
+    if (finishInFlightRef.current || saveInFlightRef.current || saveRetryLocked || correctionInFlightRef.current || editingSavedSet) return;
     finishInFlightRef.current = true;
     setFinishing(true);
     setFinishError(null);
@@ -402,10 +571,12 @@ export default function WorkoutPage() {
       dispatchRecordFlow({ type: "RESET" });
       setCurrentSet(1);
       nextSetByExerciseRef.current = {};
+      sessionSetWeightsRef.current = {};
       setCurrentExerciseIndex(0);
       setFormData({ weight: '', reps: '', feeling: '' });
       setRequestRef.current = null;
       setRecordedSetID(null);
+      setSavedSet(null);
     } catch (e) {
       console.error(e);
       setFinishError(apiErrorMessage(e, 'ワークアウト終了に失敗しました。'));
@@ -416,7 +587,7 @@ export default function WorkoutPage() {
   };
 
   const handleNextExercise = () => {
-    if (!workoutPlan || saveInFlightRef.current || saveRetryLocked || finishInFlightRef.current) return;
+    if (!workoutPlan || saveInFlightRef.current || saveRetryLocked || finishInFlightRef.current || correctionInFlightRef.current || editingSavedSet) return;
     const nextIndex = currentExerciseIndex + 1;
     if (nextIndex >= workoutPlan.plan.exercises.length) {
       void finishWorkout();
@@ -601,6 +772,35 @@ export default function WorkoutPage() {
         )}
       </AnimatePresence>
 
+      {confirmation && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div role="alertdialog" aria-modal="true" aria-labelledby="set-confirmation-title" aria-describedby="set-confirmation-detail" className="w-full max-w-sm rounded-[24px] border border-amber-400/30 bg-[#151515] p-6 shadow-2xl">
+            <h2 id="set-confirmation-title" className="text-lg font-black text-amber-200">{confirmation.title}</h2>
+            <p id="set-confirmation-detail" className="mt-2 text-sm text-white/65">{confirmation.detail}</p>
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmation(null)}
+                className="rounded-2xl bg-white/10 py-3 text-sm font-bold text-white transition-colors hover:bg-white/20"
+              >
+                {confirmation.cancelLabel ?? "入力し直す"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const proceed = confirmation.onConfirm;
+                  setConfirmation(null);
+                  proceed();
+                }}
+                className="rounded-2xl bg-amber-400/20 py-3 text-sm font-bold text-amber-200 transition-colors hover:bg-amber-400/30"
+              >
+                {confirmation.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showExerciseSelector && (
         <ExerciseSelectorModal
           onClose={() => setShowExerciseSelector(false)}
@@ -750,9 +950,13 @@ export default function WorkoutPage() {
                   <label className="text-[10px] font-black text-white/40 ml-1">重量（kg）</label>
                   <input 
                     type="number" 
+                    min={0}
+                    max={MAX_WEIGHT_KG}
+                    step="any"
+                    inputMode="decimal"
                     value={formData.weight}
                     onChange={(e) => setFormData({...formData, weight: e.target.value})}
-                    disabled={recordTransitionLocked || saveState === "saved" || finishing}
+                    disabled={inputsLocked}
                     className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-primary/50 text-2xl font-bold disabled:opacity-60"
                     placeholder="80"
                   />
@@ -761,9 +965,13 @@ export default function WorkoutPage() {
                   <label className="text-[10px] font-black text-white/40 ml-1">回数</label>
                   <input 
                     type="number" 
+                    min={1}
+                    max={MAX_REPS}
+                    step={1}
+                    inputMode="numeric"
                     value={formData.reps}
                     onChange={(e) => setFormData({...formData, reps: e.target.value})}
-                    disabled={recordTransitionLocked || saveState === "saved" || finishing}
+                    disabled={inputsLocked}
                     className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-secondary/50 text-2xl font-bold disabled:opacity-60"
                     placeholder="10"
                   />
@@ -774,17 +982,74 @@ export default function WorkoutPage() {
                 <textarea 
                   value={formData.feeling}
                   onChange={(e) => setFormData({...formData, feeling: e.target.value})}
-                  disabled={recordTransitionLocked || saveState === "saved" || finishing}
+                  disabled={inputsLocked}
                   className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 focus:outline-none focus:border-accent/50 text-sm min-h-[100px] disabled:opacity-60"
                   placeholder="例: きつかった、まだ余裕がある、肩に違和感..."
                 />
               </div>
 
-              {saveState === "saved" && (
-                <div className="flex items-center gap-2 rounded-2xl border border-green-500/25 bg-green-500/10 px-4 py-3 text-xs font-bold text-green-300">
-                  <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
-                  セットは保存済みです。AIの状態にかかわらず次へ進めます。
+              {saveState === "saved" && !editingSavedSet && (
+                <div className="space-y-3 rounded-2xl border border-green-500/25 bg-green-500/10 px-4 py-3">
+                  <div className="flex items-center gap-2 text-xs font-bold text-green-300">
+                    <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                    セットは保存済みです。AIの状態にかかわらず次へ進めます。
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={startSetCorrection}
+                      disabled={finishing || correctionState !== "idle"}
+                      className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
+                    >
+                      <Pencil className="h-3.5 w-3.5" /> このセットを修正
+                    </button>
+                    <button
+                      type="button"
+                      onClick={requestSetDeletion}
+                      disabled={finishing || correctionState !== "idle"}
+                      className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-white/70 transition-colors hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40"
+                    >
+                      {correctionState === "deleting"
+                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> 取り消し中...</>
+                        : <><Undo2 className="h-3.5 w-3.5" /> このセットを取り消す</>}
+                    </button>
+                  </div>
                 </div>
+              )}
+
+              {editingSavedSet && (
+                <div className="space-y-3 rounded-2xl border border-primary/25 bg-primary/5 p-4">
+                  <p className="text-xs font-bold text-white/70">保存済みの{currentSet}セット目を修正中です。直した値で保存すると、自己ベストと最大重量も再計算されます。</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={cancelSetCorrection}
+                      disabled={correctionState !== "idle"}
+                      className="rounded-2xl bg-white/10 py-3 text-sm font-bold text-white transition-colors hover:bg-white/20 disabled:opacity-40"
+                    >
+                      修正をやめる
+                    </button>
+                    <button
+                      type="button"
+                      onClick={submitSetCorrection}
+                      disabled={correctionState !== "idle" || finishing || !formData.weight || !formData.reps}
+                      className="flex items-center justify-center gap-2 rounded-2xl bg-primary py-3 text-sm font-black text-black transition-colors disabled:opacity-40"
+                    >
+                      {correctionState === "updating" ? <><Loader2 className="h-4 w-4 animate-spin" /> 保存中...</> : "修正を保存"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {correctionError && (
+                <div role="alert" className="flex items-start gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
+                  <Flame className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-400" />
+                  <p className="text-xs text-red-200/80 whitespace-pre-line">{correctionError}</p>
+                </div>
+              )}
+
+              {correctionNotice && (
+                <p role="status" className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs font-bold text-white/65">{correctionNotice}</p>
               )}
 
               {saveState !== "saved" && (
@@ -814,7 +1079,7 @@ export default function WorkoutPage() {
                 </div>
               )}
 
-              {aiEnabled && saveState === "saved" && recommendationState === "loading" && (
+              {aiEnabled && saveState === "saved" && !editingSavedSet && recommendationState === "loading" && (
                 <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
                   <div className="flex items-center gap-3">
                     <Loader2 className="h-5 w-5 animate-spin text-primary" />
@@ -826,7 +1091,7 @@ export default function WorkoutPage() {
                 </div>
               )}
 
-              {aiEnabled && saveState === "saved" && recommendationState === "unavailable" && (
+              {aiEnabled && saveState === "saved" && !editingSavedSet && recommendationState === "unavailable" && (
                 <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4">
                   <div className="flex items-start gap-3">
                     <BrainCircuit className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-300" />
@@ -845,12 +1110,12 @@ export default function WorkoutPage() {
                 </div>
               )}
 
-              {saveState === "saved" && recommendationState !== "ready" && (
+              {saveState === "saved" && !editingSavedSet && recommendationState !== "ready" && (
                 <div className="space-y-3 rounded-2xl border border-white/10 bg-black/25 p-4">
                   <div className="grid grid-cols-1 gap-2 text-center sm:grid-cols-3">
                     <div className="rounded-xl bg-white/5 p-3">
                       <p className="text-[10px] font-bold text-white/35">直前のセット</p>
-                      <p className="mt-1 text-sm font-bold">{formData.weight}kg × {formData.reps}回</p>
+                      <p className="mt-1 text-sm font-bold">{savedSet ? `${savedSet.weight}kg × ${savedSet.reps}回` : "—"}</p>
                     </div>
                     <div className="rounded-xl bg-white/5 p-3">
                       <p className="text-[10px] font-bold text-white/35">計画上の目標</p>
@@ -892,7 +1157,7 @@ export default function WorkoutPage() {
             </div>
 
             {/* AI Result Area - Only shows when recommendation exists */}
-            {aiEnabled && recommendationState === "ready" && recommendation && (
+            {aiEnabled && !editingSavedSet && recommendationState === "ready" && recommendation && (
               <div className="animate-in slide-in-from-bottom-8 fade-in duration-500 pt-6 border-t border-white/5">
                 <div className="space-y-6">
                   <div className={`p-6 rounded-[24px] border-2 flex items-center justify-between ${
