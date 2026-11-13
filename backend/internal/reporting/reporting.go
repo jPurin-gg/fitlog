@@ -25,9 +25,21 @@ type RecentWorkout struct {
 	Time     string `json:"time"`
 }
 
+// WeekProgress compares this week's training days with saved daily plans.
+// The week runs Monday to Sunday in the app timezone.
+type WeekProgress struct {
+	WeekStart    string `json:"week_start"`
+	WorkoutCount int    `json:"workout_count"`
+	PlannedCount int    `json:"planned_count"`
+}
+
 type Dashboard struct {
-	Stats          []Stat          `json:"stats"`
+	Stats []Stat `json:"stats"`
+	// ChartData holds set counts for the last 7 days, oldest first.
+	// ChartDates holds the matching dates (YYYY-MM-DD, app timezone).
 	ChartData      []int           `json:"chart_data"`
+	ChartDates     []string        `json:"chart_dates"`
+	ThisWeek       WeekProgress    `json:"this_week"`
 	RecentWorkouts []RecentWorkout `json:"recent_workouts"`
 }
 
@@ -60,6 +72,9 @@ type Repository interface {
 	CloseStaleWorkouts(ctx context.Context, userID int, today time.Time) error
 	SetCounts(ctx context.Context, userID int, start, end time.Time) (map[string]int, error)
 	RecentWorkouts(ctx context.Context, userID int, limit int) ([]WorkoutRow, error)
+	// WeekProgress counts days in [start, end) that have recorded sets, and
+	// distinct dates with a saved daily plan in [startDate, endDate).
+	WeekProgress(ctx context.Context, userID int, start, end time.Time) (workoutDays, plannedDays int, err error)
 	Calendar(ctx context.Context, userID, year, month int, timezone string) (Calendar, error)
 }
 
@@ -84,9 +99,16 @@ func (s *Service) Dashboard(ctx context.Context, userID int) (Dashboard, error) 
 		return Dashboard{}, apperr.Internal(err)
 	}
 	chart := make([]int, 7)
+	chartDates := make([]string, 7)
 	for index := range chart {
 		key := start.AddDate(0, 0, index).Format("2006-01-02")
 		chart[index] = counts[key]
+		chartDates[index] = key
+	}
+	weekStart := beginningOfWeek(now)
+	workoutDays, plannedDays, err := s.repository.WeekProgress(ctx, userID, weekStart, weekStart.AddDate(0, 0, 7))
+	if err != nil {
+		return Dashboard{}, apperr.Internal(err)
 	}
 	rows, err := s.repository.RecentWorkouts(ctx, userID, 3)
 	if err != nil {
@@ -108,7 +130,8 @@ func (s *Service) Dashboard(ctx context.Context, userID int) (Dashboard, error) 
 			{Label: "活動時間", Value: "45", Unit: "分", Trend: "+5分"},
 			{Label: "体重", Value: "68.5", Unit: "kg", Trend: "-0.5kg"},
 		},
-		ChartData: chart, RecentWorkouts: recent,
+		ChartData: chart, ChartDates: chartDates, RecentWorkouts: recent,
+		ThisWeek: WeekProgress{WeekStart: weekStart.Format("2006-01-02"), WorkoutCount: workoutDays, PlannedCount: plannedDays},
 	}, nil
 }
 
@@ -135,6 +158,12 @@ func (s *Service) Calendar(ctx context.Context, userID, year, month int) (Calend
 
 func beginningOfDay(value time.Time) time.Time {
 	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, value.Location())
+}
+
+// beginningOfWeek returns Monday 00:00 of the week containing value.
+func beginningOfWeek(value time.Time) time.Time {
+	daysSinceMonday := (int(value.Weekday()) + 6) % 7
+	return beginningOfDay(value).AddDate(0, 0, -daysSinceMonday)
 }
 
 func DisplayWorkoutType(value string) string {

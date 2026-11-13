@@ -86,6 +86,16 @@ JSON入力は1 MiBまでで、未知フィールドと複数JSON値を拒否し�
 | GET | `/api/preferences` | AIコーチ設定 |
 | PUT | `/api/preferences` | AIコーチ設定を保存 |
 
+ダッシュボードの日付はすべてアプリ設定のタイムゾーンで数えます。
+
+| フィールド | 内容 |
+|---|---|
+| `chart_data` | 直近7日（今日を含む）の日ごとのセット数。古い日から順に7要素 |
+| `chart_dates` | `chart_data` と同じ順の日付（`YYYY-MM-DD`） |
+| `this_week.week_start` | 今週の月曜日（週は月曜始まり） |
+| `this_week.workout_count` | 今週、セットを記録した日数 |
+| `this_week.planned_count` | 今週の保存済み日次予定の日数（実施済み・未実施を問わない。開始時に自動作成された予定も含む） |
+
 ### 種目
 
 | Method | Path | 説明 |
