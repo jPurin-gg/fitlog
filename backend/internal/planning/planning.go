@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -102,6 +103,27 @@ type PlanSession struct {
 	Plan      WorkoutPlan `json:"plan"`
 }
 
+// TodayWorkout is the workout recorded on the app-timezone date returned by Today.
+type TodayWorkout struct {
+	ID        int        `json:"id"`
+	Status    string     `json:"status"`
+	StartedAt time.Time  `json:"started_at"`
+	EndedAt   *time.Time `json:"ended_at,omitempty"`
+}
+
+// Today is the single source of "today" for clients. Date and Timezone come
+// from the app clock; Plan is the saved daily plan (status "active"), a draft
+// built from the monthly plan (status "draft"), or nil when neither exists.
+// RestDay is true only when no daily plan is saved and the monthly plan marks
+// the weekday as a rest day.
+type Today struct {
+	Date     string        `json:"date"`
+	Timezone string        `json:"timezone"`
+	RestDay  bool          `json:"rest_day"`
+	Plan     *PlanSession  `json:"plan"`
+	Workout  *TodayWorkout `json:"workout"`
+}
+
 type ExerciseStats struct {
 	Name         string
 	TargetSets   int
@@ -120,6 +142,9 @@ type Repository interface {
 	CreateDailyIfMissing(ctx context.Context, userID int, date time.Time, plan WorkoutPlan) (bool, error)
 	AttachWorkout(ctx context.Context, userID int, date time.Time) (PlanSession, error)
 	ResolveExercise(ctx context.Context, userID int, exerciseID, name string) (ExerciseStats, string, error)
+	// WorkoutOn returns the workout started in [date, date+1 day), preferring an
+	// unfinished one. It returns ErrNotFound when there is none.
+	WorkoutOn(ctx context.Context, userID int, date time.Time) (TodayWorkout, error)
 }
 
 type PreferencesReader interface {
@@ -357,27 +382,91 @@ func (s *Service) StartDaily(ctx context.Context, userID int, dateText string, i
 	return session, nil
 }
 
-func (s *Service) basePlan(ctx context.Context, userID int, date time.Time) (WorkoutPlan, error) {
-	monthly, err := s.repository.Monthly(ctx, userID, date.Format("2006-01"))
-	if errors.Is(err, ErrNotFound) {
-		return WorkoutPlan{}, apperr.NotFound("今月の月間プランがまだありません。")
-	}
-	if err != nil {
-		return WorkoutPlan{}, apperr.Internal(err)
-	}
-	if len(monthly.WeeklyRoutine) == 0 {
-		return WorkoutPlan{}, apperr.NotFound("今月の月間プランがまだありません。")
-	}
-	index := -1
-	for i, day := range monthly.RecommendedDays {
-		if day == int(date.Weekday()) {
-			index = i
+// Today resolves the app-timezone date on the server and returns what a start
+// request for that date would use: the saved daily plan first, otherwise the
+// monthly-plan draft. Clients must not derive "today" from the browser clock.
+func (s *Service) Today(ctx context.Context, userID int) (Today, error) {
+	now := s.clock.Now()
+	year, month, day := now.Date()
+	date := time.Date(year, month, day, 0, 0, 0, 0, now.Location())
+	result := Today{Date: date.Format("2006-01-02"), Timezone: now.Location().String()}
+
+	session, err := s.repository.Daily(ctx, userID, date)
+	switch {
+	case err == nil:
+		session.AIStatus = AIStatusNotRequested
+		result.Plan = &session
+	case errors.Is(err, ErrNotFound):
+		monthly, monthlyErr := s.monthlyFor(ctx, userID, date)
+		if isNotFound(monthlyErr) {
 			break
 		}
+		if monthlyErr != nil {
+			return Today{}, monthlyErr
+		}
+		result.RestDay = routineIndex(monthly, date) < 0
+		base, buildErr := s.planFromMonthly(ctx, userID, date, monthly)
+		if isNotFound(buildErr) {
+			break
+		}
+		if buildErr != nil {
+			return Today{}, buildErr
+		}
+		result.Plan = &PlanSession{PlanDate: result.Date, Status: "draft", AIStatus: AIStatusNotRequested, Plan: base}
+	default:
+		return Today{}, apperr.Internal(err)
 	}
+
+	workout, err := s.repository.WorkoutOn(ctx, userID, date)
+	if err == nil {
+		result.Workout = &workout
+	} else if !errors.Is(err, ErrNotFound) {
+		return Today{}, apperr.Internal(err)
+	}
+	return result, nil
+}
+
+func (s *Service) basePlan(ctx context.Context, userID int, date time.Time) (WorkoutPlan, error) {
+	monthly, err := s.monthlyFor(ctx, userID, date)
+	if err != nil {
+		return WorkoutPlan{}, err
+	}
+	return s.planFromMonthly(ctx, userID, date, monthly)
+}
+
+func (s *Service) monthlyFor(ctx context.Context, userID int, date time.Time) (MonthlyPlan, error) {
+	monthly, err := s.repository.Monthly(ctx, userID, date.Format("2006-01"))
+	if errors.Is(err, ErrNotFound) {
+		return MonthlyPlan{}, apperr.NotFound("今月の月間プランがまだありません。")
+	}
+	if err != nil {
+		return MonthlyPlan{}, apperr.Internal(err)
+	}
+	if len(monthly.WeeklyRoutine) == 0 {
+		return MonthlyPlan{}, apperr.NotFound("今月の月間プランがまだありません。")
+	}
+	return monthly, nil
+}
+
+// routineIndex returns the weekly routine assigned to date's weekday, or -1
+// when the monthly plan treats that weekday as a rest day.
+func routineIndex(monthly MonthlyPlan, date time.Time) int {
+	for i, day := range monthly.RecommendedDays {
+		if day == int(date.Weekday()) {
+			if i < len(monthly.WeeklyRoutine) {
+				return i
+			}
+			return -1
+		}
+	}
+	return -1
+}
+
+func (s *Service) planFromMonthly(ctx context.Context, userID int, date time.Time, monthly MonthlyPlan) (WorkoutPlan, error) {
+	index := routineIndex(monthly, date)
 	routine := monthly.WeeklyRoutine[0]
 	coachNote := "今日は月間プラン上は休息日ですが、実施する場合に備えて軽めに調整します。"
-	if index >= 0 && index < len(monthly.WeeklyRoutine) {
+	if index >= 0 {
 		routine = monthly.WeeklyRoutine[index]
 		coachNote = "月間プランの今日のメニューに、直近の重量と目標セット数を反映します。"
 	}
@@ -514,6 +603,11 @@ func ValidateMonth(value string) error {
 		return apperr.Validation("月はYYYY-MM形式で指定してください。", nil)
 	}
 	return nil
+}
+
+func isNotFound(err error) bool {
+	var appErr *apperr.Error
+	return errors.As(err, &appErr) && appErr.Status == http.StatusNotFound
 }
 
 func sameDate(left, right time.Time) bool {

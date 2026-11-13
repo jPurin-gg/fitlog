@@ -227,6 +227,31 @@ func (r *Repository) AttachWorkout(ctx context.Context, userID int, date time.Ti
 	return session, nil
 }
 
+func (r *Repository) WorkoutOn(ctx context.Context, userID int, date time.Time) (planning.TodayWorkout, error) {
+	var result planning.TodayWorkout
+	var endedAt sql.NullTime
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, started_at, ended_at
+		FROM workouts
+		WHERE user_id=$1 AND started_at >= $2 AND started_at < $3
+		ORDER BY (ended_at IS NULL) DESC, started_at DESC, id DESC
+		LIMIT 1
+	`, userID, date, date.AddDate(0, 0, 1)).Scan(&result.ID, &result.StartedAt, &endedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return planning.TodayWorkout{}, planning.ErrNotFound
+	}
+	if err != nil {
+		return planning.TodayWorkout{}, err
+	}
+	result.Status = "active"
+	if endedAt.Valid {
+		ended := endedAt.Time
+		result.EndedAt = &ended
+		result.Status = "completed"
+	}
+	return result, nil
+}
+
 func (r *Repository) ResolveExercise(ctx context.Context, userID int, exerciseID, name string) (planning.ExerciseStats, string, error) {
 	var id, displayName string
 	if exerciseID != "" {

@@ -104,6 +104,7 @@ JSON入力は1 MiBまでで、未知フィールドと複数JSON値を拒否し�
 
 | Method | Path | 説明 |
 |---|---|---|
+| GET | `/api/today` | アプリのタイムゾーンでの今日の日付・今日の予定・今日のワークアウト |
 | GET | `/api/monthly-plans` | 保存済み月間プラン一覧 |
 | GET | `/api/monthly-plans/{YYYY-MM}` | 指定月のプラン |
 | PUT | `/api/monthly-plans/{YYYY-MM}` | 指定月のプランを保存 |
@@ -111,6 +112,24 @@ JSON入力は1 MiBまでで、未知フィールドと複数JSON値を拒否し�
 | GET | `/api/workout-plans/{YYYY-MM-DD}` | 保存済み予定、なければ月間プランからdraftを構築 |
 | PUT | `/api/workout-plans/{YYYY-MM-DD}` | 日次予定を保存 |
 | POST | `/api/workout-plans/{YYYY-MM-DD}/start` | AI利用を選択して開始、または種目指定で手動開始 |
+
+「今日」はサーバーだけが決めます。`GET /api/today` は `APP_TIMEZONE` の現在日付と、その日に開始APIが使う予定を返します。クライアントはブラウザの日付から今日を作らず、この `date` を開始APIに渡し、カレンダーの過去・未来判定と時刻表示にもこの `date` と `timezone` を使います。
+
+```json
+{
+  "date": "2026-08-25",
+  "timezone": "Asia/Tokyo",
+  "rest_day": false,
+  "plan": { "plan_date": "2026-08-25", "status": "active", "ai_status": "not_requested", "plan": { "workout_title": "胸", "exercises": [{ "exercise_id": "bench", "name": "ベンチプレス", "planned_sets": 3, "target_weight": 40, "target_reps": 10 }] } },
+  "workout": { "id": 9, "status": "active", "started_at": "2026-08-25T00:30:00Z" }
+}
+```
+
+| フィールド | 内容 |
+|---|---|
+| `plan` | 保存済みの日次予定（`status: "active"`）を優先し、なければ月間プランから作る下書き（`status: "draft"`、保存はしない）。どちらもなければ `null` |
+| `rest_day` | 保存済みの日次予定がなく、月間プラン上の休息日のときだけ `true` |
+| `workout` | 今日開始したワークアウト（進行中を優先）。なければ `null`。`status` は `active` または `completed` |
 
 開始APIはアプリ設定のタイムゾーンにおける当日だけ受け付けます。過去・未来の記録編集は `/api/workouts/by-date/{YYYY-MM-DD}` を使います。開始リクエストは任意のJSON本文を受け付けます。
 
@@ -194,7 +213,7 @@ HTTPログは `request_id`、method、生のIDを含まないroute pattern、sta
 
 - `auth`: パスワード、署名Cookieトークン、登録・旧ユーザー移行
 - `ai/openaicompat`: リクエスト形式、再試行、非再試行、レート制限、壊れたレスポンス
-- `planning`: 休息日ポリシー、AIが辞書外IDを返した場合の拒否、開始オプション、AIなしの手動開始と既存予定保持
+- `planning`: 休息日ポリシー、AIが辞書外IDを返した場合の拒否、開始オプション、AIなしの手動開始と既存予定保持、今日の予定（保存済み予定の優先・下書き・休息日）とアプリのタイムゾーンでの日付
 - `profile`: 設定正規化
 - `prompt`: 全テンプレートの描画
 - `workout`: 冪等キー入力契約

@@ -387,10 +387,15 @@ type startDailyRepository struct {
 	saveCalls        int
 	saveContextErr   error
 	attachResult     PlanSession
+	monthlyResult    *MonthlyPlan
+	dailyDates       []time.Time
+	workoutResult    TodayWorkout
+	workoutErr       error
+	workoutDates     []time.Time
 }
 
 func newStartDailyRepository(now time.Time) *startDailyRepository {
-	return &startDailyRepository{now: now, dailyErr: ErrNotFound}
+	return &startDailyRepository{now: now, dailyErr: ErrNotFound, workoutErr: ErrNotFound}
 }
 
 func (r *startDailyRepository) basePlan() WorkoutPlan {
@@ -409,6 +414,9 @@ func (r *startDailyRepository) Monthly(context.Context, int, string) (MonthlyPla
 	r.monthlyCalls++
 	if r.monthlyErr != nil {
 		return MonthlyPlan{}, r.monthlyErr
+	}
+	if r.monthlyResult != nil {
+		return *r.monthlyResult, nil
 	}
 	return MonthlyPlan{
 		RecommendedDays: []int{int(r.now.Weekday())},
@@ -432,8 +440,14 @@ func (r *startDailyRepository) Candidates(context.Context, int) ([]Candidate, er
 	return r.candidates, nil
 }
 
-func (r *startDailyRepository) Daily(context.Context, int, time.Time) (PlanSession, error) {
+func (r *startDailyRepository) Daily(_ context.Context, _ int, date time.Time) (PlanSession, error) {
+	r.dailyDates = append(r.dailyDates, date)
 	return r.dailyResult, r.dailyErr
+}
+
+func (r *startDailyRepository) WorkoutOn(_ context.Context, _ int, date time.Time) (TodayWorkout, error) {
+	r.workoutDates = append(r.workoutDates, date)
+	return r.workoutResult, r.workoutErr
 }
 
 func (r *startDailyRepository) SaveDaily(ctx context.Context, _ int, date time.Time, plan WorkoutPlan) (PlanSession, error) {
