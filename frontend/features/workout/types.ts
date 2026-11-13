@@ -67,3 +67,15 @@ export interface SetInput {
   reps: number;
   feeling: string;
 }
+
+export interface WorkoutSet {
+  id: number;
+  workout_id: number;
+  exercise_id: string;
+  set_order: number;
+  weight: number;
+  reps: number;
+  feeling: string;
+  is_pr: boolean;
+  created_at: string;
+}
