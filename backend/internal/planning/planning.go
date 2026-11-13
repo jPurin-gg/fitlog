@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -184,6 +185,24 @@ func (s *Service) SaveMonthly(ctx context.Context, userID int, month string, inp
 	}
 	if err := validateSavedPlan(plan); err != nil {
 		return MonthlyPlan{}, err
+	}
+	for routineIndex := range plan.WeeklyRoutine {
+		routine := &plan.WeeklyRoutine[routineIndex]
+		for exerciseIndex, id := range routine.ExerciseIDs {
+			field := fmt.Sprintf("weekly_routine[%d].exercise_ids[%d]", routineIndex, exerciseIndex)
+			if strings.TrimSpace(id) == "" {
+				return MonthlyPlan{}, apperr.Validation("種目IDが必要です。", map[string]string{field: "required"})
+			}
+			// AI用候補の絞り込みを使わず、日次プランと同じ辞書でIDを照合する。
+			stats, resolvedID, err := s.repository.ResolveExercise(ctx, userID, id, "")
+			if errors.Is(err, ErrExerciseNotFound) {
+				return MonthlyPlan{}, apperr.Validation("月間プランの種目IDが辞書にありません。", map[string]string{field: "unknown exercise_id"})
+			}
+			if err != nil {
+				return MonthlyPlan{}, apperr.Internal(err)
+			}
+			routine.ExerciseIDs[exerciseIndex], routine.ExampleExercises[exerciseIndex] = resolvedID, stats.Name
+		}
 	}
 	saved, err := s.repository.SaveMonthly(ctx, userID, month, plan)
 	if err != nil {
