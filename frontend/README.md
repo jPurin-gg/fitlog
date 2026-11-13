@@ -16,4 +16,4 @@ npm run test:e2e
 npm audit
 ```
 
-ブラウザE2EはAPIをモックします。実APIとDBによる検証はルートREADMEの統合テストを参照してください。ローカルのChromeを使って逐次実行する場合は `E2E_PORT=3002 PLAYWRIGHT_CHANNEL=chrome npm run test:e2e -- --workers=1` を使えます。
+`npm run test:e2e` のブラウザE2E（`e2e/`）はAPIをモックします。APIをモックせず実APIと一時DBを通すスモークE2E（`e2e-smoke/`、`playwright.smoke.config.ts`）と統合テストの実行方法は、ルートREADMEを参照してください。ローカルのChromeを使って逐次実行する場合は `E2E_PORT=3002 PLAYWRIGHT_CHANNEL=chrome npm run test:e2e -- --workers=1` を使えます。
