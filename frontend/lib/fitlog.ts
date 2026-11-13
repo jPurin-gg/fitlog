@@ -1,3 +1,12 @@
+export const MIN_TARGET_SETS = 1;
+export const MAX_TARGET_SETS = 20;
+
+// 保存済みの異常値でも、表示用の配列を安全な長さに収める。
+export function clampSetCount(value: number): number {
+  if (!Number.isFinite(value)) return 3;
+  return Math.min(MAX_TARGET_SETS, Math.max(MIN_TARGET_SETS, Math.trunc(value)));
+}
+
 export function formatLocalDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }

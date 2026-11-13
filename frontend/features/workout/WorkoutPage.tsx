@@ -23,7 +23,7 @@ import { AlternativeCoachModal } from "@/features/exercises/components/Alternati
 import { ExerciseSelectorModal } from "@/features/exercises/components/ExerciseSelectorModal";
 import { WorkoutSummaryView, type WorkoutSummary } from "./components/WorkoutSummaryView";
 import { ApiError, apiErrorMessage } from "@/lib/api";
-import { displayPlanText, formatLocalDate } from "@/lib/fitlog";
+import { clampSetCount, displayPlanText, formatLocalDate, MAX_TARGET_SETS, MIN_TARGET_SETS } from "@/lib/fitlog";
 import { initialRecordFlowState, recordFlowReducer } from "./workoutFlow";
 import { finishWorkoutSession, getSetRecommendation, getSummaryComment, getTargetSets, recordWorkoutSet, startWorkoutPlan, updateTargetSets } from "./api";
 import type { SetRecommendation, WorkoutPlanSession } from "./types";
@@ -125,8 +125,9 @@ export default function WorkoutPage() {
       if (workoutPlan) return;
       try {
         const data = await getTargetSets(currentExercise.id);
-        setTargetSets(data.target_sets ?? 3);
-        setTempTargetSets(data.target_sets ?? 3);
+        const sets = clampSetCount(data.target_sets ?? 3);
+        setTargetSets(sets);
+        setTempTargetSets(sets);
       } catch { /* デフォルト3セットのまま */ }
     };
     fetchTargetSets();
@@ -134,10 +135,11 @@ export default function WorkoutPage() {
 
   const saveTargetSets = async (value: number) => {
     if (saveInFlightRef.current || saveRetryLocked || finishInFlightRef.current) return;
-    setTargetSets(value);
+    const sets = clampSetCount(value);
+    setTargetSets(sets);
     setEditingTargetSets(false);
     try {
-      await updateTargetSets(currentExercise.id, value);
+      await updateTargetSets(currentExercise.id, sets);
     } catch { /* 無視 */ }
   };
 
@@ -162,8 +164,9 @@ export default function WorkoutPage() {
     if (workoutPlan && index === currentExerciseIndex && ex.exercise_id === currentExercise.id) return;
     setCurrentExerciseIndex(index);
     setCurrentExercise({ id: ex.exercise_id, name: ex.name });
-    setTargetSets(ex.planned_sets || 3);
-    setTempTargetSets(ex.planned_sets || 3);
+    const sets = clampSetCount(ex.planned_sets ?? 3);
+    setTargetSets(sets);
+    setTempTargetSets(sets);
     setCurrentSet(nextSetByExerciseRef.current[ex.exercise_id] || 1);
     resetSetFlow();
     setFormData({
@@ -677,7 +680,7 @@ export default function WorkoutPage() {
             </div>
             {/* 進捗バー */}
             <div className="flex gap-1">
-              {Array.from({ length: targetSets }).map((_, i) => (
+              {Array.from({ length: clampSetCount(targetSets) }).map((_, i) => (
                 <div
                   key={i}
                   className={`h-1.5 w-5 rounded-full transition-colors ${
@@ -689,9 +692,9 @@ export default function WorkoutPage() {
             {/* 目標セット数の編集 */}
             {editingTargetSets ? (
               <div className="flex items-center gap-1 mt-1">
-                <button onClick={() => saveTargetSets(Math.max(1, tempTargetSets - 1))} disabled={finishing || recordTransitionLocked} className="w-6 h-6 bg-white/10 rounded-lg text-white font-bold hover:bg-white/20 transition-colors flex items-center justify-center text-xs disabled:opacity-40">−</button>
+                <button onClick={() => saveTargetSets(Math.max(MIN_TARGET_SETS, tempTargetSets - 1))} disabled={finishing || recordTransitionLocked} className="w-6 h-6 bg-white/10 rounded-lg text-white font-bold hover:bg-white/20 transition-colors flex items-center justify-center text-xs disabled:opacity-40">−</button>
                 <span className="text-xs text-white/70 w-10 text-center font-bold">{tempTargetSets} セット</span>
-                <button onClick={() => saveTargetSets(Math.min(20, tempTargetSets + 1))} disabled={finishing || recordTransitionLocked} className="w-6 h-6 bg-white/10 rounded-lg text-white font-bold hover:bg-white/20 transition-colors flex items-center justify-center text-xs disabled:opacity-40">＋</button>
+                <button onClick={() => saveTargetSets(Math.min(MAX_TARGET_SETS, tempTargetSets + 1))} disabled={finishing || recordTransitionLocked} className="w-6 h-6 bg-white/10 rounded-lg text-white font-bold hover:bg-white/20 transition-colors flex items-center justify-center text-xs disabled:opacity-40">＋</button>
                 <button onClick={() => setEditingTargetSets(false)} disabled={finishing || recordTransitionLocked} className="text-[10px] text-white/40 ml-1 hover:text-white/60 disabled:opacity-40">✕</button>
               </div>
             ) : (
@@ -734,7 +737,7 @@ export default function WorkoutPage() {
                       <span className="text-sm font-bold truncate">{ex.name}</span>
                     </div>
                     <div className="mt-1 text-[10px] text-white/40">
-                      {ex.planned_sets}セット / {ex.target_weight}kg × {ex.target_reps}回
+                      {clampSetCount(ex.planned_sets ?? 3)}セット / {ex.target_weight}kg × {ex.target_reps}回
                     </div>
                   </button>
                 ))}
