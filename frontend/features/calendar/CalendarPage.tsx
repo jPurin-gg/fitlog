@@ -161,7 +161,7 @@ export default function CalendarPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white p-4 md:p-8 font-sans selection:bg-primary/30">
+    <div className="flex-1 bg-[#0a0a0a] text-white p-4 md:p-8 font-sans selection:bg-primary/30">
       <div className="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="fixed bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-secondary/10 blur-[120px] rounded-full pointer-events-none" />
 

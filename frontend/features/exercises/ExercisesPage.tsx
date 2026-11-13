@@ -176,7 +176,7 @@ export default function ExercisesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white pb-20 selection:bg-primary/30">
+    <div className="flex-1 bg-[#0a0a0a] text-white pb-20 selection:bg-primary/30">
       {/* プレミアムなヘッダー */}
       <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white pt-16 pb-20 px-4 shadow-lg rounded-b-3xl relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>

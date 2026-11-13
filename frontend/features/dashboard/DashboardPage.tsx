@@ -149,7 +149,7 @@ export default function DashboardPage() {
   }, [dismissalReady, dismissed, monthlyLoad, promptScope]);
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white p-4 md:p-8 font-sans selection:bg-primary/30">
+    <div className="flex-1 bg-[#0a0a0a] text-white p-4 md:p-8 font-sans selection:bg-primary/30">
       <AnimatePresence>
         {showMonthlyModal && (
           <MonthlyPlanModal
