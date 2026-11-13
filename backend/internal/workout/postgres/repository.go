@@ -9,6 +9,7 @@ import (
 
 	"github.com/lib/pq"
 
+	"github.com/jPurin-gg/myfitlog-backend/internal/database"
 	"github.com/jPurin-gg/myfitlog-backend/internal/workout"
 )
 
@@ -17,7 +18,7 @@ type Repository struct{ db *sql.DB }
 func New(db *sql.DB) *Repository { return &Repository{db: db} }
 
 func (r *Repository) RecordSet(ctx context.Context, userID, workoutID int, key string, input workout.SetInput) (workout.Set, bool, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return workout.Set{}, false, err
 	}
@@ -55,6 +56,9 @@ func (r *Repository) RecordSet(ctx context.Context, userID, workoutID int, key s
 	if !exerciseExists {
 		return workout.Set{}, false, workout.ErrNotFound
 	}
+	if err := database.LockExerciseHistory(ctx, tx, userID, []string{input.ExerciseID}); err != nil {
+		return workout.Set{}, false, err
+	}
 	var previousMax float64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(max_weight,0) FROM user_exercise_stats WHERE user_id=$1 AND exercise_id=$2`, userID, input.ExerciseID).Scan(&previousMax); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return workout.Set{}, false, err
@@ -85,15 +89,7 @@ func (r *Repository) RecordSet(ctx context.Context, userID, workoutID int, key s
 		return workout.Set{}, false, err
 	}
 	result.CreatedAt = createdAt.Format(time.RFC3339)
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO user_exercise_stats (user_id,exercise_id,weight,max_weight)
-		VALUES ($1,$2,$3,$3)
-		ON CONFLICT (user_id,exercise_id) DO UPDATE SET
-			weight=EXCLUDED.weight,
-			max_weight=GREATEST(COALESCE(user_exercise_stats.max_weight,0),EXCLUDED.max_weight),
-			updated_at=CURRENT_TIMESTAMP
-	`, userID, input.ExerciseID, input.Weight)
-	if err != nil {
+	if err := recalculateStats(ctx, tx, userID, input.ExerciseID); err != nil {
 		return workout.Set{}, false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -278,7 +274,7 @@ func (r *Repository) CalendarWorkout(ctx context.Context, userID int, date time.
 }
 
 func (r *Repository) SaveCalendarWorkout(ctx context.Context, userID int, date time.Time, input workout.CalendarWorkoutInput) (workout.CalendarWorkout, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return workout.CalendarWorkout{}, err
 	}
@@ -294,15 +290,9 @@ func (r *Repository) SaveCalendarWorkout(ctx context.Context, userID int, date t
 	}
 	start, end := date, date.AddDate(0, 0, 1)
 	var workoutID int
-	err = tx.QueryRowContext(ctx, `SELECT id FROM workouts WHERE user_id=$1 AND started_at >= $2 AND started_at < $3 ORDER BY started_at DESC,id DESC LIMIT 1`, userID, start, end).Scan(&workoutID)
-	startedAt := date.Add(12 * time.Hour)
-	endedAt := startedAt.Add(time.Duration(15+len(input.Sets)*3) * time.Minute)
-	if errors.Is(err, sql.ErrNoRows) {
-		err = tx.QueryRowContext(ctx, `INSERT INTO workouts (user_id,started_at,ended_at,notes,summary_comment) VALUES ($1,$2,$3,$4,NULL) RETURNING id`, userID, startedAt, endedAt, input.Title).Scan(&workoutID)
-	} else if err == nil {
-		_, err = tx.ExecContext(ctx, `UPDATE workouts SET started_at=$1,ended_at=$2,notes=$3,summary_comment=NULL WHERE id=$4 AND user_id=$5`, startedAt, endedAt, input.Title, workoutID, userID)
-	}
-	if err != nil {
+	err = tx.QueryRowContext(ctx, `SELECT id FROM workouts WHERE user_id=$1 AND started_at >= $2 AND started_at < $3 ORDER BY started_at DESC,id DESC LIMIT 1 FOR UPDATE`, userID, start, end).Scan(&workoutID)
+	create := errors.Is(err, sql.ErrNoRows)
+	if err != nil && !create {
 		return workout.CalendarWorkout{}, err
 	}
 	impacted := map[string]bool{}
@@ -318,17 +308,43 @@ func (r *Repository) SaveCalendarWorkout(ctx context.Context, userID int, date t
 		}
 		impacted[id] = true
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return workout.CalendarWorkout{}, err
+	}
 	rows.Close()
+	for _, set := range input.Sets {
+		impacted[set.ExerciseID] = true
+	}
+	ids := make([]string, 0, len(impacted))
+	for id := range impacted {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	if err := database.LockExerciseHistory(ctx, tx, userID, ids); err != nil {
+		return workout.CalendarWorkout{}, err
+	}
+	startedAt := date.Add(12 * time.Hour)
+	endedAt := startedAt.Add(time.Duration(15+len(input.Sets)*3) * time.Minute)
+	if create {
+		err = tx.QueryRowContext(ctx, `INSERT INTO workouts (user_id,started_at,ended_at,notes,summary_comment) VALUES ($1,$2,$3,$4,NULL) RETURNING id`, userID, startedAt, endedAt, input.Title).Scan(&workoutID)
+	} else {
+		_, err = tx.ExecContext(ctx, `UPDATE workouts SET started_at=$1,ended_at=$2,notes=$3,summary_comment=NULL WHERE id=$4 AND user_id=$5`, startedAt, endedAt, input.Title, workoutID, userID)
+	}
+	if err != nil {
+		return workout.CalendarWorkout{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM workout_sets WHERE workout_id=$1`, workoutID); err != nil {
 		return workout.CalendarWorkout{}, err
 	}
 	for index, set := range input.Sets {
-		impacted[set.ExerciseID] = true
 		var maxWeight float64
-		_ = tx.QueryRowContext(ctx, `
+		if err := tx.QueryRowContext(ctx, `
 			SELECT COALESCE(MAX(ws.weight),0) FROM workout_sets ws JOIN workouts w ON w.id=ws.workout_id
 			WHERE w.user_id=$1 AND ws.exercise_id=$2
-		`, userID, set.ExerciseID).Scan(&maxWeight)
+		`, userID, set.ExerciseID).Scan(&maxWeight); err != nil {
+			return workout.CalendarWorkout{}, err
+		}
 		createdAt := startedAt.Add(time.Duration(index) * time.Minute)
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO workout_sets (workout_id,exercise_id,weight,reps,set_order,feeling,is_pr,created_at)
@@ -337,11 +353,6 @@ func (r *Repository) SaveCalendarWorkout(ctx context.Context, userID int, date t
 			return workout.CalendarWorkout{}, err
 		}
 	}
-	ids := make([]string, 0, len(impacted))
-	for id := range impacted {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
 	for _, id := range ids {
 		if err := recalculateStats(ctx, tx, userID, id); err != nil {
 			return workout.CalendarWorkout{}, err
@@ -446,6 +457,8 @@ func scanHistory(rows *sql.Rows) ([]workout.HistorySet, error) {
 	return result, rows.Err()
 }
 
+// Callers must hold database.LockExerciseHistory before modifying history and
+// keep it through this read/write pair and the transaction's commit.
 func recalculateStats(ctx context.Context, tx *sql.Tx, userID int, exerciseID string) error {
 	var latestWeight, maxWeight float64
 	err := tx.QueryRowContext(ctx, `
