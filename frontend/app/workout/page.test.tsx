@@ -115,6 +115,45 @@ describe("WorkoutPage record-first flow", () => {
     expect(screen.queryByText("遅い応答")).not.toBeInTheDocument();
   });
 
+  it("保存応答のis_prがtrueなら保存直後に自己ベスト更新を知らせ、次セットで消す", async () => {
+    useCommonHandlers();
+    server.use(
+      http.post(`${apiOrigin}/api/workouts/42/sets`, () => HttpResponse.json({
+        id: 100, workout_id: 42, exercise_id: "bench_press", set_order: 1, weight: 60, reps: 8, feeling: "", is_pr: true, created_at: "2026-08-24T10:00:00+09:00",
+      })),
+    );
+    const user = userEvent.setup();
+    renderWorkout(false);
+    await user.click(screen.getByRole("button", { name: /ワークアウトを開始/ }));
+    await screen.findByRole("heading", { name: "ワークアウト中" });
+    await user.click(screen.getByRole("button", { name: "セットを保存" }));
+
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent("自己ベスト更新！");
+    expect(notice).toHaveTextContent("ベンチプレス 60kg × 8回で、前日までの最大重量を超えました。");
+
+    await user.click(screen.getByRole("button", { name: "同じ内容で次へ" }));
+    expect(await screen.findByText("セット 2 / 3")).toBeInTheDocument();
+    expect(screen.queryByText("自己ベスト更新！")).not.toBeInTheDocument();
+  });
+
+  it("保存応答のis_prがfalseなら自己ベスト表示を出さない", async () => {
+    useCommonHandlers();
+    server.use(
+      http.post(`${apiOrigin}/api/workouts/42/sets`, () => HttpResponse.json({
+        id: 100, workout_id: 42, exercise_id: "bench_press", set_order: 1, weight: 60, reps: 8, feeling: "", is_pr: false, created_at: "2026-08-24T10:00:00+09:00",
+      })),
+    );
+    const user = userEvent.setup();
+    renderWorkout(false);
+    await user.click(screen.getByRole("button", { name: /ワークアウトを開始/ }));
+    await screen.findByRole("heading", { name: "ワークアウト中" });
+    await user.click(screen.getByRole("button", { name: "セットを保存" }));
+
+    await screen.findByText(/セットは保存済みです/);
+    expect(screen.queryByText("自己ベスト更新！")).not.toBeInTheDocument();
+  });
+
   it("保存待機中のOFFでも保存と入力を維持し、AI提案は開始しない", async () => {
     useCommonHandlers();
     const saved = deferred<Response>();

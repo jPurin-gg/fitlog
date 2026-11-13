@@ -76,6 +76,7 @@ export default function WorkoutPage() {
   const [finishedSummary, setFinishedSummary] = React.useState<WorkoutSummary | null>(null);
   const [finishedWorkoutID, setFinishedWorkoutID] = React.useState<number | null>(null);
   const [recordedSetID, setRecordedSetID] = React.useState<number | null>(null);
+  const [personalRecord, setPersonalRecord] = React.useState<{ exerciseName: string; weight: number; reps: number } | null>(null);
   const startInFlightRef = React.useRef(false);
   const startAbortRef = React.useRef<AbortController | null>(null);
   const startRequestRef = React.useRef(0);
@@ -153,6 +154,7 @@ export default function WorkoutPage() {
     setRequestRef.current = null;
     activeSetIDRef.current = null;
     setRecordedSetID(null);
+    setPersonalRecord(null);
   };
 
   const activatePlanExercise = (plan: WorkoutPlanSession, index: number) => {
@@ -310,6 +312,9 @@ export default function WorkoutPage() {
       setRequestRef.current.setID = recorded.id;
       activeSetIDRef.current = recorded.id;
       setRecordedSetID(recorded.id);
+      setPersonalRecord(recorded.is_pr === true
+        ? { exerciseName: currentExercise.name, weight: setInput.weight, reps: setInput.reps }
+        : null);
       nextSetByExerciseRef.current[currentExercise.id] = Math.max(
         nextSetByExerciseRef.current[currentExercise.id] || 1,
         currentSet + 1,
@@ -406,6 +411,7 @@ export default function WorkoutPage() {
       setFormData({ weight: '', reps: '', feeling: '' });
       setRequestRef.current = null;
       setRecordedSetID(null);
+      setPersonalRecord(null);
     } catch (e) {
       console.error(e);
       setFinishError(apiErrorMessage(e, 'ワークアウト終了に失敗しました。'));
@@ -784,6 +790,21 @@ export default function WorkoutPage() {
                 <div className="flex items-center gap-2 rounded-2xl border border-green-500/25 bg-green-500/10 px-4 py-3 text-xs font-bold text-green-300">
                   <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
                   セットは保存済みです。AIの状態にかかわらず次へ進めます。
+                </div>
+              )}
+
+              {saveState === "saved" && personalRecord && (
+                <div
+                  role="status"
+                  className="flex items-center gap-3 rounded-2xl border border-primary/40 bg-primary/15 px-4 py-3 shadow-[0_0_20px_rgba(255,170,0,0.2)]"
+                >
+                  <Trophy className="h-6 w-6 flex-shrink-0 text-primary" aria-hidden="true" />
+                  <div>
+                    <p className="text-sm font-black text-white">自己ベスト更新！</p>
+                    <p className="mt-0.5 text-xs font-bold text-white/70">
+                      {personalRecord.exerciseName} {personalRecord.weight}kg × {personalRecord.reps}回で、前日までの最大重量を超えました。
+                    </p>
+                  </div>
                 </div>
               )}
 

@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api";
-import type { SetInput, SetRecommendation, WorkoutDetail, WorkoutPlanSession, WorkoutSummary } from "./types";
+import type { RecordedSet, SetInput, SetRecommendation, WorkoutDetail, WorkoutPlanSession, WorkoutSummary } from "./types";
 
 export function getTargetSets(exerciseID: string) {
   return apiFetch<{ target_sets: number }>(`/api/exercises/${encodeURIComponent(exerciseID)}/settings`);
@@ -28,7 +28,7 @@ export function getSetRecommendation(workoutID: number, setID: number, signal: A
 }
 
 export function recordWorkoutSet(workoutID: number, idempotencyKey: string, input: SetInput) {
-  return apiFetch<{ id: number }>(`/api/workouts/${workoutID}/sets`, {
+  return apiFetch<RecordedSet>(`/api/workouts/${workoutID}/sets`, {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
     body: JSON.stringify(input),
