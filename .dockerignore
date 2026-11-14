@@ -2,9 +2,13 @@
 .gitignore
 .env
 .env.*
+**/.env*
 docker/env/*.env
 frontend/node_modules
 frontend/.next
+frontend/test-results
+frontend/playwright-report
+frontend/smoke-results
 backend/tmp
 backend/fitlog
 other

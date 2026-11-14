@@ -202,6 +202,7 @@ HTTPログは `request_id`、method、生のIDを含まないroute pattern、sta
 - `app` のHTTP統合テストで認証→月間・日次プランなしの手動開始→複数セット・種目変更→終了→履歴取得を検証。ローカルのAI用サーバーで呼び出し0件を確認し、8件の並行開始と遅いAIによる上書き防止も検証
 - React Testing LibraryとMSWで保存状態とAI状態の分離、保存・提案・総評の待機中のOFF切り替え、入力保持、遅い応答の破棄を検証
 - 時刻・ストレージを制御し、月間案内の当月非表示、通常の閉じる、再訪、翌月、年越し、別ユーザー、手動表示を検証
-- PlaywrightでAI OFFの手動記録・終了とAI呼び出し0件、AI ONの障害時継続、月間案内の非表示・再表示と設定共有をブラウザ検証
+- APIをモックしたPlaywrightでAI OFFの手動記録・終了とAI呼び出し0件、AI ONの障害時継続、月間案内の非表示・再表示と設定共有をブラウザ検証
+- APIをモックしないPlaywrightのスモークで、`compose.test.yml` の一時PostgreSQL・本番Dockerfileのバックエンド・本番ビルドのNext.jsを使い、新規登録→手動開始→セット保存→終了→履歴・カレンダー反映、再ログインと401時のログイン画面への切り替え、過去日の記録の作成・編集を検証。`/api` 中継とCookie認証を実際に通し、AIはローカルのスタブに向けて呼び出し0件を確認
 - Docker上で `go test`、race detector、`go vet`、ESLint、TypeScript検査、Next.js本番ビルド
 - npm本番依存は `npm audit --omit=dev` で監査

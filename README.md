@@ -82,7 +82,7 @@ AI利用は初期OFFです。開始画面の「自分で種目を選んで始め
 ├── docker/                             # Dockerfileと環境変数の例
 ├── compose.yaml                        # 開発環境
 ├── compose.prod.yml                    # 本番向け構成
-├── compose.test.yml                    # 並行性を確認する一時PostgreSQL環境
+├── compose.test.yml                    # 一時PostgreSQLでの統合テストとスモークE2E
 └── docs.md                             # API・バックエンド技術仕様
 ```
 
@@ -220,7 +220,31 @@ docker compose -f compose.test.yml down
 
 Goをホストで実行する場合は、`docker compose -f compose.test.yml up -d --wait db` の後、`backend` で `go test -race -tags=integration -count=1 ./internal/app ./internal/workout/postgres` を実行できます。既定では `127.0.0.1:55432` の検証DBを使い、テストごとに作成したスキーマだけを後片付けします。
 
-ブラウザE2EはバックエンドAPIをモックし、AI OFFでの手動開始・複数セット・種目変更・終了、AI ONでの障害時の継続、月間案内の非表示・再訪・手動表示を確認します。初回だけChromiumを準備してください。既にインストール済みのChromeを使う場合は `PLAYWRIGHT_CHANNEL=chrome` を指定できます。
+### スモークE2E（実API）
+
+APIをモックしないブラウザのスモークE2Eも、開発DBと分離した一時DBで実行します。本番と同じDockerfileでビルドしたバックエンドと、本番ビルドのNext.jsを起動し、ブラウザからNext.jsの `/api` 中継とCookie認証を通して次の4本を確認します。
+
+- 新規登録 → 種目を選んで手動開始 → セット保存 → 終了 → 履歴とカレンダーに反映
+- ログアウト → 誤ったパスワードの拒否 → 同じユーザーで再ログイン
+- 無効なセッションで401になったときのログイン画面への切り替えと、再ログイン後の復帰
+- カレンダーから過去日の記録を作成・編集
+
+AIの通信先はテスト用のスタブ（`ai-stub`）に固定し、外部のAIは使いません。スモークはAI OFFで通る経路だけを使い、スタブが一度も呼ばれないことも確認します。Docker以外の準備（Node.js、ブラウザ、APIキー）は不要です。
+
+```sh
+docker compose -f compose.test.yml run --rm --build e2e-smoke
+docker compose -f compose.test.yml --profile e2e down
+```
+
+1行目だけで、イメージのビルド、一時DB・バックエンド・AIスタブの起動、テストの実行までを行い、テストの成否を終了コードで返します。2行目で起動したコンテナを停止・削除します。HTMLレポートと、失敗したテストのtrace・スクリーンショットは `frontend/smoke-results/` に出力されます（コンテナのrootユーザーで作成されます）。レポートは `frontend` で `npx playwright show-report smoke-results/report` を実行すると確認できます。
+
+GitHub Actionsでは `.github/workflows/e2e-smoke.yml` が、mainへのpushと手動実行（Actions → E2E smoke → Run workflow）で同じスモークを実行します。失敗時はサービスのログを表示し、`frontend/smoke-results/` をArtifactsに保存します（保持7日）。
+
+テストは `frontend/e2e-smoke/`、設定は `frontend/playwright.smoke.config.ts` にあります。起動済みの環境に向けて実行する場合は、`frontend` で `SMOKE_BASE_URL=http://localhost:3000 npm run test:e2e:smoke` を使えます。このときはホストにChromiumが必要で、バックエンドの `FRONTEND_URL` を `SMOKE_BASE_URL` と同じオリジンにします。AIスタブの呼び出し確認は行わず、テスト用のユーザーはそのDBに残ります。
+
+### ブラウザE2E（APIモック）
+
+`npm run test:e2e` のブラウザE2EはバックエンドAPIをモックし、AI OFFでの手動開始・複数セット・種目変更・終了、AI ONでの障害時の継続、月間案内の非表示・再訪・手動表示を確認します。初回だけChromiumを準備してください。既にインストール済みのChromeを使う場合は `PLAYWRIGHT_CHANNEL=chrome` を指定できます。
 
 ```sh
 cd frontend
